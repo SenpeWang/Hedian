@@ -1,0 +1,24 @@
+# Cache
+__pycache__/
+*.pyc
+
+# Weights
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Media & Outputs (assuming it's a demo source)
+*.mp4
+*.avi
+*.wav
+*.mp3
+Outputs/
+outputs/
+logs/
+*.log
+
+# Environment
+.venv/
+venv/
+env/
