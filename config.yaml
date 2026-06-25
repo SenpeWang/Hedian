@@ -1,0 +1,46 @@
+# 核电站监护制合规检测系统 — 全局配置
+# 此文件覆盖 config.py 中的默认值
+
+app:
+  gpu: "0"
+  fps: 30.0
+
+paths:
+  data_root: "data"
+  model_root: "models"
+  result_root: "data/results"
+  video: "data/videos/camFRONT.mpg"
+
+supervision:
+  bind_hold_sec: 3.0
+  unbind_hold_sec: 10.0
+  dist_close_px: 280
+  dist_near_px: 560
+  vote_window: 3
+  vote_threshold: 2
+  cooldown_frames: 300
+
+bus:
+  max_queue_size: 1024
+
+voice:
+  sample_rate: 16000
+  sentence_gap_sec: 1.5
+  model_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/large-v3.pt"
+
+gaze:
+  head_conf_th: 0.55
+  inout_th: 0.5
+  heatmap_th: 0.3
+  head_min_size: 20
+  head_max_size: 300
+
+modules:
+  voice: true
+  mot: true
+  gaze: false
+  behavior: false
+
+regulations:
+  supervision: true
+  self_ticket: true
