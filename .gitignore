@@ -25,3 +25,6 @@ env/
 
 # Data directory
 data/
+
+# Model files
+models/
