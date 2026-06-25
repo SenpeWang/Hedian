@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>核电站行为合规检测系统</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow:hidden;height:100vh;display:flex;flex-direction:column}
+::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a0e1a}::-webkit-scrollbar-thumb{background:#1e2a42;border-radius:2px}
+.header{display:flex;align-items:center;padding:5px 14px;background:linear-gradient(135deg,#0d1224,#141b2d);border-bottom:1px solid #1e2a42;justify-content:space-between;min-height:36px}
+.header h1{font-size:15px;color:#00d4ff;white-space:nowrap}
+#startBtn{padding:5px 20px;border:1px solid #00d4ff;border-radius:5px;background:linear-gradient(135deg,rgba(0,212,255,.1),rgba(0,100,200,.15));color:#00d4ff;cursor:pointer;font-size:13px;font-weight:600;transition:.3s}
+#startBtn:hover{transform:scale(1.05);box-shadow:0 0 10px rgba(0,212,255,.3)}
+#startBtn:disabled{opacity:.5;cursor:default;transform:none}
+.header-right{display:flex;align-items:center;gap:8px}
+#statusDot{width:7px;height:7px;border-radius:50%;background:#6b7a90;flex-shrink:0}
+#statusDot.active{background:#00ff88;animation:pulse 1.5s infinite}
+#headerStatus{font-size:11px;color:#e0e6f0;white-space:nowrap;max-width:350px;overflow:hidden;text-overflow:ellipsis}
+.progress-group{display:flex;flex-direction:column;gap:1px;min-width:260px}
+.progress-row{font-family:'Consolas',monospace;font-size:10px;color:#8899aa;white-space:nowrap;line-height:1.2}
+
+.main{display:flex;flex:1;min-height:0;gap:5px;padding:0 5px 5px}
+.left{display:flex;flex-direction:column;flex:1;min-width:0;gap:5px;min-width:280px}
+.right{display:flex;flex-direction:column;flex:3;min-width:0;gap:5px}
+.panel{background:#141b2d;border:1px solid #1e2a42;border-radius:5px;display:flex;flex-direction:column;overflow:hidden}
+.panel-title{font-size:11px;font-weight:600;padding:5px 8px;border-bottom:1px solid #1e2a42;color:#8899aa;display:flex;align-items:center;justify-content:space-between}
+.panel-body{flex:1;overflow-y:auto;padding:5px;position:relative}
+
+#streamImg{width:100%;height:100%;object-fit:contain;display:block}
+#streamImg2{width:100%;height:100%;object-fit:contain;display:block}
+.video-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#6b7a90;gap:6px}
+.video-placeholder .icon{font-size:28px}
+.video-placeholder .text{font-size:12px}
+
+.text-item{padding:2px 4px;margin-bottom:2px;border-radius:2px;font-size:11px;line-height:1.4;animation:fadeIn .3s}
+.text-item .ts{color:#6b7a90;margin-right:4px;font-size:9px}
+.intent-badge{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;margin-left:2px;vertical-align:middle}
+.intent-监护请求,.intent-监护确认{background:rgba(255,77,77,.25);color:#ff4d4d}
+.intent-核对确认{background:rgba(255,170,0,.25);color:#ffaa00}
+.intent-确认{background:rgba(0,255,136,.2);color:#00ff88}
+.intent-操作指令,.intent-操作说明,.intent-操作结束{background:rgba(0,212,255,.2);color:#00d4ff}
+.intent-实验结束{background:rgba(255,215,0,.25);color:#ffd700;font-weight:700}
+.intent-其他{background:rgba(107,122,144,.2);color:#6b7a90}
+.type-badge{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;margin-left:2px;vertical-align:middle;background:rgba(107,122,144,.2);color:#8899aa}
+.type-信号信号{background:rgba(255,77,77,.15);color:#ff8888}
+.type-执行信号{background:rgba(0,212,255,.15);color:#66d9ff}
+.type-核对信号{background:rgba(255,170,0,.15);color:#ffcc66}
+.type-设备信号{background:rgba(0,212,255,.15);color:#66d9ff}
+.kw-red{color:#ff4d4d;font-weight:700}.kw-green{color:#00ff88;font-weight:700}.kw-blue{color:#00d4ff;font-weight:700}
+
+.bottom{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:0 5px 5px;flex:2;min-height:0}
+
+.det-event{padding:3px 5px;margin-bottom:2px;border-radius:3px;font-size:11px;animation:fadeIn .3s;border-left:3px solid #1e2a42}
+.det-event .ts{color:#6b7a90;font-size:9px;margin-right:3px}
+.det-event .ev-label{font-weight:600}
+.state-监护{color:#00ff88}.state-接近中{color:#ffaa00}.state-未监护{color:#ff4d4d}
+.flow-tag{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;font-weight:600;margin-left:3px}
+.flow-supervision{background:rgba(0,212,255,.2);color:#00d4ff;border:1px solid rgba(0,212,255,.3)}
+.flow-self-ticket{background:rgba(255,170,0,.2);color:#ffaa00;border:1px solid rgba(255,170,0,.3)}
+.flow-active{animation:pulse 1.5s infinite}
+
+.summary-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;margin-bottom:5px;text-align:center}
+.summary-grid div{background:#0a0e1a;border-radius:3px;padding:3px}
+.summary-grid .val{font-size:16px;font-weight:700;color:#00d4ff}
+.summary-grid .lbl{font-size:8px;color:#6b7a90;margin-top:1px}
+
+.seg-card{background:#0a0e1a;border-radius:3px;padding:4px 6px;margin-bottom:3px;border-left:3px solid #6b7a90;animation:fadeIn .3s}
+.seg-card .sc-head{display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px}
+.seg-card .sc-score{font-weight:700}
+.seg-card .sc-bar{height:2px;background:#1e2a42;border-radius:1px;margin:2px 0}
+.seg-card .sc-bar-fill{height:100%;border-radius:1px;transition:width .6s}
+.seg-card .sc-detail{font-size:9px;color:#8899aa;line-height:1.3}
+
+.qr-placeholder{text-align:center;padding:15px;color:#6b7a90;font-size:12px}
+.qr-placeholder .icon{font-size:24px;margin-bottom:4px}
+.qr-title{font-size:12px;font-weight:700;color:#ffd700;padding:3px 0 2px;border-bottom:1px solid #1e2a42;margin-bottom:2px}
+.qr-score-line{text-align:center;font-size:18px;font-weight:700;padding:6px;margin:3px 0}
+.qr-item{font-size:11px;padding:1px 0;line-height:1.4}
+
+@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1><span>⚛️</span>核电站行为合规检测系统</h1>
+  <button id="startBtn" onclick="startPipeline()">👤 开始测试</button>
+  <div class="header-right">
+    <div id="statusDot"></div>
+    <span id="headerStatus">就绪</span>
+    <div class="progress-group" id="progressGroup" style="display:none">
+      <div class="progress-row" id="prVoice">🎤 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+      <div class="progress-row" id="prMot">🎯 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+      <div class="progress-row" id="prBehavior">✋ |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+    </div>
+  </div>
+</div>
+
+<div class="main">
+  <div class="left">
+    <div class="panel" style="flex:1">
+      <div class="panel-title">🎤 人员对话记录</div>
+      <div class="panel-body" id="textScroll"></div>
+    </div>
+  </div>
+  <div class="right">
+    <div class="panel" style="flex:4;display:flex;flex-direction:row;min-height:0">
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+        <div class="panel-title">🎥 多目标跟踪视频</div>
+        <div class="panel-body" style="padding:0;flex:1;position:relative">
+          <img id="streamImg" alt="">
+          <div class="video-placeholder" id="overlay1"><div class="icon">🎥</div><div class="text">等待视频输入</div></div>
+        </div>
+      </div>
+      <div style="flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid #1e2a42">
+        <div class="panel-title">🎥 行为检测输入视频</div>
+        <div class="panel-body" style="padding:0;flex:1;position:relative">
+          <img id="streamImg2" alt="">
+          <div class="video-placeholder" id="overlay2"><div class="icon">✋</div><div class="text">行为检测（手指指向等）待完善</div></div>
+        </div>
+      </div>
+    </div>
+    <div class="bottom">
+      <div class="panel">
+        <div class="panel-title">📊 行为检测结果 <span id="flowTag" style="display:none"></span></div>
+        <div class="panel-body" id="detBody">
+          <div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none">
+            <div style="display:flex;justify-content:space-between;align-items:center">
+              <span>📏 距离: <b id="distVal">--</b> px</span>
+              <span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span>
+            </div>
+            <div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px">
+              <div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="panel">
+        <div class="panel-title">📋 评价报告</div>
+        <div class="panel-body">
+          <div class="summary-grid">
+            <div><div class="val" id="msSup">0</div><div class="lbl">监护制流程</div></div>
+            <div><div class="val" id="msTicket">0</div><div class="lbl">自唱票流程</div></div>
+            <div><div class="val" id="msAvg">-</div><div class="lbl">平均分</div></div>
+            <div><div class="val" id="msTotal">-</div><div class="lbl">总分</div></div>
+          </div>
+          <div id="segCards"></div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<audio id="audioPlayer" preload="none" style="display:none"></audio>
+
+<script>
+const $=id=>document.getElementById(id);
+let evtSource=null,segScores=[],supN=0,ticketN=0;
+const audio=$('audioPlayer');
+function fmt(s){let m=Math.floor(s/60),ss=Math.floor(s%60);return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`}
+
+function startPipeline(){
+  const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
+  $('statusDot').className='active';$('headerStatus').textContent='🚀 启动中…';
+  segScores=[];supN=0;ticketN=0;
+  $('detBody').innerHTML='<div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none"><div style="display:flex;justify-content:space-between;align-items:center"><span>📏 距离: <b id="distVal">--</b> px</span><span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span></div><div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px"><div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div></div></div>';$('textScroll').innerHTML='';$('segCards').innerHTML='';
+  updateSummary();
+  connectSSE(function(){fetch('/start').then(r=>r.json())});
+}
+
+function connectSSE(onReady){
+  if(evtSource){evtSource.close();evtSource=null}
+  evtSource=new EventSource('/events');
+  evtSource.onopen=function(){
+    // SSE 连接后立即启动视频流
+    $('overlay1').style.display='none';$('streamImg').src='/stream?'+Date.now();
+    $('overlay2').style.display='none';$('streamImg2').src='/stream2?'+Date.now();
+    audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
+    if(onReady)onReady();
+  };
+  evtSource.onmessage=function(e){try{handleEvent(JSON.parse(e.data));if(JSON.parse(e.data).type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
+  evtSource.onerror=function(){};
+}
+
+// 页面加载时检查流水线是否已在运行
+function checkRunning(){
+  fetch('/status').then(r=>r.json()).then(d=>{
+    if(d.pipeline==='running'){
+      // 流水线已在运行，自动连接 SSE
+      const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
+      $('statusDot').className='active';$('headerStatus').textContent='🔄 已在运行，连接中…';
+      connectSSE(null);
+    }
+  }).catch(()=>{});
+}
+window.onload=checkRunning;
+
+function highlightText(t){
+  t=t.replace(/请求监护/g,'<span class="kw-red">请求监护</span>');
+  t=t.replace(/(核对|核实)/g,'<span class="kw-red">$1</span>');
+  t=t.replace(/(好|确认|收到|没问题)/g,'<span class="kw-green">$1</span>');
+  t=t.replace(/(1ES\w+|T1RPA\w+|LCO\w+|RPA\w+|SM3)/g,'<span class="kw-blue">$1</span>');
+  return t;
+}
+
+function updateSummary(){
+  $('msSup').textContent=supN;$('msTicket').textContent=ticketN;
+  if(segScores.length>0)$('msAvg').textContent=(segScores.reduce((a,b)=>a+b,0)/segScores.length).toFixed(1);
+}
+
+let lastClockSec = -1;
+let clockStuckCount = 0;
+
+function handleEvent(d){
+  try{
+  if(d.type==='clock_sync'){
+      if (d.localSec === lastClockSec) {
+          clockStuckCount++;
+          if (clockStuckCount > 5 && !audio.paused) {
+              audio.pause();
+          }
+      } else {
+          clockStuckCount = 0;
+          
+          if (audio.paused && d.localSec > 0.1) {
+              let p = audio.play();
+              if(p !== undefined) p.catch(()=>{});
+          }
+          lastClockSec = d.localSec;
+      }
+      return;
+  }
+  if(d.type==='voice')addVoiceItem(d);
+  else if(d.type==='tracking')addDetEvent(d);
+  else if(d.type==='gaze')addGazeEvent(d);
+  else if(d.type==='flow_start')addFlowStart(d);
+  else if(d.type==='flow_end')addFlowEnd(d);
+  else if(d.type==='segment_report')addSegCard(d);
+  else if(d.type==='segment_report_stream')addSegStream(d);
+  else if(d.type==='progress')updateProgress(d);
+  else if(d.type==='status')$('headerStatus').textContent=d.text;
+  else if(d.type==='report_progress'){
+    $('headerStatus').textContent='🤖 '+d.text;
+    if(!$('reportStreamCard')){
+      const card=document.createElement('div');
+      card.id='reportStreamCard';
+      card.className='seg-card';
+      card.style.borderLeftColor='#ffd700';
+      card.innerHTML='<div class="sc-head"><span>🤖 大模型总结报告</span></div><div class="sc-detail" style="white-space:pre-wrap"></div>';
+      $('segCards').appendChild(card);
+    }
+    const el=$('reportStreamCard');
+    if(el){
+      const detail=el.querySelector('.sc-detail');
+      if(detail) detail.textContent+=d.text||'';
+    }
+  }
+  else if(d.type==='report')showQwenReport(d.text);
+  else if(d.type==='video_start'){
+    $('overlay1').style.display='none';$('streamImg').src='/stream?'+Date.now();
+    $('overlay2').style.display='none';$('streamImg2').src='/stream2?'+Date.now();
+    audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
+  }
+  else if(d.type==='done'){
+    $('statusDot').className='';$('startBtn').disabled=false;$('startBtn').textContent='🔄 重新测试';
+    $('headerStatus').textContent='✅ 完成';$('progressGroup').style.display='none';audio.pause();
+  }
+  }catch(ex){console.error(d.type,ex)}
+}
+
+function updateProgress(d){
+  const moduleMap={voice:"prVoice",mot:"prMot",behavior:"prBehavior"};
+  $('progressGroup').style.display='';
+  const iconMap={voice:'🎤',mot:'🎯',gaze:'👁️',behavior:'✋'};
+  const rid=moduleMap[d.label];
+  if(!rid){$('headerStatus').textContent=d.detail||d.pct+'%';return}
+  const icon=iconMap[d.label]||'📊';
+  const pct=Math.max(0,Math.min(100,d.pct||0)),bl=20,f=Math.round(pct/100*bl);
+  const bar=pct>=100?'█'.repeat(bl):'█'.repeat(f)+'░'.repeat(bl-f);
+  const cls=pct>=100?'tqdm-done':'tqdm-bar';
+  $(rid).innerHTML=`${icon} |<span class=${cls}>${bar}</span>| ${pct}%`;
+}
+
+function addVoiceItem(d){
+  const el=document.createElement('div');el.className='text-item';
+  let intentBadge=d.intent?`<span class="intent-badge intent-${d.intent}">${d.intent}</span>`:'';
+  let typeBadge=d.km_type?`<span class="type-badge type-${d.km_type}">${d.km_type}</span>`:'';
+  let textLine=d.text?`<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlightText(d.text)}</div>`:'';
+  let ctxLine='';
+  if(d.context&&d.context.mot){
+    const m=d.context.mot;
+    const supLabel=m.supervision_state==='bound'?'🛡️监护中':m.supervision_state==='requesting'?'⏳请求中':'';
+    if(supLabel) ctxLine=`<div style="margin-top:1px;font-size:9px;color:#8899aa">${supLabel} ${m.distance_state||''} ${m.distance_px?m.distance_px+'px':''}</div>`;
+  }
+  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${intentBadge}${typeBadge}${textLine}${ctxLine}`;
+  $('textScroll').appendChild(el);el.scrollIntoView({behavior:'smooth'});
+}
+
+function addDetEvent(d){
+  const body=$('detBody');
+  const el=document.createElement('div');el.className='det-event';
+  const st=d.state||'';
+  const roles=d.roles_details?JSON.stringify(d.roles_details):'';
+  let voiceCtx='';
+  if(d.context&&d.context.voice){
+    const v=d.context.voice;
+    if(v.latest_text) voiceCtx=`<div style="font-size:9px;color:#8899aa;margin-top:1px">🎤 ${highlightText(v.latest_text)}</div>`;
+  }
+
+  if(st==='已监护'){
+    el.style.borderLeftColor='#00d4ff';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">🛡️ 监护中</span> ${roles} <span class="flow-tag flow-supervision flow-active">进行中</span>${voiceCtx}`;
+    body.appendChild(el);
+    const tag=$('flowTag');tag.className='flow-tag flow-supervision flow-active';tag.textContent='🛡️ 监护制进行中';tag.style.display='';
+    const dd=$('distDashboard');dd.style.display='';
+  }else if(st==='未监护'){
+    el.style.borderLeftColor='#ffaa00';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> ⚠️ 未监护 ${roles}${voiceCtx}`;
+    body.insertBefore(el,body.firstChild);
+    while(body.childElementCount>30)body.removeChild(body.lastChild);
+  }else if(st==='不在监护制'){
+    el.style.borderLeftColor='#ff4d4d';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⚠️ 不在监护制</span> ${roles}${voiceCtx}`;
+    body.appendChild(el);
+    const tag=$('flowTag');tag.style.display='none';
+    $('distDashboard').style.display='none';
+  }
+  el.scrollIntoView({behavior:'smooth'});
+}
+
+function addGazeEvent(d){
+  const body=$('detBody');
+  const el=document.createElement('div');el.className='det-event';
+  const ev=d.event||'';
+  if(ev==='GAZE_ALERT'){
+    el.style.borderLeftColor='#ff4d4d';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 无人注视盘台</span> <span style="color:#ff4d4d;font-weight:700">⚠️ 告警</span> <span style="color:#6b7a90;font-size:9px">${d.heads_count||0}人在场</span>`;
+  }else{
+    el.style.borderLeftColor='#00ff88';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 注视盘台</span> ${d.roi_label||''}`;
+  }
+  body.insertBefore(el,body.firstChild);
+  while(body.childElementCount>30)body.removeChild(body.lastChild);
+  el.scrollIntoView({behavior:'smooth'});
+}
+
+function addFlowStart(d){
+  const body=$('detBody');
+  const el=document.createElement('div');el.className='det-event';
+  if(d.flow_type==='supervision'){
+    el.style.borderLeftColor='#00d4ff';
+    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🛡️ 监护制流程 #${d.flowId} <span class="flow-tag flow-supervision flow-active">进行中</span>`;
+  }else{
+    el.style.borderLeftColor='#ffaa00';
+    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🎫 自唱票 #${d.flowId} <span class="flow-tag flow-self-ticket flow-active">进行中</span>${d.parent_flow_id?' (监护制#'+d.parent_flow_id+')':''}`;
+  }
+  body.appendChild(el);
+}
+
+function addFlowEnd(d){
+  const body=$('detBody');
+  const el=document.createElement('div');el.className='det-event';
+  let icon=d.flow_type==='supervision'?'🛡️':'🎫';
+  let color=d.flow_type==='supervision'?'#00d4ff':'#ffaa00';
+  let label=d.flow_type==='supervision'?'监护制':'自唱票';
+  el.style.borderLeftColor=color;
+  el.innerHTML=`<span class="ts">[${fmt(d.flow_end_sec)}]</span> ${icon} ${label} #${d.flowId} <span style="color:#00ff88">结束</span> (${d.flow_continue_sec||'?'}s)`;
+  body.appendChild(el);
+  $('flowTag').style.display='none';
+  const activeTags=body.querySelectorAll('.flow-active');
+  activeTags.forEach(t=>t.remove());
+}
+
+function addSegCard(d){
+  const fid=d.flowId||'?';
+  const streamEl=$('stream-'+fid);
+  if(streamEl){
+    segScores.push(d.score||0);
+    if(d.flow_type==='supervision')supN++;else ticketN++;
+    updateSummary();
+    let isSup=d.flow_type==='supervision';
+    let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
+    let bc=isSup?'#00d4ff':'#ffaa00';
+    let icon=isSup?'🛡️':'🎫';
+    let label=isSup?'监护制':'自唱票';
+    streamEl.style.borderLeftColor=bc;
+    streamEl.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
+    delete _streamBuffers[fid];
+    return;
+  }
+  segScores.push(d.score||0);
+  if(d.flow_type==='supervision')supN++;else ticketN++;
+  updateSummary();
+  let isSup=d.flow_type==='supervision';
+  let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
+  let bc=isSup?'#00d4ff':'#ffaa00';
+  let icon=isSup?'🛡️':'🎫';
+  let label=isSup?'监护制':'自唱票';
+  const card=document.createElement('div');card.className='seg-card';card.style.borderLeftColor=bc;
+  card.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
+  $('segCards').appendChild(card);card.scrollIntoView({behavior:'smooth'});
+}
+
+let _streamBuffers = {};
+
+function addSegStream(d) {
+  const fid = d.flowId;
+  if (!_streamBuffers[fid]) {
+    _streamBuffers[fid] = '';
+    const card = document.createElement('div');
+    card.id = 'stream-' + fid;
+    card.className = 'seg-card';
+    card.style.borderLeftColor = '#6b7a90';
+    card.innerHTML = `<div class="sc-head"><span>🤖 流程 #${fid} 推理中…</span></div><div class="sc-detail" style="white-space:pre-wrap"></div>`;
+    $('segCards').appendChild(card);
+    card.scrollIntoView({ behavior: 'smooth' });
+  }
+  _streamBuffers[fid] += d.chunk || '';
+  const el = $('stream-' + fid);
+  if (el) {
+    const detail = el.querySelector('.sc-detail');
+    if (detail) detail.textContent = _streamBuffers[fid];
+  }
+}
+
+function showQwenReport(text){
+  const container = $('segCards');
+  const streamCard = $('reportStreamCard');
+  if (streamCard) streamCard.remove();
+  $('progressGroup').style.display = 'none';
+  const card = document.createElement('div');
+  card.className = 'seg-card';
+  card.style.borderLeftColor = '#ffd700';
+  let html = '<div class="sc-head"><span>🤖 大模型总结报告</span></div>';
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue;
+    let m = line.match(/总分[：:]\s*(\d+).*评级[：:]\s*([ABCD])/);
+    if (m) {
+      let c = m[2] === 'A' ? '#00ff88' : m[2] === 'B' ? '#00d4ff' : m[2] === 'C' ? '#ffaa00' : '#ff4d4d';
+      html += `<div class="qr-score-line" style="color:${c}">${line.trim()}</div>`;
+      $('msTotal').textContent = m[1];
+      $('msTotal').style.color = c;
+      $('headerStatus').textContent = '✅ 报告生成完毕';
+      continue;
+    }
+    if (/^(#{1,3}\s|[一二三四五六七八九十]、)/.test(line.trim())) {
+      html += `<div class="qr-title">${line.replace(/^#+\s*/, '').trim()}</div>`;
+      continue;
+    }
+    html += `<div class="qr-item">${line.replace(/✅/g, '<span style="color:#00ff88">✅</span>').replace(/❌/g, '<span style="color:#ff4d4d">❌</span>').replace(/⚠️/g, '<span style="color:#ffaa00">⚠️</span>')}</div>`;
+  }
+  card.innerHTML = html;
+  container.appendChild(card);
+  card.scrollIntoView({ behavior: 'smooth' });
+}
+</script>
+</body>
+</html>

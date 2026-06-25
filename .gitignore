@@ -22,3 +22,6 @@ logs/
 .venv/
 venv/
 env/
+
+# Data directory
+data/
