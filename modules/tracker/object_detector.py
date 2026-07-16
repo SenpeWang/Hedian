@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 
 import numpy as np
 
-logger = logging.getLogger("module.mot.detector")
+logger = logging.getLogger("module.tracker.detector")
 
 
 class ObjectDetector:

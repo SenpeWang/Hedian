@@ -9,7 +9,7 @@ from typing import Optional
 
 import numpy as np
 
-logger = logging.getLogger("module.mot.hand_raiser")
+logger = logging.getLogger("module.tracker.hand_raiser")
 
 
 class HandRaiser:

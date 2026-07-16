@@ -2,7 +2,7 @@
 # 此文件覆盖 config.py 中的默认值
 
 app:
-  gpu: "0"
+  gpu: "1"
   fps: 30.0
 
 paths:
@@ -26,7 +26,10 @@ bus:
 voice:
   sample_rate: 16000
   sentence_gap_sec: 1.5
-  model_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/large-v3.pt"
+  asr_engine: "qwen3"
+  model_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0.6B"
+  aligner_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0.6B"
+  torch_dtype: "bfloat16"
 
 gaze:
   head_conf_th: 0.55
@@ -37,10 +40,13 @@ gaze:
 
 modules:
   voice: true
-  mot: true
-  gaze: false
+  tracker: true
+  personnel_status: true
+  info_notice: true
   behavior: false
 
-regulations:
+rules:
   supervision: true
   self_ticket: true
+  personnel_status: true
+  info_notice: true

@@ -1,7 +1,7 @@
 """
-MOT 结果存储模块
+Tracker 结果存储模块
 
-负责保存 MOT 模块的处理结果。
+负责保存 Tracker 模块的处理结果。
 """
 import json
 import logging
@@ -10,17 +10,17 @@ from typing import List, Dict
 
 from core.path_manager import PathConfig
 
-logger = logging.getLogger("module.mot.storage")
+logger = logging.getLogger("module.tracker.storage")
 
 
-class MOTResultStorage:
+class TrackerStorage:
     """
-    MOT 结果存储器
+    Tracker 结果存储器
 
-    负责保存 MOT 模块的处理结果，包括：
-    - 关键事件（Mot_key_moments.json）
-    - 角色信息（Mot_role_info.json）
-    - 关键帧（Mot_key_frames/）
+    负责保存 Tracker 模块的处理结果，包括：
+    - 关键事件（tracker_key_moments.json）
+    - 角色信息（tracker_role_info.json）
+    - 关键帧（key_frames/）
     """
 
     def __init__(self, paths: PathConfig):
@@ -42,8 +42,8 @@ class MOTResultStorage:
         """
         output_path = self._paths.get_result_path(
             run_id=run_id,
-            module="mot",
-            filename="Mot_key_moments.json",
+            module="tracker",
+            filename="tracker_key_moments.json",
         )
 
         try:
@@ -75,8 +75,8 @@ class MOTResultStorage:
         """
         output_path = self._paths.get_result_path(
             run_id=run_id,
-            module="mot",
-            filename="Mot_role_info.json",
+            module="tracker",
+            filename="tracker_role_info.json",
         )
 
         try:
@@ -106,8 +106,8 @@ class MOTResultStorage:
 
         output_path = self._paths.get_result_path(
             run_id=run_id,
-            module="mot",
-            filename="Mot_panel_violations.json",
+            module="tracker",
+            filename="tracker_panel_violations.json",
         )
 
         try:
@@ -129,8 +129,8 @@ class MOTResultStorage:
         """
         input_path = self._paths.get_result_path(
             run_id=run_id,
-            module="mot",
-            filename="Mot_key_moments.json",
+            module="tracker",
+            filename="tracker_key_moments.json",
         )
 
         try:
@@ -159,8 +159,8 @@ class MOTResultStorage:
         """
         input_path = self._paths.get_result_path(
             run_id=run_id,
-            module="mot",
-            filename="Mot_role_info.json",
+            module="tracker",
+            filename="tracker_role_info.json",
         )
 
         try:

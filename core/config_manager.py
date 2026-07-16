@@ -37,7 +37,7 @@ _DEFAULTS = {
         "vote_threshold": 2,
         "cooldown_frames": 300,
     },
-    "bus": {
+    "event_bus": {
         "max_queue_size": 1024,
     },
     "voice": {
@@ -57,13 +57,15 @@ _DEFAULTS = {
     },
     "modules": {
         "voice": True,
-        "mot": True,
+        "tracker": True,
         "gaze": True,
         "behavior": False,
     },
-    "regulations": {
+    "rules": {
         "supervision": True,
         "self_ticket": True,
+        "personnel_status": True,
+        "info_notice": True,
     },
 }
 
@@ -171,9 +173,9 @@ class ConfigManager:
         return self._data["supervision"]
 
     @property
-    def bus(self) -> dict:
+    def event_bus(self) -> dict:
         """总线配置"""
-        return self._data["bus"]
+        return self._data["event_bus"]
 
     @property
     def voice(self) -> dict:
@@ -191,9 +193,9 @@ class ConfigManager:
         return self._data["modules"]
 
     @property
-    def regulations(self) -> dict:
+    def rules(self) -> dict:
         """制度配置"""
-        return self._data["regulations"]
+        return self._data["rules"]
 
     def get(self, key: str, default: Any = None) -> Any:
         """

@@ -34,9 +34,28 @@ class FlowDataExtractor:
         self._redis = redis_client or redis.Redis(
             host="localhost", port=6379, db=0, decode_responses=True
         )
+        
+        # 动态解析 config.yaml 确定开启了哪些模块，避免对未开启的模块执行无意义等待
+        self._enabled_modules = {"voice", "tracker", "gaze"}
+        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+        if os.path.exists(config_path):
+            try:
+                import yaml
+                with open(config_path, encoding="utf-8") as f:
+                    cfg = yaml.safe_load(f) or {}
+                modules_cfg = cfg.get("modules", {})
+                self._enabled_modules = set()
+                if modules_cfg.get("voice", True):
+                    self._enabled_modules.add("voice")
+                if modules_cfg.get("tracker", True):
+                    self._enabled_modules.add("tracker")
+                    self._enabled_modules.add("gaze")  # gaze 伴随 tracker 启用
+                logger.info(f"数据提取器初始化成功，当前启用的等待模块: {self._enabled_modules}")
+            except Exception as e:
+                logger.warning(f"数据提取器加载配置文件失败，默认等待全部模块: {e}")
 
     def extract(self, start_sec: float, end_sec: float,
-                wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict]]:
+                wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict], List[Dict]]:
         """
         提取指定时间范围的事件
 
@@ -47,25 +66,50 @@ class FlowDataExtractor:
             timeout: 超时时间（秒），默认5分钟
 
         Returns:
-            (voice_events, mot_events)
+            (voice_events, tracker_events, gaze_events)
         """
         if wait:
             logger.info(f"等待所有模块处理到 {end_sec}s...")
             self._wait_all_modules(end_sec, timeout)
 
         voice_events = self._extract_voice_events(start_sec, end_sec)
-        mot_events = self._extract_mot_events(start_sec, end_sec)
+        tracker_events = self._extract_tracker_events(start_sec, end_sec)
+        gaze_events = self._extract_gaze_events(start_sec, end_sec)
 
-        logger.info(f"提取事件完成: voice={len(voice_events)}条, mot={len(mot_events)}条, "
+        logger.info(f"提取事件完成: voice={len(voice_events)}条, tracker={len(tracker_events)}条, gaze={len(gaze_events)}条, "
                     f"时间范围={start_sec:.2f}s ~ {end_sec:.2f}s")
 
-        return voice_events, mot_events
+        return voice_events, tracker_events, gaze_events
+
+    def save_extracted_data(self, flow_data: dict) -> None:
+        """
+        将提取和拼接好的流程数据单独保存到一个 JSON 文件中，存放于 evaluation 文件夹下。
+
+        Args:
+            flow_data: 提取拼接好的流程数据字典
+        """
+        try:
+            # 建立 evaluation 子文件夹
+            eval_dir = os.path.join(self._result_dir, "evaluation")
+            os.makedirs(eval_dir, exist_ok=True)
+
+            flow_id = flow_data.get("flow_id", "unknown_flow")
+            filename = f"extracted_flow_{flow_id}.json"
+            output_path = os.path.join(eval_dir, filename)
+
+            with open(output_path, "w", encoding="utf-8") as f:
+                json.dump(flow_data, f, ensure_ascii=False, indent=2)
+
+            logger.info(f"提取拼接好的流程数据已成功保存到: {output_path}")
+
+        except Exception as e:
+            logger.error(f"保存提取的流程数据失败: {e}", exc_info=True)
 
     def _wait_all_modules(self, target_sec: float, timeout: int) -> None:
         """
         等待所有模块都处理到目标时间
 
-        从 Redis 读取 aggregator:progress，检查每个模块的进度。
+        从 Redis 读取 inference:progress，检查每个模块的进度。
 
         Args:
             target_sec: 目标时间（秒）
@@ -102,7 +146,7 @@ class FlowDataExtractor:
             {module_name: progress_sec}
         """
         progress = {}
-        for module_name in ["voice", "mot"]:
+        for module_name in self._enabled_modules:
             progress[module_name] = self._get_module_progress(module_name)
         return progress
 
@@ -110,7 +154,7 @@ class FlowDataExtractor:
         """
         从 Redis 获取单个模块的实时进度
 
-        读取 aggregator:progress Hash 中的模块进度。
+        读取 inference:progress Hash 中的模块进度。
 
         Args:
             module_name: 模块名称
@@ -120,7 +164,7 @@ class FlowDataExtractor:
         """
         try:
             # 从 Redis 读取进度
-            progress = self._redis.hget("aggregator:progress", module_name)
+            progress = self._redis.hget("inference:progress", module_name)
             return float(progress) if progress else 0.0
         except Exception as e:
             logger.error(f"获取 {module_name} 进度失败: {e}")
@@ -160,21 +204,21 @@ class FlowDataExtractor:
             logger.error(f"加载语音事件失败: {e}")
             return []
 
-    def _extract_mot_events(self, start_sec: float, end_sec: float) -> List[Dict]:
+    def _extract_tracker_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 Mot_key_moments.json 提取 MOT 事件
+        从 tracker_key_moments.json 提取 Tracker 事件
 
         Args:
             start_sec: 开始时间
             end_sec: 结束时间
 
         Returns:
-            MOT 事件列表
+            Tracker 事件列表
         """
-        mkm_path = os.path.join(self._result_dir, "mot", "Mot_key_moments.json")
+        mkm_path = os.path.join(self._result_dir, "tracker", "tracker_key_moments.json")
 
         if not os.path.exists(mkm_path):
-            logger.warning(f"MOT事件文件不存在: {mkm_path}")
+            logger.warning(f"Tracker事件文件不存在: {mkm_path}")
             return []
 
         try:
@@ -191,7 +235,41 @@ class FlowDataExtractor:
             return filtered_events
 
         except Exception as e:
-            logger.error(f"加载MOT事件失败: {e}")
+            logger.error(f"加载Tracker事件失败: {e}")
+            return []
+
+    def _extract_gaze_events(self, start_sec: float, end_sec: float) -> List[Dict]:
+        """
+        从 gaze_key_moments.json 提取 Gaze 事件
+
+        Args:
+            start_sec: 开始时间
+            end_sec: 结束时间
+
+        Returns:
+            Gaze 事件列表
+        """
+        gkm_path = os.path.join(self._result_dir, "gaze", "gaze_key_moments.json")
+
+        if not os.path.exists(gkm_path):
+            logger.warning(f"Gaze事件文件不存在: {gkm_path}")
+            return []
+
+        try:
+            with open(gkm_path, encoding="utf-8") as f:
+                all_events = json.load(f)
+
+            # 按时间范围过滤
+            filtered_events = []
+            for ev in all_events:
+                ts = ev.get("localSec") or 0
+                if start_sec <= ts <= end_sec:
+                    filtered_events.append(ev)
+
+            return filtered_events
+
+        except Exception as e:
+            logger.error(f"加载Gaze事件失败: {e}")
             return []
 
     def get_voice_summary(self) -> Dict:
@@ -218,13 +296,13 @@ class FlowDataExtractor:
             return {
                 "total_events": len(events),
                 "supervision_requests": sum(
-                    1 for e in events if e.get("intent") == "监护请求"
+                    1 for e in events if any(w in e.get("key_moment", "") for w in ["监护", "请求", "申请"])
                 ),
                 "supervision_verifications": sum(
-                    1 for e in events if e.get("intent") == "核对确认"
+                    1 for e in events if any(w in e.get("key_moment", "") for w in ["核对", "收到"])
                 ),
                 "operation_commands": sum(
-                    1 for e in events if e.get("intent") == "操作指令"
+                    1 for e in events if any(w in e.get("key_moment", "") for w in ["执行"])
                 ),
             }
 
@@ -239,12 +317,12 @@ class FlowDataExtractor:
 
     def get_mot_summary(self) -> Dict:
         """
-        获取 MOT 事件摘要
+        获取 Tracker 事件摘要
 
         Returns:
             MOT 事件统计
         """
-        mkm_path = os.path.join(self._result_dir, "mot", "Mot_key_moments.json")
+        mkm_path = os.path.join(self._result_dir, "tracker", "tracker_key_moments.json")
 
         if not os.path.exists(mkm_path):
             return {"total_events": 0, "key_frames": 0}
@@ -253,7 +331,7 @@ class FlowDataExtractor:
             with open(mkm_path, encoding="utf-8") as f:
                 events = json.load(f)
 
-            kf_dir = os.path.join(self._result_dir, "mot", "Mot_key_frames")
+            kf_dir = os.path.join(self._result_dir, "tracker", "key_frames")
             kf_count = len(os.listdir(kf_dir)) if os.path.isdir(kf_dir) else 0
 
             return {
@@ -262,5 +340,5 @@ class FlowDataExtractor:
             }
 
         except Exception as e:
-            logger.error(f"获取MOT摘要失败: {e}")
+            logger.error(f"获取Tracker摘要失败: {e}")
             return {"total_events": 0, "key_frames": 0}

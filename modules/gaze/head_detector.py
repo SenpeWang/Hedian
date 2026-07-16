@@ -4,6 +4,22 @@
 使用 YOLOv8 ONNX 模型检测头部。
 """
 import os
+import ctypes
+
+# 预加载 cuDNN 库（LD_LIBRARY_PATH 在运行中修改对 dlopen 不生效）
+_nvidia_base = "/home/wangshengping/myconda/envs/sp_hedian/lib/python3.10/site-packages/nvidia"
+_cudnn_lib = f"{_nvidia_base}/cudnn/lib"
+_cuda_runtime_lib = f"{_nvidia_base}/cuda_runtime/lib"
+_cublas_lib = f"{_nvidia_base}/cublas/lib"
+
+for _lib_dir in [_cudnn_lib, _cuda_runtime_lib, _cublas_lib]:
+    for _f in sorted(os.listdir(_lib_dir)) if os.path.isdir(_lib_dir) else []:
+        if _f.endswith(".so") or ".so." in _f:
+            try:
+                ctypes.CDLL(os.path.join(_lib_dir, _f))
+            except OSError:
+                pass
+
 import logging
 from pathlib import Path
 from typing import List, Optional
@@ -67,7 +83,9 @@ class HeadDetector:
 
         import onnxruntime
 
-        providers = providers or ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        # 仅使用 GPU
+        import onnxruntime as _ort
+        providers = ["CUDAExecutionProvider"]
         sess_opts = onnxruntime.SessionOptions()
         sess_opts.log_severity_level = 3
         onnxruntime.set_default_logger_severity(3)

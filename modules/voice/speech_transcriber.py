@@ -1,12 +1,13 @@
 """
 语音转文字模块
 
-使用 Whisper 进行语音转录，带后处理纠错和幻觉移除。
+使用 Qwen3-ASR 进行语音转录，带后处理纠错和幻觉移除。
 技术方案来自备份版本 A_DemoSrc1/VOICE/voice.py
 """
 import os
 import re
 import logging
+import unicodedata
 from pathlib import Path
 from typing import List, Dict, Optional
 
@@ -14,13 +15,7 @@ import numpy as np
 
 logger = logging.getLogger("module.voice.transcriber")
 
-# Whisper 提示词（核电领域术语）
-PROMPT_V4 = (
-    "T1RPA034实验。1ES013V。浮片对齐。操作页数。"
-    "请求监护。框架正确。KICK。SVideo。LCO306.6。"
-    "1ES001VB。1ES013VSM3。D坑。报警。地坑隔离法。"
-    "RPA34FU。1ES005。核对。确认。开启。基础状态。"
-)
+
 
 # ======================== 后处理纠错规则 ========================
 CORRECTIONS = [
@@ -94,6 +89,8 @@ CORRECTIONS = [
 
     # ---- 请求监护 ----
     ("请求进入", "请求监护"), ("请求接入", "请求监护"),
+    ("请台军务", "请求监护"), ("请台监护", "请求监护"),
+    ("台军务", "请求监护"),
 
     # ---- 其他术语 ----
     ("重按", "长按"), ("此按", "长按"), ("呈案", "长按"),
@@ -110,7 +107,7 @@ CORRECTIONS = [
     ("可以报警了", "报警"), ("入口。滑", "入口阀"), ("入口。法", "入口阀"),
     ("正常出发", "正常触发"), ("画面在确认", "画面再确认一遍"),
     ("可以进行", "可以执行"),
-    ("手放", "收到"),
+    ("手放", "收到"), ("三黑", "三K"), ("SV六十", "SVideo"),
 
     # ---- 幻觉移除 ----
     ("请使用简体中文输出", ""), ("请不吝点赞", ""), ("订阅", ""),
@@ -127,7 +124,7 @@ def apply_corrections(text: str) -> str:
 
 
 def remove_hallucinations(words):
-    """移除连续重复的短词（Whisper 幻觉）"""
+    """移除连续重复的短词（ASR 幻觉）"""
     if not words:
         return words
     cleaned, i = [], 0
@@ -147,48 +144,135 @@ def remove_hallucinations(words):
     return cleaned
 
 
+
+# ======================== Qwen3-ASR 辅助函数 ========================
+def _read_attr_or_key(item, *names, default=None):
+    for name in names:
+        if isinstance(item, dict) and name in item:
+            return item[name]
+        if hasattr(item, name):
+            return getattr(item, name)
+    return default
+
+def _safe_float(value, default=0.0):
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+def normalize_qwen_results(results, duration_seconds=0.0):
+    if results is None:
+        return []
+    if not isinstance(results, (list, tuple)):
+        results = [results]
+
+    segments = []
+    for result in results:
+        text = str(_read_attr_or_key(result, "text", default="") or "").strip()
+        raw_stamps = (
+            _read_attr_or_key(result, "time_stamps")
+            or _read_attr_or_key(result, "timestamps")
+            or _read_attr_or_key(result, "words")
+            or []
+        )
+        words = []
+        for stamp in raw_stamps:
+            word_text = str(
+                _read_attr_or_key(stamp, "text", "word", "token", default="") or ""
+            ).strip()
+            if not word_text:
+                continue
+            start = _safe_float(_read_attr_or_key(stamp, "start_time", "start", "begin_time", default=0.0))
+            end = _safe_float(_read_attr_or_key(stamp, "end_time", "end", "finish_time", default=start))
+            words.append({
+                "start": float(start),
+                "end": float(end if end >= start else start),
+                "word": word_text,
+            })
+
+        if words:
+            start = min(word["start"] for word in words)
+            end = max(word["end"] for word in words)
+            if not text:
+                text = "".join(word["word"] for word in words)
+        else:
+            start = 0.0
+            end = float(duration_seconds or 0.0)
+
+        if not text:
+            continue
+
+        item = {
+            "start": float(start),
+            "end": float(end if end >= start else start),
+            "text": text,
+        }
+        if words:
+            item["words"] = words
+        segments.append(item)
+    return segments
+
+
 class SpeechTranscriber:
     """
     语音转文字器
 
-    使用 Whisper 模型进行语音转录，带后处理纠错。
+    使用 Qwen3-ASR 模型进行语音转录，带后处理纠错。
     """
 
     def __init__(
         self,
         model_path: str = None,
-        tokenizer_path: str = None,
+        aligner_path: str = None,
+        asr_engine: str = "qwen3",
         sample_rate: int = 16000,
+        device: str = "cpu",
+        torch_dtype: str = None,
     ):
-        self.model_path = model_path or "large-v3"
+        self.model_path = model_path
+        self.aligner_path = aligner_path
+        self.asr_engine = asr_engine
         self.sample_rate = sample_rate
+        self.device = device
+        self.torch_dtype = torch_dtype
         self._model = None
 
     def _load_model(self):
-        """加载 Whisper 模型"""
+        """加载 ASR 模型"""
         if self._model is not None:
             return
 
         try:
-            import whisper
+            import torch
+            from qwen_asr import Qwen3ASRModel
 
-            # 优先从本地路径加载
-            local_path = self.model_path
-            if os.path.isfile(local_path):
-                logger.info(f"从本地加载 Whisper 模型: {local_path}")
-                self._model = whisper.load_model(local_path)
+            # 配置推理参数
+            device_map = "cuda:0" if self.device == "cuda" else "cpu"
+            torch_type = getattr(torch, self.torch_dtype) if self.torch_dtype else (torch.bfloat16 if self.device == "cuda" else torch.float32)
+
+            kwargs = {
+                "dtype": torch_type,
+                "device_map": device_map,
+                "max_new_tokens": 4096,
+                "max_inference_batch_size": 8,
+            }
+            
+            # 如果有 aligner 并且路径存在，则使用它
+            if self.aligner_path and os.path.exists(self.aligner_path):
+                kwargs["forced_aligner"] = self.aligner_path
+                kwargs["forced_aligner_kwargs"] = {
+                    "dtype": torch_type,
+                    "device_map": device_map,
+                }
+                logger.info(f"开启 Word-level Aligner 对齐器: {self.aligner_path}")
             else:
-                # 尝试从 models/voice/ 目录加载
-                voice_dir = Path(__file__).parent.parent.parent / "models" / "voice"
-                local_file = voice_dir / f"{self.model_path}.pt"
-                if local_file.exists():
-                    logger.info(f"从 models/voice 加载 Whisper 模型: {local_file}")
-                    self._model = whisper.load_model(str(local_file))
-                else:
-                    logger.info(f"加载 Whisper 模型: {self.model_path}")
-                    self._model = whisper.load_model(self.model_path)
+                logger.warning("未检测到或未配置对齐器 Aligner 路径，将仅使用 ASR 段级时间戳")
 
-            logger.info("Whisper 模型加载完成")
+            logger.info(f"正在从本地加载 Qwen3-ASR 模型: {self.model_path}")
+            self._model = Qwen3ASRModel.from_pretrained(self.model_path, **kwargs)
+            logger.info("Qwen3-ASR 模型加载完成")
         except Exception as e:
             logger.error(f"模型加载失败: {e}", exc_info=True)
             raise
@@ -231,7 +315,7 @@ class SpeechTranscriber:
             # 滑动窗口分段转录（与备份版本一致：window=25, overlap=5）
             words = self._transcribe_segmented(
                 audio, sr,
-                window_sec=25, overlap_sec=5,
+                window_sec=15, overlap_sec=5,
                 start_time=0, end_time=effective_end,
                 progress_callback=progress_callback,
                 on_segment=on_segment,
@@ -306,25 +390,16 @@ class SpeechTranscriber:
                 logger.debug(f"跳过静音段 {i}/{len(windows)} ({t:.1f}s-{end:.1f}s)")
                 continue
 
-            # 转录（与备份版本参数一致）
+            # 转录
             try:
-                result = self._model.transcribe(
-                    segment_audio,
-                    language="zh",
-                    task="transcribe",
-                    verbose=False,
-                    word_timestamps=False,
-                    initial_prompt=PROMPT_V4,
-                    condition_on_previous_text=False,
-                    temperature=0.0,
-                    beam_size=5,
-                    no_speech_threshold=0.6,
-                )
-
                 seg_words = []
-                for seg in result.get("segments", []):
-                    st = round(t + float(seg.get("start", 0)), 3)
-                    et = round(t + float(seg.get("end", end - t)), 3)
+                results = self._model.transcribe(
+                    audio=(segment_audio, sr),
+                    language="Chinese",
+                    return_time_stamps=bool(self.aligner_path and os.path.exists(self.aligner_path)),
+                )
+                normalized = normalize_qwen_results(results, duration_seconds=len(segment_audio)/sr)
+                for seg in normalized:
                     txt = seg.get("text", "").strip()
                     # 繁体转简体
                     try:
@@ -334,15 +409,60 @@ class SpeechTranscriber:
                     except ImportError:
                         pass
                     if txt:
-                        seg_words.append({"word": txt, "start": st, "end": et})
+                        st = round(t + float(seg.get("start", 0.0)), 3)
+                        et = round(t + float(seg.get("end", 0.0)), 3)
+                        seg_item = {"word": txt, "start": st, "end": et}
+                        if "words" in seg and seg["words"]:
+                            seg_item["words"] = [
+                                {
+                                    "start": round(t + float(w.get("start", 0.0)), 3),
+                                    "end": round(t + float(w.get("end", 0.0)), 3),
+                                    "word": w.get("word") or w.get("text") or "",
+                                }
+                                for w in seg["words"]
+                            ]
+                        seg_words.append(seg_item)
 
-                # 重叠区去重
+                # 重叠区去重：基于词级时间戳的中点切分
                 if i > 1 and all_words:
                     mid = t + overlap_sec / 2
-                    seg_words = [w for w in seg_words if w["start"] >= mid]
-                    all_words = [w for w in all_words if w["start"] < mid]
 
-                all_words.extend(seg_words)
+                    # 前段：保留 mid 之前的内容
+                    trimmed_prev = []
+                    for w in all_words:
+                        if w["end"] <= mid:
+                            trimmed_prev.append(w)
+                        elif "words" in w and w["words"]:
+                            # 有细粒度词级时间戳：按中点精确切分
+                            kept = [wd for wd in w["words"] if wd["start"] < mid]
+                            if kept:
+                                trimmed_prev.append({
+                                    "word": "".join(wd["word"] for wd in kept),
+                                    "start": w["start"],
+                                    "end": kept[-1]["end"],
+                                    "words": kept,
+                                })
+                        elif w["start"] < mid:
+                            trimmed_prev.append(w)
+
+                    # 当前段：保留 mid 之后的内容
+                    trimmed_cur = []
+                    for w in seg_words:
+                        if w["start"] >= mid:
+                            trimmed_cur.append(w)
+                        elif "words" in w and w["words"]:
+                            kept = [wd for wd in w["words"] if wd["start"] >= mid]
+                            if kept:
+                                trimmed_cur.append({
+                                    "word": "".join(wd["word"] for wd in kept),
+                                    "start": kept[0]["start"],
+                                    "end": w["end"],
+                                    "words": kept,
+                                })
+
+                    all_words = trimmed_prev + trimmed_cur
+                else:
+                    all_words.extend(seg_words)
 
                 # 子窗口级进度更新（每段转录后立即报告）
                 if progress_callback:
@@ -373,3 +493,140 @@ class SpeechTranscriber:
                 break
         end_sec = (last_active * hop + frame_len) / sr
         return min(end_sec, len(audio) / sr)
+
+
+# ======================== 文本归一化与关键词提取 (原 intent_classifier) ========================
+
+NORM_DEVICE_PATTERN = re.compile(r"([1-9]?[A-Z]{2,3}\d{3}[A-Z]{2}|1EAS\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)")
+
+CN_DIGITS = {
+    "零": 0, "〇": 0, "洞": 0,
+    "一": 1, "幺": 1, "腰": 1,
+    "二": 2, "两": 2,
+    "三": 3, "四": 4, "五": 5,
+    "六": 6, "七": 7, "八": 8, "九": 9,
+}
+
+CN_UNITS = {
+    "十": 10, "百": 100, "千": 1000,
+}
+
+LETTER_WORDS = {
+    "阿尔": "R", "艾儿": "R",
+    "艾斯": "S", "爱斯": "S",
+    "维": "V", "威": "V", "微": "V",
+    "批": "P", "屁": "P", "皮": "P",
+    "诶": "A",
+}
+
+def _convert_cn_number(token):
+    if not token:
+        return ""
+    if any(ch in CN_UNITS for ch in token):
+        total = 0
+        current = 0
+        for ch in token:
+            if ch in CN_DIGITS:
+                current = CN_DIGITS[ch]
+            elif ch in CN_UNITS:
+                unit = CN_UNITS[ch]
+                if current == 0:
+                    current = 1
+                total += current * unit
+                current = 0
+        total += current
+        return str(total)
+    chars = []
+    for ch in token:
+        if ch in CN_DIGITS:
+            chars.append(str(CN_DIGITS[ch]))
+    return "".join(chars)
+
+def normalize_spoken_text(text):
+    if not text:
+        return ""
+    text = unicodedata.normalize("NFKC", str(text)).upper()
+    for word, letter in LETTER_WORDS.items():
+        text = text.replace(word, letter)
+    text = re.sub(
+        r"[零〇洞一幺腰二两三四五六七八九十百千]+",
+        lambda m: _convert_cn_number(m.group(0)),
+        text,
+    )
+    # 常用音译前缀和数字归一化
+    text = text.replace("11ES", "1EAS")
+    text = text.replace("1ES", "1EAS")
+    text = text.replace("EES", "1EAS").replace("EAS", "1EAS").replace("EEX", "1EAS")
+    text = text.replace("ES", "1EAS")
+    # 只保留字母数字和小数点
+    return re.sub(r"[^A-Z0-9\.]", "", text)
+
+def get_key_moment(text: str, device: str) -> str:
+    """根据匹配到的语音关键字返回对应的 key_moment"""
+    if device:
+        return device
+    
+    # 严格检查核心流程关键字
+    if "监护" in text:
+        return "请求监护"
+    if "执行" in text:
+        return "执行"
+    if "核对" in text:
+        return "核对"
+    if "信息通报" in text:
+        return "信息通报"
+    if "信息通告" in text:
+        return "信息通告"
+    if "通报完毕" in text:
+        return "通报完毕"
+    if "通告完毕" in text:
+        return "通告完毕"
+    if text.strip() == "收到":
+        return "收到"
+        
+    return ""
+
+def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
+    """对字/词按停顿切分出段落，并提取设备码与关键行为"""
+    if not words:
+        return []
+
+    words = [w for w in words if w is not None and w.get("word")]
+    if not words:
+        return []
+
+    # 分句：按停顿切分
+    sentences = []
+    cur = []
+    for w in words:
+        if cur and w["start"] - cur[-1]["end"] > sentence_gap_sec:
+            sentences.append(cur)
+            cur = [w]
+        else:
+            cur.append(w)
+    if cur:
+        sentences.append(cur)
+
+    events = []
+    for sent_words in sentences:
+        text = "".join(w["word"] for w in sent_words)
+        if not text.strip():
+            continue
+
+        audio_ts = round(sent_words[0]["start"], 2)
+
+        # 设备码提取
+        norm_text = normalize_spoken_text(text)
+        m = NORM_DEVICE_PATTERN.search(norm_text)
+        device = m.group(1) if m else ""
+
+        # 关键时刻
+        key_moment = get_key_moment(text, device)
+
+        events.append({
+            "localSec": audio_ts,
+            "text": text,
+            "key_moment": key_moment or ""
+        })
+
+    return events

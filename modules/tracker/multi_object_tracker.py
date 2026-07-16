@@ -8,7 +8,7 @@ from typing import List, Dict, Optional
 
 import numpy as np
 
-logger = logging.getLogger("module.mot.tracker")
+logger = logging.getLogger("module.tracker.tracker")
 
 # 工位坐标
 WORKSTATIONS = {
@@ -42,7 +42,7 @@ class MultiObjectTracker:
     """
 
     def __init__(self):
-        from modules.mot.ocsort_bytetrack import OCSORTByteTracker
+        from modules.tracker.ocsort_bytetrack import OCSORTByteTracker
 
         self.tracker = OCSORTByteTracker(
             track_thresh=0.50,

@@ -6,17 +6,17 @@
 监护制流程：
   开始：语音(监护请求) 或 行为(举手)
   内容：1.九字码复述  2.执行操作  3.核对确认
-  结束：监护员和操作员离开10秒 或 实验结束
+  结束：监护员和操作员离开10秒
 """
 import logging
 
-from core.message_bus import MessageBus, MsgType
-from regulations.regulation_base import BaseRegulation
+from core.event_bus import EventBus, EventTopic
+from rules.rule_base import BaseRule
 
-logger = logging.getLogger("regulations.supervision")
+logger = logging.getLogger("rules.supervision")
 
 
-class SupervisionRegulation(BaseRegulation):
+class SupervisionRule(BaseRule):
     """监护制度（集成状态机）"""
 
     def __init__(self, config: dict = None):
@@ -27,7 +27,7 @@ class SupervisionRegulation(BaseRegulation):
             config: 配置字典
         """
         self._config = config or {}
-        self._bus = None
+        self._event_bus = None
 
         # 流程状态
         self._active = False
@@ -51,18 +51,25 @@ class SupervisionRegulation(BaseRegulation):
         self._bind_hold_sec = self._config.get("bind_hold_sec", 3.0)
         self._unbind_hold_sec = self._config.get("unbind_hold_sec", 10.0)
 
+        # 举手相关事件追踪，用于判定 5 秒内 举手 + 请求监护
+        self._last_hand_raise_ts = -999.0
+        self._last_hand_raise_role = None
+
+        # 记录操纵人员的最新距离状态，不进行默认绑定
+        self._operator_states = {}
+
 # 状态机已直接集成到本类中
 
     def name(self) -> str:
         """制度名称"""
         return "supervision"
 
-    def subscribe_events(self, bus: MessageBus) -> None:
+    def subscribe_events(self, event_bus: EventBus) -> None:
         """订阅事件"""
-        self._bus = bus
-        bus.subscribe(MsgType.VOICE_INTENT, self._on_voice_intent)
-        bus.subscribe(MsgType.MOT_SUPERVISION_REQUEST, self._on_mot_request)
-        bus.subscribe(MsgType.MOT_SUPERVISOR_STATUS, self._on_mot_status)
+        self._event_bus = event_bus
+        event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
+        event_bus.subscribe(EventTopic.TRACKER_HAND_RAISED, self._on_mot_request)
+        event_bus.subscribe(EventTopic.TRACKER_PROXIMITY, self._on_mot_status)
 
     def is_active(self) -> bool:
         """是否有活跃流程"""
@@ -99,25 +106,32 @@ class SupervisionRegulation(BaseRegulation):
 
         self._active = True
         self._sm_state = "REQUESTING"  # 状态机进入 REQUESTING 状态
+
+        # 设置 Redis 标志，通知其他模块监护制已开始
+        import redis
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.set("supervision:active", "true", ex=3600)
+        r.close()
         self._close_start_ts = -1.0
         self._far_start_ts = -1.0
         self._flow_id = self._next_flow_id()
         self._flow_start_sec = ts
         self._flow_start_source = source
-        self._target_role = target_role or "ROAD1"
+        self._target_role = None  # 启动时不进行默认绑定，通过后续身份距离动态判断
+        self._operator_states = {}  # 清空历史状态记录
         self._checklist = {
             "code_repeat": False,
             "execution": False,
             "verification": False,
         }
 
-        if self._bus:
-            self._bus.publish(MsgType.FLOW_STARTED, {
+        if self._event_bus:
+            self._event_bus.publish(EventTopic.FLOW_STARTED, {
                 "flow_id": self._flow_id,
                 "flow_type": "supervision",
                 "flow_start_sec": ts,
                 "start_source": source,
-                "target_role": self._target_role,
+                "target_role": None,
             }, ts=ts)
 
         logger.info(f"流程开始 flow_id={self._flow_id} @{ts:.1f}s source={source}")
@@ -139,8 +153,8 @@ class SupervisionRegulation(BaseRegulation):
             "content_checklist": dict(self._checklist),
         }
 
-        if self._bus:
-            self._bus.publish(MsgType.FLOW_ENDED, flow, ts=ts)
+        if self._event_bus:
+            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, ts=ts)
 
         logger.info(f"流程结束 flow_id={self._flow_id} @{ts:.1f}s")
 
@@ -151,90 +165,101 @@ class SupervisionRegulation(BaseRegulation):
         self._close_start_ts = -1.0
         self._far_start_ts = -1.0
 
+        # 清除 Redis 标志，通知其他模块监护制已结束
+        import redis
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.set("supervision:active", "false", ex=3600)
+        r.close()
+
         return flow
 
     def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音意图"""
+        """处理语音事件（仅包含 localSec 和 key_moment 字段）"""
         data = msg.get("data", {})
-        intent = data.get("intent", "")
-        ts = data.get("localSec", msg.get("ts", 0))
+        ts = data.get("localSec", msg.get("ts", 0.0))
+        key_moment = data.get("key_moment", "")
+        if not key_moment:
+            return
 
-        # 处理流程逻辑
-        if intent == "监护请求":
-            if not self._active:
-                self._start_flow(ts, source="voice")
-            # 更新内容检查
-            if self._active and data.get("key_moment") == "九字码":
+        # 启动流程判定：只要匹配到包含“监护”二字的语音事件即可启动流程 (支持“由监护进入”以及“监护和举手一起进入”)
+        if not self._active:
+            is_supervision_word = (key_moment in ["监护", "请求监护"])
+            has_hand_raise = (abs(ts - self._last_hand_raise_ts) <= 5.0)
+
+            if is_supervision_word:
+                role = self._last_hand_raise_role if has_hand_raise else "ROAD1"
+                self._start_flow(ts, source="voice", target_role=role)
+
+        # 流程运行中状态更新
+        if self._active:
+            # 如果 km 不是核心的控制关键字，它就是设备识别码！
+            is_device = key_moment not in ["监护", "请求监护", "执行", "核对", "收到", "信息通报", "信息通告", "通报完毕", "通告完毕"]
+            if is_device:
                 self._checklist["code_repeat"] = True
-
-        elif intent == "操作指令":
-            if self._active:
+            elif key_moment == "执行":
                 self._checklist["execution"] = True
-
-        elif intent in ("核对确认", "监护确认"):
-            if self._active:
+            elif key_moment == "核对" or key_moment == "收到":
                 self._checklist["verification"] = True
-
-        elif intent == "实验结束":
-            if self._active:
-                self._close_flow(ts, source="voice")
-
-        # 九字码检测
-        if self._active and data.get("key_moment") == "九字码":
-            self._checklist["code_repeat"] = True
-
     def _on_mot_request(self, msg: dict) -> None:
         """处理 MOT 监护请求（举手）"""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
         role = data.get("operator", "ROAD1")
 
-        # 启动流程
-        if not self._active:
-            self._start_flow(ts, source="mot", target_role=role)
+        # 仅记录举手时间与人员角色，单独举手不再判定/启动监护流程
+        self._last_hand_raise_ts = ts
+        self._last_hand_raise_role = role
+        logger.debug(f"监护制: 收到举手事件 @{ts:.1f}s")
 
     def _on_mot_status(self, msg: dict) -> None:
         """处理 MOT 距离状态更新，实现状态机转移"""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
-        distance_px = data.get("distance_px", 0)
         state = data.get("state", "")
         operator = data.get("operator", "")
+
+        # 记录每个操纵人员的最新监护状态
+        self._operator_states[operator] = state
 
         # 只在流程活跃时处理距离状态
         if not self._active:
             return
 
+        # 判断任一操纵人员是否处于监护中，以及是否全部操纵人员都离开
+        any_close = any(s == "监护中" for s in self._operator_states.values())
+        all_far = all(s == "未监护" for s in self._operator_states.values())
+
         # 状态机转移逻辑
         if self._sm_state == "IDLE":
-            # IDLE 状态下不处理距离（等待语音/举手触发）
             pass
 
         elif self._sm_state == "REQUESTING":
-            # REQUESTING → BOUND: 距离≤280px 持续3秒
-            if state == "监护中":
+            # REQUESTING → BOUND: 任一操纵员距离≤280px 持续3秒
+            if any_close:
                 if self._close_start_ts < 0:
                     self._close_start_ts = ts
                 elif ts - self._close_start_ts >= self._bind_hold_sec:
+                    # 动态判定当前的监护目标是谁（获取第一个处于监护中的操纵员）
+                    self._target_role = next((op for op, s in self._operator_states.items() if s == "监护中"), None)
+
                     # 状态转移：REQUESTING → BOUND
                     self._sm_state = "BOUND"
                     self._far_start_ts = -1.0
-                    logger.info(f"状态转移: REQUESTING → BOUND @{ts:.1f}s")
+                    logger.info(f"状态转移: REQUESTING → BOUND @{ts:.1f}s, 动态监护对象: {self._target_role}")
 
                     # 发布监护绑定事件
-                    if self._bus:
-                        self._bus.publish(MsgType.MOT_SUPERVISION_BOUND, {
+                    if self._event_bus:
+                        self._event_bus.publish(EventTopic.TRACKER_SUPERVISION_BOUND, {
                             "localSec": ts,
-                            "operator": operator,
+                            "operator": self._target_role,
                             "source": "distance",
                         }, ts=ts)
             else:
-                # 距离不够近，重置计时
                 self._close_start_ts = -1.0
 
         elif self._sm_state == "BOUND":
-            # BOUND → IDLE: 距离>560px 持续10秒
-            if state == "未监护":
+            # BOUND → IDLE: 全部操纵员离开(距离>560px) 持续10秒
+            if all_far:
                 if self._far_start_ts < 0:
                     self._far_start_ts = ts
                 elif ts - self._far_start_ts >= self._unbind_hold_sec:
@@ -243,10 +268,10 @@ class SupervisionRegulation(BaseRegulation):
                     logger.info(f"状态转移: BOUND → IDLE @{ts:.1f}s (人员离开超10秒)")
 
                     # 发布监护结束事件
-                    if self._bus:
-                        self._bus.publish(MsgType.MOT_SUPERVISION_END, {
+                    if self._event_bus:
+                        self._event_bus.publish(EventTopic.TRACKER_SUPERVISION_END, {
                             "localSec": ts,
-                            "operator": operator,
+                            "operator": self._target_role,
                             "source": "distance",
                             "reason": "人员离开超10秒",
                         }, ts=ts)
@@ -254,7 +279,6 @@ class SupervisionRegulation(BaseRegulation):
                     # 关闭流程
                     self._close_flow(ts, source="distance", reason="人员离开超10秒")
             else:
-                # 距离够近，重置计时
                 self._far_start_ts = -1.0
 
 
@@ -262,4 +286,4 @@ class SupervisionRegulation(BaseRegulation):
 
 def register():
     """模块注册入口"""
-    return SupervisionRegulation()
+    return SupervisionRule()

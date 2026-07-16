@@ -77,7 +77,7 @@ class PathConfig:
 
         Args:
             run_id: 运行 ID（如 '20260617_120000'）
-            module: 模块名称（如 'voice', 'mot', 'gaze'）
+            module: 模块名称（如 'voice', 'tracker', 'gaze'）
             filename: 结果文件名
 
         Returns:

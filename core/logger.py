@@ -69,7 +69,7 @@ def get_module_logger(module_name: str, result_dir: str = None) -> logging.Logge
     获取模块 logger
 
     Args:
-        module_name: 模块名称（如 'voice', 'mot', 'gaze'）
+        module_name: 模块名称（如 'voice', 'tracker', 'gaze'）
         result_dir: 结果目录（用于日志文件）
 
     Returns:
