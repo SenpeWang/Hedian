@@ -4,8 +4,23 @@
 使用 Gazelle ONNX 模型推断注视方向。
 """
 import os
+import ctypes
+
+# 预加载 cuDNN 库（LD_LIBRARY_PATH 在运行中修改对 dlopen 不生效）
+_nvidia_base = "/home/wangshengping/myconda/envs/sp_hedian/lib/python3.10/site-packages/nvidia"
+_cudnn_lib = f"{_nvidia_base}/cudnn/lib"
+_cuda_runtime_lib = f"{_nvidia_base}/cuda_runtime/lib"
+_cublas_lib = f"{_nvidia_base}/cublas/lib"
+
+for _lib_dir in [_cudnn_lib, _cuda_runtime_lib, _cublas_lib]:
+    for _f in sorted(os.listdir(_lib_dir)) if os.path.isdir(_lib_dir) else []:
+        if _f.endswith(".so") or ".so." in _f:
+            try:
+                ctypes.CDLL(os.path.join(_lib_dir, _f))
+            except OSError:
+                pass
+
 import logging
-from pathlib import Path
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -40,9 +55,12 @@ class GazeEstimator:
 
         import onnxruntime
 
-        providers = providers or ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        # 仅使用 GPU
+        providers = ["CUDAExecutionProvider"]
         sess_opts = onnxruntime.SessionOptions()
         sess_opts.log_severity_level = 3
+
+        logger.info(f"加载注视推断模型: {os.path.basename(model_path)} (provider: {providers})")
 
         self._session = onnxruntime.InferenceSession(
             model_path, sess_options=sess_opts, providers=providers
@@ -61,7 +79,7 @@ class GazeEstimator:
             else None
         )
 
-        logger.info(f"加载注视推断模型: {os.path.basename(model_path)}")
+        logger.info(f"注视推断模型加载完成, 输入: {self._input_names}, 输出: {self._output_names}")
 
     def predict(
         self,

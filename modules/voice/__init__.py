@@ -8,17 +8,15 @@
 
 使用方式：
     from modules.voice import VoiceModule
-    module = VoiceModule(bus, config, paths, aggregator)
+    module = VoiceModule(event_bus, config, paths, display_buffer)
     module.start(video_path, run_id)
 """
 from modules.voice.voice_module import VoiceModule
 from modules.voice.speech_transcriber import SpeechTranscriber
-from modules.voice.intent_classifier import IntentClassifier
-from modules.voice.result_storage import VoiceResultStorage
+from modules.voice.storage import VoiceResultStorage
 
 __all__ = [
     "VoiceModule",
     "SpeechTranscriber",
-    "IntentClassifier",
     "VoiceResultStorage",
 ]

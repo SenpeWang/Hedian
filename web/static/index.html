@@ -39,14 +39,16 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
 .intent-监护请求,.intent-监护确认{background:rgba(255,77,77,.25);color:#ff4d4d}
 .intent-核对确认{background:rgba(255,170,0,.25);color:#ffaa00}
 .intent-确认{background:rgba(0,255,136,.2);color:#00ff88}
+.intent-收到{background:rgba(0,255,136,.2);color:#00ff88}
 .intent-操作指令,.intent-操作说明,.intent-操作结束{background:rgba(0,212,255,.2);color:#00d4ff}
-.intent-实验结束{background:rgba(255,215,0,.25);color:#ffd700;font-weight:700}
+
 .intent-其他{background:rgba(107,122,144,.2);color:#6b7a90}
 .type-badge{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;margin-left:2px;vertical-align:middle;background:rgba(107,122,144,.2);color:#8899aa}
 .type-信号信号{background:rgba(255,77,77,.15);color:#ff8888}
 .type-执行信号{background:rgba(0,212,255,.15);color:#66d9ff}
 .type-核对信号{background:rgba(255,170,0,.15);color:#ffcc66}
 .type-设备信号{background:rgba(0,212,255,.15);color:#66d9ff}
+.type-确认信号{background:rgba(0,255,136,.15);color:#88ffa3}
 .kw-red{color:#ff4d4d;font-weight:700}.kw-green{color:#00ff88;font-weight:700}.kw-blue{color:#00d4ff;font-weight:700}
 
 .bottom{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:0 5px 5px;flex:2;min-height:0}
@@ -58,9 +60,10 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
 .flow-tag{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;font-weight:600;margin-left:3px}
 .flow-supervision{background:rgba(0,212,255,.2);color:#00d4ff;border:1px solid rgba(0,212,255,.3)}
 .flow-self-ticket{background:rgba(255,170,0,.2);color:#ffaa00;border:1px solid rgba(255,170,0,.3)}
+.flow-info-notice{background:rgba(0,255,204,.2);color:#00ffcc;border:1px solid rgba(0,255,204,.3)}
 .flow-active{animation:pulse 1.5s infinite}
 
-.summary-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:3px;margin-bottom:5px;text-align:center}
+.summary-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:3px;margin-bottom:5px;text-align:center}
 .summary-grid div{background:#0a0e1a;border-radius:3px;padding:3px}
 .summary-grid .val{font-size:16px;font-weight:700;color:#00d4ff}
 .summary-grid .lbl{font-size:8px;color:#6b7a90;margin-top:1px}
@@ -80,6 +83,12 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
 
 @keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.status-stats{flex:1;background:rgba(10,14,26,0.65);border-bottom:1px solid #1e2a42;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;z-index:10;backdrop-filter:blur(8px)}
+.status-stats .stat-item{display:flex;align-items:center;font-size:12px;font-weight:600;color:#e0e6f0}
+.status-stats .stat-label{color:#8899aa;margin-right:6px}
+.status-stats .stat-val{font-size:18px;font-weight:700;color:#00ff88;margin-right:2px}
+.status-stats .stat-alert{font-size:9px;color:#8899aa;margin-top:1px;font-weight:normal}
 </style>
 </head>
 <body>
@@ -92,7 +101,7 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
     <div class="progress-group" id="progressGroup" style="display:none">
       <div class="progress-row" id="prVoice">🎤 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
       <div class="progress-row" id="prMot">🎯 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
-      <div class="progress-row" id="prBehavior">✋ |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+      <div class="progress-row" id="prGaze">👁️ |░░░░░░░░░░░░░░░░░░░░| 0%</div>
     </div>
   </div>
 </div>
@@ -107,14 +116,14 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
   <div class="right">
     <div class="panel" style="flex:4;display:flex;flex-direction:row;min-height:0">
       <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-        <div class="panel-title">🎥 多目标跟踪视频</div>
+        <div class="panel-title">🎥 目标跟踪</div>
         <div class="panel-body" style="padding:0;flex:1;position:relative">
           <img id="streamImg" alt="">
           <div class="video-placeholder" id="overlay1"><div class="icon">🎥</div><div class="text">等待视频输入</div></div>
         </div>
       </div>
       <div style="flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid #1e2a42">
-        <div class="panel-title">🎥 行为检测输入视频</div>
+        <div class="panel-title">🎥 行为检测</div>
         <div class="panel-body" style="padding:0;flex:1;position:relative">
           <img id="streamImg2" alt="">
           <div class="video-placeholder" id="overlay2"><div class="icon">✋</div><div class="text">行为检测（手指指向等）待完善</div></div>
@@ -123,8 +132,15 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
     </div>
     <div class="bottom">
       <div class="panel">
-        <div class="panel-title">📊 行为检测结果 <span id="flowTag" style="display:none"></span></div>
-        <div class="panel-body" id="detBody">
+        <div class="panel-title">📊 关键事件 <span id="flowTag" style="display:none"></span></div>
+        <div class="status-stats" id="statusStats">
+          <div class="stat-item">
+            <span class="stat-label">👥 监控室人数:</span>
+            <span class="stat-val" id="peopleCountVal">--</span>人
+          </div>
+          <div class="stat-alert" id="peopleStatusAlert">就绪</div>
+        </div>
+        <div class="panel-body" id="detBody" style="flex:4">
           <div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none">
             <div style="display:flex;justify-content:space-between;align-items:center">
               <span>📏 距离: <b id="distVal">--</b> px</span>
@@ -142,6 +158,7 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
           <div class="summary-grid">
             <div><div class="val" id="msSup">0</div><div class="lbl">监护制流程</div></div>
             <div><div class="val" id="msTicket">0</div><div class="lbl">自唱票流程</div></div>
+            <div><div class="val" id="msNotice">0</div><div class="lbl">信息通报</div></div>
             <div><div class="val" id="msAvg">-</div><div class="lbl">平均分</div></div>
             <div><div class="val" id="msTotal">-</div><div class="lbl">总分</div></div>
           </div>
@@ -156,17 +173,90 @@ body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow
 
 <script>
 const $=id=>document.getElementById(id);
-let evtSource=null,segScores=[],supN=0,ticketN=0;
+let evtSource=null,segScores=[],supN=0,ticketN=0,noticeN=0;
 const audio=$('audioPlayer');
 function fmt(s){let m=Math.floor(s/60),ss=Math.floor(s%60);return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`}
+
+// 事件缓冲区和视频时间同步
+let eventBuffer = [];  // 缓冲所有事件
+let currentVideoTime = 0;  // 当前视频播放时间
+let videoTimeInitialized = false;
+
+// 获取视频当前播放时间
+function getVideoTime() {
+    const video = document.getElementById('streamImg');
+    if (video && video.currentTime) {
+        return video.currentTime;
+    }
+    // 如果没有视频时间，使用本地时间差
+    return currentVideoTime;
+}
+
+// 初始化视频时间监听
+function initVideoTimeSync() {
+    // 通过 SSE 的 clock_sync 事件获取视频时间
+    // 或者通过本地计时器模拟
+    if (!videoTimeInitialized) {
+        videoTimeInitialized = true;
+        // 每100ms检查一次缓冲区
+        setInterval(flushEventBuffer, 100);
+    }
+}
+
+// 刷新缓冲区：显示当前视频时间对应的事件
+function flushEventBuffer() {
+    // 按 localSec 排序
+    eventBuffer.sort((a, b) => (a.localSec || 0) - (b.localSec || 0));
+
+    // 显示 localSec <= currentVideoTime 的事件
+    while (eventBuffer.length > 0) {
+        const event = eventBuffer[0];
+        const eventTime = event.localSec || 0;
+
+        if (eventTime <= currentVideoTime) {
+            // 时间到了，显示事件
+            eventBuffer.shift();
+            displayEvent(event);
+        } else {
+            // 时间还没到，等待
+            break;
+        }
+    }
+}
+
+// 显示事件（原 handleEvent 逻辑）
+function displayEvent(d) {
+    try {
+        if(d.type==='voice') addVoiceItem(d);
+        else if(d.type==='tracking') addDetEvent(d);
+        else if(d.type==='gaze') addGazeEvent(d);
+        else if(d.type==='flow_start') addFlowStart(d);
+        else if(d.type==='flow_end') addFlowEnd(d);
+        else if(d.type==='segment_report') addSegCard(d);
+        else if(d.type==='segment_report_stream') addSegStream(d);
+        else if(d.type==='progress') updateProgress(d);
+        else if(d.type==='status') $('headerStatus').textContent=d.text;
+        else if(d.type==='video_frame') {
+            if(d.frame_data) {
+                $('overlay1').style.display='none';
+                $('streamImg').src='data:image/jpeg;base64,'+d.frame_data;
+                // 更新视频时间
+                currentVideoTime = d.localSec || currentVideoTime;
+            }
+        }
+    } catch(ex) { console.error(d.type, ex); }
+}
 
 function startPipeline(){
   const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
   $('statusDot').className='active';$('headerStatus').textContent='🚀 启动中…';
   segScores=[];supN=0;ticketN=0;
   $('detBody').innerHTML='<div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none"><div style="display:flex;justify-content:space-between;align-items:center"><span>📏 距离: <b id="distVal">--</b> px</span><span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span></div><div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px"><div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div></div></div>';$('textScroll').innerHTML='';$('segCards').innerHTML='';
+  $('peopleCountVal').textContent = '--';
+  $('peopleStatusAlert').textContent = '就绪';
+  $('peopleStatusAlert').style.color = '#8899aa';
   updateSummary();
-  connectSSE(function(){fetch('/start').then(r=>r.json())});
+  connectSSE(function(){fetch('/start',{method:'POST'}).then(r=>r.json())});
 }
 
 function connectSSE(onReady){
@@ -191,23 +281,41 @@ function checkRunning(){
       const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
       $('statusDot').className='active';$('headerStatus').textContent='🔄 已在运行，连接中…';
       connectSSE(null);
+      // 视频帧通过 SSE 接收，不需要独立的视频流
+      $('overlay1').style.display='none';
+      $('overlay2').style.display='none';
     }
   }).catch(()=>{});
 }
 window.onload=checkRunning;
 
 function highlightText(t){
-  t=t.replace(/请求监护/g,'<span class="kw-red">请求监护</span>');
-  t=t.replace(/(核对|核实)/g,'<span class="kw-red">$1</span>');
-  t=t.replace(/(好|确认|收到|没问题)/g,'<span class="kw-green">$1</span>');
-  t=t.replace(/(1ES\w+|T1RPA\w+|LCO\w+|RPA\w+|SM3)/g,'<span class="kw-blue">$1</span>');
+  // 1. 监护制与信息通报的核心语音关键字标红
+  const redWords = [
+    "请求监护", "请监护", "申请监护", "监护",
+    "可以执行", "REST执行", "REST 执行", "执行",
+    "核对",
+    "信息通报", "信息通告",
+    "通报完毕", "通告完毕",
+    "收到"
+  ];
+  redWords.forEach(w => {
+    const reg = new RegExp(w, 'g');
+    t = t.replace(reg, `<span class="kw-red">${w}</span>`);
+  });
+
+  // 2. 自唱票与监护制的设备九字码标红 (原为蓝色)
+  t = t.replace(/(1ES\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)/gi, '<span class="kw-red">$1</span>');
+
   return t;
 }
 
 function updateSummary(){
-  $('msSup').textContent=supN;$('msTicket').textContent=ticketN;
+  $('msSup').textContent=supN;$('msTicket').textContent=ticketN;$('msNotice').textContent=noticeN;
   if(segScores.length>0)$('msAvg').textContent=(segScores.reduce((a,b)=>a+b,0)/segScores.length).toFixed(1);
 }
+
+
 
 let lastClockSec = -1;
 let clockStuckCount = 0;
@@ -258,9 +366,16 @@ function handleEvent(d){
   }
   else if(d.type==='report')showQwenReport(d.text);
   else if(d.type==='video_start'){
-    $('overlay1').style.display='none';$('streamImg').src='/stream?'+Date.now();
-    $('overlay2').style.display='none';$('streamImg2').src='/stream2?'+Date.now();
+    // 视频帧通过 SSE 接收，不需要独立的视频流
+    $('overlay1').style.display='none';
+    $('overlay2').style.display='none';
     audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
+  }
+  else if(d.type==='video_frame'){
+    if(d.frame_data){
+      $('overlay1').style.display='none';
+      $('streamImg').src='data:image/jpeg;base64,'+d.frame_data;
+    }
   }
   else if(d.type==='done'){
     $('statusDot').className='';$('startBtn').disabled=false;$('startBtn').textContent='🔄 重新测试';
@@ -270,34 +385,47 @@ function handleEvent(d){
 }
 
 function updateProgress(d){
-  const moduleMap={voice:"prVoice",mot:"prMot",behavior:"prBehavior"};
+  const moduleMap={voice:"prVoice",tracker:"prMot",gaze:"prGaze"};
   $('progressGroup').style.display='';
-  const iconMap={voice:'🎤',mot:'🎯',gaze:'👁️',behavior:'✋'};
+  const iconMap={voice:'🎤',tracker:'🎯',gaze:'👁️'};
   const rid=moduleMap[d.label];
-  if(!rid){$('headerStatus').textContent=d.detail||d.pct+'%';return}
+  if(!rid){$('headerStatus').textContent=d.detail||(d.pct !== undefined ? d.pct.toFixed(1) : '0.0')+'%';return}
   const icon=iconMap[d.label]||'📊';
   const pct=Math.max(0,Math.min(100,d.pct||0)),bl=20,f=Math.round(pct/100*bl);
   const bar=pct>=100?'█'.repeat(bl):'█'.repeat(f)+'░'.repeat(bl-f);
   const cls=pct>=100?'tqdm-done':'tqdm-bar';
-  $(rid).innerHTML=`${icon} |<span class=${cls}>${bar}</span>| ${pct}%`;
+  $(rid).innerHTML=`${icon} |<span class=${cls}>${bar}</span>| ${pct.toFixed(1)}%`;
 }
 
 function addVoiceItem(d){
   const el=document.createElement('div');el.className='text-item';
-  let intentBadge=d.intent?`<span class="intent-badge intent-${d.intent}">${d.intent}</span>`:'';
-  let typeBadge=d.km_type?`<span class="type-badge type-${d.km_type}">${d.km_type}</span>`:'';
   let textLine=d.text?`<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlightText(d.text)}</div>`:'';
   let ctxLine='';
-  if(d.context&&d.context.mot){
-    const m=d.context.mot;
+  if(d.context&&(d.context.tracker||d.context.mot)){
+    const m=d.context.tracker||d.context.mot;
     const supLabel=m.supervision_state==='bound'?'🛡️监护中':m.supervision_state==='requesting'?'⏳请求中':'';
     if(supLabel) ctxLine=`<div style="margin-top:1px;font-size:9px;color:#8899aa">${supLabel} ${m.distance_state||''} ${m.distance_px?m.distance_px+'px':''}</div>`;
   }
-  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${intentBadge}${typeBadge}${textLine}${ctxLine}`;
+  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${textLine}${ctxLine}`;
   $('textScroll').appendChild(el);el.scrollIntoView({behavior:'smooth'});
 }
 
 function addDetEvent(d){
+  // 监控室人数更新事件
+  if(d.event === 'PEOPLE_COUNT_UPDATE') {
+    $('peopleCountVal').textContent = d.count;
+    if(d.state_alert) {
+      $('peopleStatusAlert').textContent = '⚠️ ' + d.state_alert;
+      $('peopleStatusAlert').style.color = '#ff4d4d';
+    } else {
+      $('peopleStatusAlert').textContent = '✅ 当前人数正常';
+      $('peopleStatusAlert').style.color = '#00ff88';
+    }
+    if(!d.state_alert) {
+      return; // 正常人数状态仅更新顶部固定的统计值，不推入历史事件流
+    }
+  }
+
   const body=$('detBody');
   const el=document.createElement('div');el.className='det-event';
   const st=d.state||'';
@@ -306,6 +434,15 @@ function addDetEvent(d){
   if(d.context&&d.context.voice){
     const v=d.context.voice;
     if(v.latest_text) voiceCtx=`<div style="font-size:9px;color:#8899aa;margin-top:1px">🎤 ${highlightText(v.latest_text)}</div>`;
+  }
+
+  // 监控室人数报警事件展示
+  if(d.event === 'PEOPLE_COUNT_UPDATE' && d.state_alert) {
+    el.style.borderLeftColor='#ff4d4d';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⚠️ ${d.state}</span> <span style="color:#ff4d4d;font-weight:700">警告</span>`;
+    body.appendChild(el);
+    el.scrollIntoView({behavior:'smooth'});
+    return;
   }
 
   if(st==='已监护'){
@@ -330,19 +467,18 @@ function addDetEvent(d){
 }
 
 function addGazeEvent(d){
-  const body=$('detBody');
-  const el=document.createElement('div');el.className='det-event';
+  // 凝视事件已在MOT帧上可视化，前端只记录关键事件
   const ev=d.event||'';
-  if(ev==='GAZE_ALERT'){
+  if(ev==='GAZE_ALERT'||ev==='GAZE_VIOLATION_START'){
+    const body=$('detBody');
+    const el=document.createElement('div');el.className='det-event';
     el.style.borderLeftColor='#ff4d4d';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 无人注视盘台</span> <span style="color:#ff4d4d;font-weight:700">⚠️ 告警</span> <span style="color:#6b7a90;font-size:9px">${d.heads_count||0}人在场</span>`;
-  }else{
-    el.style.borderLeftColor='#00ff88';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 注视盘台</span> ${d.roi_label||''}`;
+    const awayDur=d.away_duration||0;
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 无人注视盘台</span> <span style="color:#ff4d4d;font-weight:700">⚠️ 告警</span>`;
+    body.insertBefore(el,body.firstChild);
+    while(body.childElementCount>30)body.removeChild(body.lastChild);
+    el.scrollIntoView({behavior:'smooth'});
   }
-  body.insertBefore(el,body.firstChild);
-  while(body.childElementCount>30)body.removeChild(body.lastChild);
-  el.scrollIntoView({behavior:'smooth'});
 }
 
 function addFlowStart(d){
@@ -351,6 +487,9 @@ function addFlowStart(d){
   if(d.flow_type==='supervision'){
     el.style.borderLeftColor='#00d4ff';
     el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🛡️ 监护制流程 #${d.flowId} <span class="flow-tag flow-supervision flow-active">进行中</span>`;
+  }else if(d.flow_type==='info_notice'){
+    el.style.borderLeftColor='#00ffcc';
+    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 📢 信息通报流程 #${d.flowId} <span class="flow-tag flow-info-notice flow-active">进行中</span>`;
   }else{
     el.style.borderLeftColor='#ffaa00';
     el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🎫 自唱票 #${d.flowId} <span class="flow-tag flow-self-ticket flow-active">进行中</span>${d.parent_flow_id?' (监护制#'+d.parent_flow_id+')':''}`;
@@ -361,9 +500,9 @@ function addFlowStart(d){
 function addFlowEnd(d){
   const body=$('detBody');
   const el=document.createElement('div');el.className='det-event';
-  let icon=d.flow_type==='supervision'?'🛡️':'🎫';
-  let color=d.flow_type==='supervision'?'#00d4ff':'#ffaa00';
-  let label=d.flow_type==='supervision'?'监护制':'自唱票';
+  let icon=d.flow_type==='supervision'?'🛡️':(d.flow_type==='info_notice'?'📢':'🎫');
+  let color=d.flow_type==='supervision'?'#00d4ff':(d.flow_type==='info_notice'?'#00ffcc':'#ffaa00');
+  let label=d.flow_type==='supervision'?'监护制':(d.flow_type==='info_notice'?'信息通报':'自唱票');
   el.style.borderLeftColor=color;
   el.innerHTML=`<span class="ts">[${fmt(d.flow_end_sec)}]</span> ${icon} ${label} #${d.flowId} <span style="color:#00ff88">结束</span> (${d.flow_continue_sec||'?'}s)`;
   body.appendChild(el);
@@ -377,26 +516,28 @@ function addSegCard(d){
   const streamEl=$('stream-'+fid);
   if(streamEl){
     segScores.push(d.score||0);
-    if(d.flow_type==='supervision')supN++;else ticketN++;
+    if(d.flow_type==='supervision')supN++;else if(d.flow_type==='info_notice')noticeN++;else ticketN++;
     updateSummary();
+    let isNotice=d.flow_type==='info_notice';
     let isSup=d.flow_type==='supervision';
     let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
-    let bc=isSup?'#00d4ff':'#ffaa00';
-    let icon=isSup?'🛡️':'🎫';
-    let label=isSup?'监护制':'自唱票';
+    let bc=isSup?'#00d4ff':(isNotice?'#00ffcc':'#ffaa00');
+    let icon=isSup?'🛡️':(isNotice?'📢':'🎫');
+    let label=isSup?'监护制':(isNotice?'信息通报':'自唱票');
     streamEl.style.borderLeftColor=bc;
     streamEl.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
     delete _streamBuffers[fid];
     return;
   }
   segScores.push(d.score||0);
-  if(d.flow_type==='supervision')supN++;else ticketN++;
+  if(d.flow_type==='supervision')supN++;else if(d.flow_type==='info_notice')noticeN++;else ticketN++;
   updateSummary();
+  let isNotice=d.flow_type==='info_notice';
   let isSup=d.flow_type==='supervision';
   let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
-  let bc=isSup?'#00d4ff':'#ffaa00';
-  let icon=isSup?'🛡️':'🎫';
-  let label=isSup?'监护制':'自唱票';
+  let bc=isSup?'#00d4ff':(isNotice?'#00ffcc':'#ffaa00');
+  let icon=isSup?'🛡️':(isNotice?'📢':'🎫');
+  let label=isSup?'监护制':(isNotice?'信息通报':'自唱票');
   const card=document.createElement('div');card.className='seg-card';card.style.borderLeftColor=bc;
   card.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
   $('segCards').appendChild(card);card.scrollIntoView({behavior:'smooth'});

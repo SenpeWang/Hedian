@@ -4,15 +4,15 @@
 本手册旨在统一团队的开发标准、命名规范及协作流程，确保系统的高可维护性与稳定性。
 
 ## 2. 编码规范
-- **命名风格**: 严格采用 **camelCase (驼峰命名法)**。
+- **命名风格**: 严格采用 **snake_case (蛇形命名法)**。
   - 函数名: `onVoiceSignal`, `pushEvent`
   - 变量名: `localSec`, `globalSec`, `roleDetails`
-  - 严禁使用 `snake_case` (如 `on_voice_signal`)。
+  - 严禁使用驼峰命名法（如 `onVoiceSignal`）。
 - **类型安全**: 在 Python 代码中优先使用类型注解，提升代码可读性与健壮性。
 - **模块结构**: 遵循逻辑解耦，每个功能模块应有明确的入口与事件聚合接口。
 
 ## 3. 架构原则
-- **异步处理**: 模块间通信必须通过事件聚合器 (`EventAggregator`) 异步进行，禁止跨模块直接耦合。
+- **异步处理**: 模块间通信必须通过事件聚合器 (`DisplayBuffer / EventBus`) 异步进行，禁止跨模块直接耦合。
 - **时间同步 (Temporal Alignment)**: 
   - 所有业务事件必须包含 `localSec` 字段。
   - 聚合器基于 `globalSec` (各模块进度的最小值) 进行对齐，只有 `localSec <= globalSec` 的事件才会被推送到前端。
@@ -32,6 +32,6 @@
 3. **验证**: 检查日志，确保无 `AttributeError` 或 `ValueError`，且事件推送顺序与 `globalSec` 同步。
 
 ## 6. 常见故障排查
-- **同步问题**: 检查 `EventAggregator` 中的 `globalSec` 是否因某模块挂起而停滞。
+- **同步问题**: 检查 `DisplayBuffer / EventBus` 中的 `globalSec` 是否因某模块挂起而停滞。
 - **属性错误**: 检查方法名是否已按驼峰命名法更新。
 - **路径问题**: 始终使用相对路径 (如基于 `os.path.join(BASE_DIR, ...)` )，禁止硬编码绝对路径。

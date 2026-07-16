@@ -16,14 +16,14 @@ import concurrent.futures
 import redis
 from typing import Dict, List, Optional, Callable
 
-from core.message_bus import MessageBus, MsgType
+from core.event_bus import EventBus, EventTopic
 from evaluation.flow_data_extractor import FlowDataExtractor
 from evaluation.qwen_evaluator import QwenEvaluator
 
-logger = logging.getLogger("evaluation.pipeline")
+logger = logging.getLogger("evaluation.manager")
 
 
-class FlowEvaluationPipeline:
+class FlowEvaluationManager:
     """
     流程评估编排器
 
@@ -32,26 +32,26 @@ class FlowEvaluationPipeline:
 
     def __init__(
         self,
-        bus: MessageBus,
+        event_bus: EventBus,
         result_dir: str,
         fps: float = 30.0,
         model_path: str = None,
-        push_event_fn: Callable = None,
+        display_fn: Callable = None,
     ):
         """
         初始化评估编排器
 
         Args:
-            bus: 消息总线
+            event_bus: 消息总线
             result_dir: 结果目录
             fps: 帧率
             model_path: Qwen 模型路径
-            push_event_fn: 推送事件函数
+            display_fn: 推送事件函数
         """
-        self._bus = bus
+        self._event_bus = event_bus
         self._result_dir = result_dir
         self._fps = fps
-        self._push_event_fn = push_event_fn
+        self._display_fn = display_fn
 
         # 默认模型路径
         if model_path is None:
@@ -81,11 +81,11 @@ class FlowEvaluationPipeline:
         self._qwen_dir = os.path.join(result_dir, "qwen")
         os.makedirs(self._qwen_dir, exist_ok=True)
 
-        # 订阅 bus 事件
-        bus.subscribe(MsgType.FLOW_STARTED, self._on_flow_started)
-        bus.subscribe(MsgType.FLOW_ENDED, self._on_flow_ended)
+        # 订阅 event_bus 事件
+        event_bus.subscribe(EventTopic.FLOW_STARTED, self._on_flow_started)
+        event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
 
-        logger.info("FlowEvaluationPipeline 初始化完成")
+        logger.info("FlowEvaluationManager 初始化完成")
 
     def _on_flow_started(self, msg: dict) -> None:
         """处理流程开始事件"""
@@ -109,8 +109,8 @@ class FlowEvaluationPipeline:
         with self._lock:
             self._active_flows[flow_id] = flow
 
-        if self._push_event_fn:
-            self._push_event_fn("flow_start", {
+        if self._display_fn:
+            self._display_fn("flow_start", {
                 "localSec": ts,
                 "flowId": flow_id,
                 "flow_type": flow_type,
@@ -149,8 +149,8 @@ class FlowEvaluationPipeline:
         # 持久化流程事件
         self._save_flow_events()
 
-        if self._push_event_fn:
-            self._push_event_fn("flow_end", {
+        if self._display_fn:
+            self._display_fn("flow_end", {
                 "localSec": ts,
                 "flowId": flow_id,
                 "flow_type": flow.get("flow_type"),
@@ -177,7 +177,7 @@ class FlowEvaluationPipeline:
         end_sec = flow.get("flow_end_sec") or start_sec
 
         # 使用数据提取器加载事件
-        voice_events, mot_events = self._data_extractor.extract(
+        voice_events, tracker_events, gaze_events = self._data_extractor.extract(
             start_sec, end_sec, wait=True, timeout=300
         )
 
@@ -193,10 +193,14 @@ class FlowEvaluationPipeline:
                 round(end_sec - start_sec, 2),
             ),
             "voice_events": voice_events,
-            "mot_events": mot_events,
+            "tracker_events": tracker_events,
+            "gaze_events": gaze_events,
         }
 
-        if flow.get("flow_type") == "supervision":
+        # 保存提取并拼接的 JSON 文件到 evaluation 文件夹内
+        self._data_extractor.save_extracted_data(flow_data)
+
+        if flow.get("flow_type") in ("supervision", "info_notice"):
             flow_data["content_checklist"] = flow.get("content_checklist", {})
         if flow.get("flow_type") == "self_ticket":
             flow_data["device_code"] = flow.get("device_code", "")
@@ -223,8 +227,8 @@ class FlowEvaluationPipeline:
         eval_local_sec = flow_data.get("flow_end_sec", flow_data.get("flow_start_sec", 0))
 
         def stream_cb(text_chunk):
-            if self._push_event_fn:
-                self._push_event_fn("segment_report_stream", {
+            if self._display_fn:
+                self._display_fn("segment_report_stream", {
                     "localSec": eval_local_sec,
                     "flowId": flow_id,
                     "chunk": text_chunk,
@@ -246,7 +250,9 @@ class FlowEvaluationPipeline:
             }
 
         except Exception as e:
-            flow_type_cn = "监护制" if flow_data.get("flow_type") == "supervision" else "自唱票"
+            flow_type_cn = "监护制" if flow_data.get("flow_type") == "supervision" else (
+                "信息通报" if flow_data.get("flow_type") == "info_notice" else "自唱票"
+            )
             report = {
                 "flow_type": flow_type_cn,
                 "score": 0,
@@ -284,8 +290,8 @@ class FlowEvaluationPipeline:
 
         self._save_segment_reports()
 
-        if self._push_event_fn:
-            self._push_event_fn("segment_report", {
+        if self._display_fn:
+            self._display_fn("segment_report", {
                 "localSec": flow_data.get(
                     "flow_end_sec",
                     flow_data.get("flow_start_sec", 0),

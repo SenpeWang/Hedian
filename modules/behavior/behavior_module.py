@@ -8,8 +8,8 @@ import json
 import logging
 
 from core.base_module import BaseModule
-from core.message_bus import MessageBus, MsgType
-from core.frontend_sync import FrontendSync
+from core.event_bus import EventBus, EventTopic
+from core.display_buffer import DisplayBuffer
 from core.path_manager import PathConfig
 
 from modules.behavior.finger_screen_detector import FingerScreenDetector
@@ -26,12 +26,12 @@ class BehaviorModule(BaseModule):
 
     def __init__(
         self,
-        bus: MessageBus,
+        event_bus: EventBus,
         config: dict,
         paths: PathConfig,
-        aggregator: FrontendSync,
+        display_buffer: DisplayBuffer,
     ):
-        super().__init__(bus, config, paths, aggregator)
+        super().__init__(event_bus, config, paths, display_buffer)
         self._detector = None
         self._events = []
 
@@ -137,11 +137,10 @@ class BehaviorModule(BaseModule):
                     event["localSec"] = round(ts, 2)
                     self._events.append(event)
 
-                    # 发布到总线
-                    self.bus.publish(MsgType.BEHAVIOR_FINGER_SCREEN, event, ts=ts)
-
-                    # 推送到聚合器
-                    self.push_event("behavior", event)
+                    # 推理流：前端展示手指指屏幕行为
+                    self.push_display("behavior", event)
+                    # 事件流：通知规则状态机
+                    self.push_event(EventTopic.BEHAVIOR_FINGER_SCREEN, event, ts=ts)
 
                 # 进度日志
                 if frame_count % 300 == 0:

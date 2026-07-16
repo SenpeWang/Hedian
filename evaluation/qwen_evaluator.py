@@ -123,8 +123,58 @@ class QwenEvaluator:
             return self._build_supervision_prompt(flow_data)
         elif flow_type == "self_ticket":
             return self._build_self_ticket_prompt(flow_data)
+        elif flow_type == "info_notice":
+            return self._build_info_notice_prompt(flow_data)
         else:
             return f"评估流程类型: {flow_type}"
+
+    def _build_info_notice_prompt(self, flow_data: Dict) -> str:
+        """
+        构建信息通报评估 prompt
+
+        Args:
+            flow_data: 流程数据
+
+        Returns:
+            prompt 字符串
+        """
+        checklist = flow_data.get("content_checklist", {})
+        voice_events = flow_data.get("voice_events", [])
+        tracker_events = flow_data.get("tracker_events", [])
+        gaze_events = flow_data.get("gaze_events", [])
+
+        parts = []
+        parts.append("你是核电站三向沟通（信息通报）合规检测评审专家。请根据以下流程数据进行评估。")
+        parts.append("")
+        parts.append("## 流程信息")
+        parts.append(f"- 流程类型: 信息通报")
+        parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
+        parts.append(f"- 结束时间: {flow_data.get('flow_end_sec', 0)}s")
+        parts.append(f"- 持续时间: {flow_data.get('flow_continue_sec', 0)}s")
+        parts.append(f"- 触发来源: {flow_data.get('start_source', '未知')}")
+        parts.append("")
+        parts.append("## 内容检查清单")
+        parts.append(f"- (1) 举手并高声喊出“信息通报”或“信息通告”: {'✅' if checklist.get('raise_hand_and_shout') else '❌'}")
+        parts.append(f"- (2) 其他成员停下手中工作接受信息: {'✅' if checklist.get('others_stopped_and_listened') else '❌'}")
+        parts.append(f"- (3) 确认团队成员均予以关注: {'✅' if checklist.get('others_attended') else '❌'}")
+        parts.append(f"- (4) 发起者喊出“通报完毕”结束: {'✅' if checklist.get('shout_finished') else '❌'}")
+        parts.append(f"- (5) 收到“收到”等语音给予回应: {'✅' if checklist.get('received_acknowledged') else '❌'}")
+        parts.append("")
+        parts.append("## 语音事件")
+        for event in voice_events:
+            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+        parts.append("")
+        parts.append("## 跟踪与关注度事件")
+        for event in tracker_events:
+            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('event', '')} ({event.get('state', '')})")
+        parts.append("")
+        parts.append("## 注视告警事件")
+        for event in gaze_events:
+            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+        parts.append("")
+        parts.append("请根据以上数据，给出评分（满分10分）和评估报告。")
+
+        return "\n".join(parts)
 
     def _build_supervision_prompt(self, flow_data: Dict) -> str:
         """
@@ -138,7 +188,8 @@ class QwenEvaluator:
         """
         checklist = flow_data.get("content_checklist", {})
         voice_events = flow_data.get("voice_events", [])
-        mot_events = flow_data.get("mot_events", [])
+        tracker_events = flow_data.get("tracker_events", [])
+        gaze_events = flow_data.get("gaze_events", [])
 
         parts = []
         parts.append("你是核电站监护制合规检测评审专家。请根据以下流程数据进行评估。")
@@ -157,11 +208,15 @@ class QwenEvaluator:
         parts.append("")
         parts.append("## 语音事件")
         for event in voice_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('text', '')} ({event.get('intent', '')})")
+            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
         parts.append("")
         parts.append("## 跟踪事件")
-        for event in mot_events:
+        for event in tracker_events:
             parts.append(f"- [{event.get('localSec', 0)}s] {event.get('event', '')} ({event.get('state', '')})")
+        parts.append("")
+        parts.append("## 注视告警事件")
+        for event in gaze_events:
+            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
         parts.append("")
         parts.append("请根据以上数据，给出评分（满分10分）和评估报告。")
 

@@ -20,7 +20,7 @@ logger = logging.getLogger("web.server")
 
 def create_app(
     config: dict,
-    bus,
+    event_bus,
     registry,
     paths,
     pipeline_runner: Callable = None,
@@ -31,7 +31,7 @@ def create_app(
 
     Args:
         config: 配置字典
-        bus: 消息总线
+        event_bus: 消息总线
         registry: 制度注册表
         paths: 路径配置
         pipeline_runner: 流水线运行函数
@@ -53,7 +53,7 @@ def create_app(
     # 视频帧队列（从外部传入，与模块共享）
     if frame_queues is None:
         frame_queues = {
-            "mot": queue.Queue(maxsize=8),
+            "tracker": queue.Queue(maxsize=8),
             "behavior": queue.Queue(maxsize=8),
         }
 
@@ -62,21 +62,15 @@ def create_app(
         """首页"""
         return app.send_static_file("index.html")
 
-    @app.route("/start")
+    @app.route("/start", methods=["POST"])
     def start():
-        """启动流水线"""
-        if pipeline_state["status"] == "running":
-            return jsonify({"status": "busy"}), 409
-
-        if pipeline_runner:
-            pipeline_state["status"] = "running"
-            pipeline_state["thread"] = threading.Thread(
-                target=_run_pipeline,
-                args=(pipeline_runner, sse_handler, pipeline_state),
-                daemon=True,
-            )
-            pipeline_state["thread"].start()
-
+        """启动流水线（设置启动信号）— 仅接受 POST"""
+        import redis
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.set("pipeline:start_signal", "start", ex=3600)
+        r.close()
+        pipeline_state["status"] = "running"
+        logger.info(f"启动信号已设置，来源: {request.remote_addr}")
         return jsonify({"status": "started"})
 
     @app.route("/events")
@@ -114,7 +108,7 @@ def create_app(
     def stream():
         """MOT 视频流"""
         def generate():
-            q = frame_queues["mot"]
+            q = frame_queues["tracker"]
             while True:
                 try:
                     data = q.get(timeout=5)

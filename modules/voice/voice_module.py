@@ -7,13 +7,12 @@ import os
 import logging
 
 from core.base_module import BaseModule
-from core.message_bus import MessageBus, MsgType
-from core.frontend_sync import FrontendSync
+from core.event_bus import EventBus, EventTopic
+from core.display_buffer import DisplayBuffer
 from core.path_manager import PathConfig
 
-from modules.voice.speech_transcriber import SpeechTranscriber
-from modules.voice.intent_classifier import IntentClassifier
-from modules.voice.result_storage import VoiceResultStorage
+from modules.voice.speech_transcriber import SpeechTranscriber, process_transcribed_words
+from modules.voice.storage import VoiceResultStorage
 
 logger = logging.getLogger("module.voice")
 
@@ -27,12 +26,12 @@ class VoiceModule(BaseModule):
 
     def __init__(
         self,
-        bus: MessageBus,
+        event_bus: EventBus,
         config: dict,
         paths: PathConfig,
-        aggregator: FrontendSync,
+        display_buffer: DisplayBuffer,
     ):
-        super().__init__(bus, config, paths, aggregator)
+        super().__init__(event_bus, config, paths, display_buffer)
         self._transcriber = None
         self._intent_classifier = None
         self._result_storage = None
@@ -50,12 +49,6 @@ class VoiceModule(BaseModule):
             self._transcriber = SpeechTranscriber(
                 model_path=voice_config.get("model_path"),
                 sample_rate=voice_config.get("sample_rate", 16000),
-            )
-
-            # 初始化意图分类器
-            self._intent_classifier = IntentClassifier(
-                bus=self.bus,
-                config=voice_config,
             )
 
             # 初始化结果存储
@@ -81,23 +74,30 @@ class VoiceModule(BaseModule):
             logger.info("开始语音转文字（逐段模式）...")
 
             def on_segment_done(words, seg_start, seg_end, total_dur):
-                """每段转录完成后的回调：分类 + 推送"""
+                """每段转录完成后的回调：分句后按需推送推理流与事件流"""
                 if not words:
                     return
-                # 意图分类（逐段）
-                events = self._intent_classifier.classify(words)
-                # 推送到聚合器
+                events = process_transcribed_words(words, sentence_gap_sec=1.0)
                 for event in events:
-                    self.push_event("voice", {
-                        "localSec": event.get("localSec", 0),
-                        "text": event.get("text", ""),
-                        "intent": event.get("intent", ""),
-                        "key_moment": event.get("key_moment", ""),
-                        "km_type": event.get("km_type", ""),
-                        "device": event.get("device", ""),
-                    })
+                    local_sec = event.get("localSec", 0.0)
+                    text = event.get("text", "")
+                    key_moment = event.get("key_moment", "")
+
+                    # 1. 推送推理流：完全的实时转录结果 (只包含时间轴和转录文本)
+                    if text:
+                        self.push_display("voice", {
+                            "localSec": local_sec,
+                            "text": text
+                        })
+
+                    # 2. 推送事件流：仅核心关键字（含 localSec 和 key_moment）
+                    if key_moment:
+                        self.push_event(EventTopic.VOICE_KEY_MOMENT, {
+                            "localSec": local_sec,
+                            "key_moment": key_moment
+                        }, ts=local_sec)
+
                     self._events.append(event)
-                # 更新进度
                 self.update_progress(seg_end, total_dur)
                 logger.debug("voice segment %.1f-%.1fs: %d events", seg_start, seg_end, len(events))
 
@@ -141,8 +141,18 @@ class VoiceModule(BaseModule):
             logger.warning("没有事件可保存")
             return
 
-        # 保存关键事件
-        self._result_storage.save_key_moments(run_id, self._events)
+        # 仅保留具有有效关键时刻的事件，并且每一项格式严格为 localSec 与 key_moment (无 text 字段)
+        key_moment_events = []
+        for event in self._events:
+            key_moment = event.get("key_moment")
+            if key_moment:
+                key_moment_events.append({
+                    "localSec": event.get("localSec"),
+                    "key_moment": key_moment
+                })
+
+        # 调用存储器，解耦保存
+        self._result_storage.save_key_moments(run_id, key_moment_events)
 
         # 保存完整文本
         full_text = " ".join(event.get("text", "") for event in self._events)
