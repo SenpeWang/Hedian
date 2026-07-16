@@ -9,8 +9,8 @@ from typing import Optional, Dict, Any
 import logging
 import time
 
-from core.message_bus import MessageBus
-from core.frontend_sync import FrontendSync
+from core.event_bus import EventBus
+from core.display_buffer import DisplayBuffer
 from core.path_manager import PathConfig
 
 
@@ -25,30 +25,30 @@ class BaseModule(ABC):
     - save_results(): 保存结果
 
     使用方式：
-        module = MyModule(bus, config, paths, aggregator)
+        module = MyModule(event_bus, config, paths, display_buffer)
         module.start(video_path, run_id)
     """
 
     def __init__(
         self,
-        bus: MessageBus,
+        event_bus: EventBus,
         config: dict,
         paths: PathConfig,
-        aggregator: FrontendSync,
+        display_buffer: DisplayBuffer,
     ):
         """
         初始化模块
 
         Args:
-            bus: 消息总线
+            event_bus: 消息总线
             config: 配置字典
             paths: 路径配置
-            aggregator: 前端同步器
+            display_buffer: 前端同步器
         """
-        self.bus = bus
+        self.event_bus = event_bus
         self.config = config
         self.paths = paths
-        self.aggregator = aggregator
+        self.display_buffer = display_buffer
         self.logger = logging.getLogger(f"module.{self.module_name}")
         self._running = False
         self._start_time = 0.0
@@ -60,7 +60,7 @@ class BaseModule(ABC):
         模块名称
 
         Returns:
-            模块名称，如 'voice', 'mot', 'gaze', 'behavior'
+            模块名称，如 'voice', 'tracker', 'gaze', 'behavior'
         """
         pass
 
@@ -117,7 +117,7 @@ class BaseModule(ABC):
                 return
 
             # 2. 注册到聚合器
-            self.aggregator.update_module_time(self.module_name, 0.0)
+            self.display_buffer.update_module_time(self.module_name, 0.0)
 
             # 3. 处理视频
             self.logger.info(f"处理视频: {video_path}")
@@ -157,7 +157,7 @@ class BaseModule(ABC):
             current: 当前处理到的时间点（秒）
             total: 总时长（秒），用于计算百分比
         """
-        self.aggregator.update_module_time(self.module_name, current)
+        self.display_buffer.update_module_time(self.module_name, current)
         # 推送进度事件到前端（每秒最多一次）
         if total and total > 0:
             now = time.time()
@@ -166,19 +166,31 @@ class BaseModule(ABC):
             if now - self._last_progress_push >= 1.0:
                 self._last_progress_push = now
                 pct = min(100, int(current / total * 100))
-                self.push_event("progress", {
+                self.push_display("progress", {
                     "label": self.module_name,
                     "pct": pct,
                     "current": round(current, 1),
                     "total": round(total, 1),
                 })
 
-    def push_event(self, event_type: str, data: Dict[str, Any]) -> None:
+    def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
         """
-        推送事件到聚合器
+        推送数据到推理流（用于后端时间对齐，前端展示）
 
         Args:
-            event_type: 事件类型
-            data: 事件数据
+            event_type: 推理事件类型，如 'tracking', 'gaze', 'voice', 'behavior'
+            data: 数据内容
         """
-        self.aggregator.push_event(event_type, data)
+        self.display_buffer.push_display(event_type, data)
+
+    def push_event(self, msg_type: str, data: Dict[str, Any], ts: float = 0.0) -> None:
+        """
+        推送指令到跨进程消息流（用于模块间通信，触发模块调用）
+
+        Args:
+            msg_type: 消息类型，定义在 EventTopic 中
+            data: 消息数据内容
+            ts: 时间戳
+        """
+        self.event_bus.publish(msg_type, data, ts=ts)
+

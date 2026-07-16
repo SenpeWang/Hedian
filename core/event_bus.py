@@ -7,11 +7,11 @@
   {"type": str, "data": dict, "ts": float}
 
 用法:
-  bus = MessageBus()
-  bus.start()
-  bus.subscribe("voice.intent", my_callback)
-  bus.publish("voice.intent", {"text": "..."}, ts=1.5)
-  bus.stop()
+  event_bus = EventBus()
+  event_bus.start()
+  event_bus.subscribe("voice.intent", my_callback)
+  event_bus.publish("voice.intent", {"text": "..."}, ts=1.5)
+  event_bus.stop()
 """
 import json
 import threading
@@ -22,33 +22,31 @@ from typing import Callable, Dict, List, Optional
 
 import redis
 
-logger = logging.getLogger("core.message_bus")
+logger = logging.getLogger("core.event_bus")
 
 
-class MsgType:
+class EventTopic:
     """消息类型常量（同时也是 Redis Stream key）"""
 
-    # Voice -> Bus
-    VOICE_SEGMENT = "voice.segment"
-    VOICE_INTENT = "voice.intent"
-    VOICE_DEVICE_CODE = "voice.device_code"
+    # Voice -> EventBus
+    VOICE_KEY_MOMENT = "voice.key_moment"
 
-    # MOT -> Bus
-    MOT_SUPERVISION_REQUEST = "mot.supervision_request"
-    MOT_SUPERVISION_BOUND = "mot.supervision_bound"
-    MOT_SUPERVISION_END = "mot.supervision_end"
-    MOT_SUPERVISOR_STATUS = "mot.supervisor_status"
-    MOT_ROLE_ASSIGNED = "mot.role_assigned"
-    MOT_HAND_RAISED = "mot.hand_raised"
+    # Tracker -> EventBus
+    TRACKER_HAND_RAISED = "tracker.hand_raised"
+    TRACKER_SUPERVISION_BOUND = "tracker.supervision_bound"
+    TRACKER_SUPERVISION_END = "tracker.supervision_end"
+    TRACKER_PROXIMITY = "tracker.proximity"
+    TRACKER_ROLE_ASSIGNED = "tracker.role_assigned"
+    TRACKER_HEADCOUNT = "tracker.headcount"
 
-    # Gaze -> Bus
-    GAZE_STATUS = "gaze.status"
+    # Gaze -> EventBus
+    GAZE_ATTENTION = "gaze.attention"
     GAZE_ALERT = "gaze.alert"
 
-    # Behavior -> Bus
+    # Behavior -> EventBus
     BEHAVIOR_FINGER_SCREEN = "behavior.finger_screen"
 
-    # Regulation -> Bus
+    # Rules -> EventBus
     FLOW_STARTED = "flow.started"
     FLOW_ENDED = "flow.ended"
 
@@ -57,7 +55,7 @@ class MsgType:
     PIPELINE_PROGRESS = "pipeline.progress"
 
 
-class MessageBus:
+class EventBus:
     """
     基于 Redis Stream 的发布/订阅消息总线（跨进程，持久化）
 
@@ -69,9 +67,9 @@ class MessageBus:
     """
 
     # Stream key 前缀
-    STREAM_PREFIX = "bus:stream:"
+    STREAM_PREFIX = "module:events:"
     # 消费者组名
-    CONSUMER_GROUP = "bus_consumers"
+    CONSUMER_GROUP = "module_consumers"
 
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379,
                  redis_db: int = 0, max_workers: int = 4, consumer_name: str = None,

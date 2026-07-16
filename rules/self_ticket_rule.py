@@ -10,13 +10,12 @@
 """
 import logging
 
-from core.message_bus import MessageBus, MsgType
-from regulations.regulation_base import BaseRegulation
+from core.event_bus import EventBus, EventTopic
+from rules.rule_base import BaseRule
 
-logger = logging.getLogger("regulations.self_ticket")
+logger = logging.getLogger("rules.self_ticket")
 
-
-class SelfTicketRegulation(BaseRegulation):
+class SelfTicketRule(BaseRule):
     """自唱票制度"""
 
     def __init__(self, config: dict = None):
@@ -27,7 +26,7 @@ class SelfTicketRegulation(BaseRegulation):
             config: 配置字典
         """
         self._config = config or {}
-        self._bus = None
+        self._event_bus = None
 
         self._active = False
         self._flow_id = 0
@@ -44,12 +43,11 @@ class SelfTicketRegulation(BaseRegulation):
         """制度名称"""
         return "self_ticket"
 
-    def subscribe_events(self, bus: MessageBus) -> None:
+    def subscribe_events(self, event_bus: EventBus) -> None:
         """订阅事件"""
-        self._bus = bus
-        bus.subscribe(MsgType.VOICE_DEVICE_CODE, self._on_device_code)
-        bus.subscribe(MsgType.VOICE_INTENT, self._on_voice_intent)
-        bus.subscribe(MsgType.FLOW_ENDED, self._on_flow_ended)
+        self._event_bus = event_bus
+        event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
+        event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
 
     def is_active(self) -> bool:
         """是否有活跃流程"""
@@ -94,8 +92,8 @@ class SelfTicketRegulation(BaseRegulation):
         self._operation_executed = False
         self._confirm_closed = False
 
-        if self._bus:
-            self._bus.publish(MsgType.FLOW_STARTED, {
+        if self._event_bus:
+            self._event_bus.publish(EventTopic.FLOW_STARTED, {
                 "flow_id": self._flow_id,
                 "flow_type": "self_ticket",
                 "flow_start_sec": ts,
@@ -122,8 +120,8 @@ class SelfTicketRegulation(BaseRegulation):
             "confirm_closed": self._confirm_closed,
         }
 
-        if self._bus:
-            self._bus.publish(MsgType.FLOW_ENDED, flow, ts=ts)
+        if self._event_bus:
+            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, ts=ts)
 
         logger.info(f"流程结束 flow_id={self._flow_id} @{ts:.1f}s")
 
@@ -133,33 +131,22 @@ class SelfTicketRegulation(BaseRegulation):
 
         return flow
 
-    def _on_device_code(self, msg: dict) -> None:
-        """处理设备码事件"""
-        data = msg.get("data", {})
-        ts = data.get("localSec", msg.get("ts", 0))
-        device = data.get("device", "")
-        is_repeat = data.get("repeat", False)
-
-        # TODO: 等弹窗模块实现后，改为由弹窗信号触发
-        # 现在不自动启动自唱票
-        # if is_repeat and device:
-        #     self._start_flow(ts, device_code=device)
-
-        if self._active:
-            self._code_read = True
-
     def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音意图"""
+        """处理语音事件（仅包含 localSec 和 key_moment 字段）"""
         data = msg.get("data", {})
-        intent = data.get("intent", "")
-
-        if not self._active:
+        ts = data.get("localSec", msg.get("ts", 0.0))
+        key_moment = data.get("key_moment", "")
+        if not key_moment:
             return
 
-        if intent == "操作指令":
-            self._operation_executed = True
-        elif intent in ("确认", "核对确认"):
-            self._confirm_closed = True
+        # 判断是否为设备码 (不属于任何标准控制词且非空即判定为设备码)
+        is_device = key_moment not in ["监护", "请求监护", "执行", "核对", "收到", "信息通报", "信息通告", "通报完毕", "通告完毕"]
+        if is_device:
+            # TODO: 等弹窗模块实现后，改为由弹窗信号触发
+            # 现在不自动启动自唱票
+            # self._start_flow(ts, device_code=key_moment)
+            if self._active:
+                self._code_read = True
 
     def _on_flow_ended(self, msg: dict) -> None:
         """处理流程结束事件（监护制结束时关闭自唱票）"""
@@ -170,7 +157,6 @@ class SelfTicketRegulation(BaseRegulation):
             ts = data.get("flow_end_sec", 0)
             self._close_flow(ts, source="supervision_end")
 
-
 def register():
     """模块注册入口"""
-    return SelfTicketRegulation()
+    return SelfTicketRule()
