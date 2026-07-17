@@ -202,15 +202,12 @@ class TrackerModule(BaseModule):
                     role_assigned_done = True
                     self._roles_info = dict(self._tracker.role_map)
 
-                    ev = {
+                    roles_str = ",".join(f"{k}:{v}" for k, v in self._roles_info.items())
+                    self._events.append({
                         "localSec": round(ts, 2),
+                        "key_moment": f"角色分配,{roles_str}",
                         "source": "tracker",
-                        "event": "ROLE_ASSIGNED",
-                        "state": "不在监护制",
-                        "roles_details": self._roles_info,
-                        "frame_id": frame_count,
-                    }
-                    self._events.append(ev)
+                    })
 
                     # 推理流：前端展示角色分配结果
                     self.push_display("tracking", {
@@ -260,28 +257,19 @@ class TrackerModule(BaseModule):
                     # 记录监护请求事件
                     self._events.append({
                         "localSec": round(ts, 2),
+                        "key_moment": f"请求监护,ID:{hand_role}",
                         "source": "tracker",
-                        "event": "SUPERVISION_REQUEST",
-                        "state": "请求监护",
-                        "operator": hand_role,
-                        "roles_details": self._roles_info,
-                        "frame_id": frame_count,
                     })
 
                     # 保存关键帧
                     kf_path = kf_dir / f"hand_raise_{hand_role}_{ts:.1f}s.jpg"
                     cv2.imwrite(str(kf_path), frame)
 
-                    ev = {
+                    self._events.append({
                         "localSec": round(ts, 2),
+                        "key_moment": f"举手,ID:{hand_role}",
                         "source": "tracker",
-                        "event": "HAND_RAISED",
-                        "state": "举手",
-                        "operator": hand_role,
-                        "key_frame": str(kf_path),
-                        "roles_details": self._roles_info,
-                    }
-                    self._events.append(ev)
+                    })
 
                     logger.info(f"举手检测: {hand_role} @{ts:.1f}s")
 
@@ -334,16 +322,11 @@ class TrackerModule(BaseModule):
                                     }, ts=ts)
 
                                 # 保存事件到本地记录
-                                ev = {
+                                self._events.append({
                                     "localSec": round(ts, 2),
+                                    "key_moment": f"{state_label},{road_name}",
                                     "source": "tracker",
-                                    "event": "SUPERVISOR_STATUS",
-                                    "state": state_label,
-                                    "operator": road_name,
-                                    "distance_px": int(d),
-                                    "roles_details": self._roles_info,
-                                }
-                                self._events.append(ev)
+                                })
 
                     # 2. 人数监控（主控室人员状态）
                     people_count = len(tracks)
