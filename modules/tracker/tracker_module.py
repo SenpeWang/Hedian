@@ -356,6 +356,12 @@ class TrackerModule(BaseModule):
                             # 正常情况（>=2人），仅更新人数数据
                             self.push_display("tracking", people_data)
 
+                        # 保存事件到本地记录
+                        self._events.append({
+                            "localSec": round(ts, 2),
+                            "key_moment": f"人数:{people_count}",
+                            "source": "tracker",
+                        })
                         # 发送给跨进程消息总线（消息流），供制度层进行违规记录
                         self.push_event(EventTopic.TRACKER_HEADCOUNT, {
                             "localSec": round(ts, 2),
