@@ -500,15 +500,12 @@ def normalize_spoken_text(text):
 
 def get_key_moment(text: str, device: str) -> str:
     """根据匹配到的语音关键字返回对应的 key_moment"""
-    if device:
-        return device
-    
-    # 严格检查核心流程关键字
+    # 先检查核心流程关键字（优先于设备码）
     if "监护" in text:
         return "请求监护"
     if "执行" in text:
         return "执行"
-    if "核对" in text:
+    if "核对" in text or "核实" in text:
         return "核对"
     if "信息通报" in text:
         return "信息通报"
@@ -521,6 +518,9 @@ def get_key_moment(text: str, device: str) -> str:
     if text.strip() == "收到":
         return "收到"
         
+    # 没有匹配到关键字时才返回设备码
+    if device:
+        return device
     return ""
 
 def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
