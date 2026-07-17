@@ -177,80 +177,10 @@ let evtSource=null,segScores=[],supN=0,ticketN=0,noticeN=0;
 const audio=$('audioPlayer');
 function fmt(s){let m=Math.floor(s/60),ss=Math.floor(s%60);return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`}
 
-// 事件缓冲区和视频时间同步
-let eventBuffer = [];  // 缓冲所有事件
-let currentVideoTime = 0;  // 当前视频播放时间
-let videoTimeInitialized = false;
-
-// 获取视频当前播放时间
-function getVideoTime() {
-    const video = document.getElementById('streamImg');
-    if (video && video.currentTime) {
-        return video.currentTime;
-    }
-    // 如果没有视频时间，使用本地时间差
-    return currentVideoTime;
-}
-
-// 初始化视频时间监听
-function initVideoTimeSync() {
-    // 通过 SSE 的 clock_sync 事件获取视频时间
-    // 或者通过本地计时器模拟
-    if (!videoTimeInitialized) {
-        videoTimeInitialized = true;
-        // 每100ms检查一次缓冲区
-        setInterval(flushEventBuffer, 100);
-    }
-}
-
-// 刷新缓冲区：显示当前视频时间对应的事件
-function flushEventBuffer() {
-    // 按 localSec 排序
-    eventBuffer.sort((a, b) => (a.localSec || 0) - (b.localSec || 0));
-
-    // 显示 localSec <= currentVideoTime 的事件
-    while (eventBuffer.length > 0) {
-        const event = eventBuffer[0];
-        const eventTime = event.localSec || 0;
-
-        if (eventTime <= currentVideoTime) {
-            // 时间到了，显示事件
-            eventBuffer.shift();
-            displayEvent(event);
-        } else {
-            // 时间还没到，等待
-            break;
-        }
-    }
-}
-
-// 显示事件（原 handleEvent 逻辑）
-function displayEvent(d) {
-    try {
-        if(d.type==='voice') addVoiceItem(d);
-        else if(d.type==='tracking') addDetEvent(d);
-        else if(d.type==='gaze') addGazeEvent(d);
-        else if(d.type==='flow_start') addFlowStart(d);
-        else if(d.type==='flow_end') addFlowEnd(d);
-        else if(d.type==='segment_report') addSegCard(d);
-        else if(d.type==='segment_report_stream') addSegStream(d);
-        else if(d.type==='progress') updateProgress(d);
-        else if(d.type==='status') $('headerStatus').textContent=d.text;
-        else if(d.type==='video_frame') {
-            if(d.frame_data) {
-                $('overlay1').style.display='none';
-                $('streamImg').src='data:image/jpeg;base64,'+d.frame_data;
-                // 更新视频时间
-                currentVideoTime = d.localSec || currentVideoTime;
-            }
-        }
-    } catch(ex) { console.error(d.type, ex); }
-}
-
 function startPipeline(){
   const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
   $('statusDot').className='active';$('headerStatus').textContent='🚀 启动中…';
-  segScores=[];supN=0;ticketN=0;
+  segScores=[];supN=0;ticketN=0;noticeN=0;
   $('detBody').innerHTML='<div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none"><div style="display:flex;justify-content:space-between;align-items:center"><span>📏 距离: <b id="distVal">--</b> px</span><span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span></div><div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px"><div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div></div></div>';$('textScroll').innerHTML='';$('segCards').innerHTML='';
   $('peopleCountVal').textContent = '--';
   $('peopleStatusAlert').textContent = '就绪';
@@ -263,10 +193,11 @@ function connectSSE(onReady){
   if(evtSource){evtSource.close();evtSource=null}
   evtSource=new EventSource('/events');
   evtSource.onopen=function(){
-    // SSE 连接后立即启动视频流
-    $('overlay1').style.display='none';$('streamImg').src='/stream?'+Date.now();
-    $('overlay2').style.display='none';$('streamImg2').src='/stream2?'+Date.now();
-    
+    // 视频帧统一由 SSE 的 video_frame 事件驱动（已按 global_sec 对齐），
+    // 不再使用 /stream MJPEG 实时流，避免两条链路互相覆盖导致画面回跳。
+    $('overlay1').style.display='none';
+    $('overlay2').style.display='none';
+
     // 连接成功后，更新 headerStatus 为正常的推理中状态，避免卡在“已在运行，连接中…”
     $('headerStatus').textContent = '⏳ 推理中...';
     const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
@@ -275,7 +206,7 @@ function connectSSE(onReady){
     audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
     if(onReady)onReady();
   };
-  evtSource.onmessage=function(e){try{handleEvent(JSON.parse(e.data));if(JSON.parse(e.data).type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
+  evtSource.onmessage=function(e){try{const d=JSON.parse(e.data);handleEvent(d);if(d.type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
   evtSource.onerror=function(){};
 }
 
@@ -411,13 +342,7 @@ function updateProgress(d){
 function addVoiceItem(d){
   const el=document.createElement('div');el.className='text-item';
   let textLine=d.text?`<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlightText(d.text)}</div>`:'';
-  let ctxLine='';
-  if(d.context&&(d.context.tracker||d.context.mot)){
-    const m=d.context.tracker||d.context.mot;
-    const supLabel=m.supervision_state==='bound'?'🛡️监护中':m.supervision_state==='requesting'?'⏳请求中':'';
-    if(supLabel) ctxLine=`<div style="margin-top:1px;font-size:9px;color:#8899aa">${supLabel} ${m.distance_state||''} ${m.distance_px?m.distance_px+'px':''}</div>`;
-  }
-  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${textLine}${ctxLine}`;
+  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${textLine}`;
   $('textScroll').appendChild(el);el.scrollIntoView({behavior:'smooth'});
 }
 
@@ -456,17 +381,23 @@ function addDetEvent(d){
     return;
   }
 
-  if(st==='已监护'){
+  if(st==='监护中'){
     el.style.borderLeftColor='#00d4ff';
     el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">🛡️ 监护中</span> ${roles} <span class="flow-tag flow-supervision flow-active">进行中</span>${voiceCtx}`;
     body.appendChild(el);
     const tag=$('flowTag');tag.className='flow-tag flow-supervision flow-active';tag.textContent='🛡️ 监护制进行中';tag.style.display='';
-    const dd=$('distDashboard');dd.style.display='';
+    const dd=$('distDashboard');dd.style.display='';updateDistDash(d.distance_px,'#00ff88');
+  }else if(st==='接近中'){
+    el.style.borderLeftColor='#ffaa00';
+    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⏳ 接近中</span> ${roles}${voiceCtx}`;
+    body.appendChild(el);
+    const dd=$('distDashboard');dd.style.display='';updateDistDash(d.distance_px,'#ffaa00');
   }else if(st==='未监护'){
     el.style.borderLeftColor='#ffaa00';
     el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> ⚠️ 未监护 ${roles}${voiceCtx}`;
     body.insertBefore(el,body.firstChild);
     while(body.childElementCount>30)body.removeChild(body.lastChild);
+    updateDistDash(d.distance_px,'#ff4d4d');
   }else if(st==='不在监护制'){
     el.style.borderLeftColor='#ff4d4d';
     el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⚠️ 不在监护制</span> ${roles}${voiceCtx}`;
@@ -475,6 +406,15 @@ function addDetEvent(d){
     $('distDashboard').style.display='none';
   }
   el.scrollIntoView({behavior:'smooth'});
+}
+
+function updateDistDash(px,color){
+  if(px===undefined||px===null)return;
+  $('distVal').textContent=px;
+  const st=$('distStatus');st.textContent=px+' px';st.style.background=color;st.style.color='#0a0e1a';
+  const ratio=Math.max(0,Math.min(1,px/560));
+  $('distBar').style.width=(ratio*100).toFixed(0)+'%';
+  $('distBar').style.background=color;
 }
 
 function addGazeEvent(d){

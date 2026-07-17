@@ -49,6 +49,8 @@ class VoiceModule(BaseModule):
             self._transcriber = SpeechTranscriber(
                 model_path=voice_config.get("model_path"),
                 sample_rate=voice_config.get("sample_rate", 16000),
+                device="cuda",
+                torch_dtype=voice_config.get("torch_dtype"),
             )
 
             # 初始化结果存储
@@ -89,6 +91,8 @@ class VoiceModule(BaseModule):
                             "localSec": local_sec,
                             "text": text
                         })
+                        # 写入最新语音快照，供追踪事件上下文展示
+                        self.display_buffer.update_module_snapshot("voice", {"latest_text": text})
 
                     # 2. 推送事件流：仅核心关键字（含 localSec 和 key_moment）
                     if key_moment:
