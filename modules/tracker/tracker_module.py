@@ -44,6 +44,7 @@ class TrackerModule(BaseModule):
         self._result_storage = None
         self._events = []
         self._roles_info = {}
+        self._last_supervision_states = {}
 
     @property
     def module_name(self) -> str:
@@ -304,13 +305,16 @@ class TrackerModule(BaseModule):
                                     state_label = "未监护"
 
                                 # 判定状态是否发生改变（作为消息流的关键事件）
+                                last_state = self._last_supervision_states.get(road_name, None)
                                 is_state_changed = (state_label != last_state)
+                                self._last_supervision_states[road_name] = state_label
 
                                 event_data = {
                                     "localSec": round(ts, 2),
                                     "event": "SUPERVISOR_STATUS",
                                     "state": state_label,
                                     "operator": road_name,
+                                    "distance_px": int(d),
                                     "roles_details": self._roles_info,
                                 }
 
@@ -325,6 +329,7 @@ class TrackerModule(BaseModule):
                                         "localSec": round(ts, 2),
                                         "state": state_label,
                                         "operator": road_name,
+                                        "distance_px": int(d),
                                     }, ts=ts)
 
                                 # 保存事件到本地记录
@@ -334,10 +339,10 @@ class TrackerModule(BaseModule):
                                     "event": "SUPERVISOR_STATUS",
                                     "state": state_label,
                                     "operator": road_name,
+                                    "distance_px": int(d),
                                     "roles_details": self._roles_info,
                                 }
                                 self._events.append(ev)
-
 
                     # 2. 人数监控（主控室人员状态）
                     people_count = len(tracks)
