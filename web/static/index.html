@@ -207,7 +207,20 @@ function connectSSE(onReady){
     if(onReady)onReady();
   };
   evtSource.onmessage=function(e){try{const d=JSON.parse(e.data);handleEvent(d);if(d.type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
-  evtSource.onerror=function(){};
+  evtSource.onerror=function(){
+    // SSE连接断开,重置状态为就绪
+    $('statusDot').className='';
+    $('headerStatus').textContent='就绪';
+    $('startBtn').disabled=false;$('startBtn').textContent='👤 开始测试';
+    setTimeout(function(){
+      if(evtSource)return;
+      fetch('/status').then(r=>r.json()).then(function(d){
+        if(d.pipeline==='idle'){
+          $('progressGroup').style.display='none';
+        }
+      }).catch(function(){});
+    },3000);
+  };
 }
 
 // 页面加载时检查流水线是否已在运行
