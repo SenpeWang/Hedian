@@ -255,6 +255,9 @@ class SpeechTranscriber:
             kwargs = {
                 "dtype": torch_type,
                 "device_map": device_map,
+                "num_beams": 5,
+                "do_sample": False,
+                "repetition_penalty": 1.1,
                 "max_new_tokens": 4096,
                 "max_inference_batch_size": 8,
             }
