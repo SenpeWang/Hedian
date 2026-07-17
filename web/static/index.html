@@ -266,6 +266,12 @@ function connectSSE(onReady){
     // SSE 连接后立即启动视频流
     $('overlay1').style.display='none';$('streamImg').src='/stream?'+Date.now();
     $('overlay2').style.display='none';$('streamImg2').src='/stream2?'+Date.now();
+    
+    // 连接成功后，更新 headerStatus 为正常的推理中状态，避免卡在“已在运行，连接中…”
+    $('headerStatus').textContent = '⏳ 推理中...';
+    const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
+    $('statusDot').className='active';
+
     audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
     if(onReady)onReady();
   };
@@ -330,6 +336,11 @@ function handleEvent(d){
           }
       } else {
           clockStuckCount = 0;
+          
+          // 如果音视频时间偏差大于 1.5 秒，强制进行音频寻道同步，确保页面重连/刷新时音频正确对齐当前推理进度
+          if (Math.abs(audio.currentTime - d.localSec) > 1.5) {
+              audio.currentTime = d.localSec;
+          }
           
           if (audio.paused && d.localSec > 0.1) {
               let p = audio.play();
