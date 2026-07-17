@@ -272,38 +272,26 @@ function updateSummary(){
 
 
 
-let lastClockSec = -1;
-let clockStuckCount = 0;
 
 function handleEvent(d){
   try{
   if(d.type==="batch"){
+    // 用 batch.globalSec 同步音频
+    if(typeof lastClockSec==='undefined'){lastClockSec=-1;}
+    if(d.globalSec!==lastClockSec){
+      lastClockSec=d.globalSec;
+      if(Math.abs(audio.currentTime-d.globalSec)>1.5){
+        audio.currentTime=d.globalSec;
+      }
+      if(audio.paused&&d.globalSec>0.1){
+        let p=audio.play();
+        if(p!==undefined)p.catch(function(){});
+      }
+    }
     for(const ev of d.events){
       handleEvent(ev);
     }
     return;
-  }
-  if(d.type==='clock_sync'){
-      if (d.localSec === lastClockSec) {
-          clockStuckCount++;
-          if (clockStuckCount > 5 && !audio.paused) {
-              audio.pause();
-          }
-      } else {
-          clockStuckCount = 0;
-          
-          // 如果音视频时间偏差大于 1.5 秒，强制进行音频寻道同步，确保页面重连/刷新时音频正确对齐当前推理进度
-          if (Math.abs(audio.currentTime - d.localSec) > 1.5) {
-              audio.currentTime = d.localSec;
-          }
-          
-          if (audio.paused && d.localSec > 0.1) {
-              let p = audio.play();
-              if(p !== undefined) p.catch(()=>{});
-          }
-          lastClockSec = d.localSec;
-      }
-      return;
   }
   if(d.type==='voice')addVoiceItem(d);
   else if(d.type==='tracking')addDetEvent(d);
