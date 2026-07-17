@@ -500,7 +500,8 @@ def normalize_spoken_text(text):
 
 def get_key_moment(text: str, device: str) -> str:
     """根据匹配到的语音关键字返回对应的 key_moment"""
-    # 先检查核心流程关键字（优先于设备码）
+    if device:
+        return device
     if "监护" in text:
         return "请求监护"
     if "执行" in text:
@@ -517,14 +518,10 @@ def get_key_moment(text: str, device: str) -> str:
         return "通告完毕"
     if text.strip() == "收到":
         return "收到"
-        
-    # 没有匹配到关键字时才返回设备码
-    if device:
-        return device
     return ""
 
 def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
-    """对字/词按停顿切分出段落，并提取设备码与关键行为"""
+    """对字/词按停顿切分出段落，并提取关键事件"""
     if not words:
         return []
 
@@ -557,13 +554,29 @@ def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) 
         m = NORM_DEVICE_PATTERN.search(norm_text)
         device = m.group(1) if m else ""
 
-        # 关键时刻
-        key_moment = get_key_moment(text, device)
+        # 收集所有匹配的关键字
+        found_keywords = set()
+        if device:
+            found_keywords.add(device)
+        for kw, label in [("监护", "请求监护"), ("执行", "执行"), ("核对", "核对"), ("核实", "核对"),
+                          ("信息通报", "信息通报"), ("信息通告", "信息通告"),
+                          ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕")]:
+            if kw in text:
+                found_keywords.add(label)
+        if text.strip() == "收到":
+            found_keywords.add("收到")
 
-        events.append({
-            "localSec": audio_ts,
-            "text": text,
-            "key_moment": key_moment or ""
-        })
+        # 每句先推完整文本（仅第一个事件带 text）
+        first = True
+        for km in found_keywords:
+            ev = {"localSec": audio_ts, "key_moment": km}
+            if first:
+                ev["text"] = text
+                first = False
+            events.append(ev)
+
+        # 如果没有匹配任何关键字，也推文本
+        if not found_keywords:
+            events.append({"localSec": audio_ts, "text": text, "key_moment": ""})
 
     return events
