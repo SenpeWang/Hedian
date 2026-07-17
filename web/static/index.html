@@ -203,7 +203,7 @@ function connectSSE(onReady){
     const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
     $('statusDot').className='active';
 
-    audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
+    audio.src='/audio?t='+Date.now();audio.load();audio.currentTime=0;audio.play().catch(()=>{});
     if(onReady)onReady();
   };
   evtSource.onmessage=function(e){try{const d=JSON.parse(e.data);handleEvent(d);if(d.type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
@@ -311,7 +311,7 @@ function handleEvent(d){
     // 视频帧通过 SSE 接收，不需要独立的视频流
     $('overlay1').style.display='none';
     $('overlay2').style.display='none';
-    audio.src='/audio';audio.load();audio.currentTime=0;audio.play().catch(()=>{});
+    audio.src='/audio?t='+Date.now();audio.load();audio.currentTime=0;audio.play().catch(()=>{});
   }
   else if(d.type==='video_frame'){
     if(d.frame_data){
