@@ -175,6 +175,15 @@ class ModuleSync:
         while not self._stop_event.is_set():
             loop_start = time.time()
             try:
+                # 流水线结束检测：main 进程在 join 完所有模块进程后，
+                # 会设置 pipeline:status=done。此时各模块已写完全部事件，
+                # 直接 flush 剩余事件并推送终止信号，让前端恢复交互。
+                if self._redis.get("pipeline:status") == "done":
+                    logger.info("检测到 pipeline:status=done，刷新剩余事件并推送终止信号")
+                    self._flush_remaining_events()
+                    self.push_sentinel()
+                    break
+
                 global_sec = self._compute_global_sec()
                 if global_sec != float("inf"):
                     logger.debug(f"计算全局时钟: global_sec={global_sec:.2f}")
