@@ -315,18 +315,11 @@ class SpeechTranscriber:
             # 滑动窗口分段转录（与备份版本一致：window=25, overlap=5）
             words = self._transcribe_segmented(
                 audio, sr,
-                window_sec=15, overlap_sec=5,
+                window_sec=20, overlap_sec=5,
                 start_time=0, end_time=effective_end,
                 progress_callback=progress_callback,
                 on_segment=on_segment,
             )
-
-            # 移除幻觉
-            words = remove_hallucinations(words)
-
-            # 应用纠错规则
-            for w in words:
-                w["word"] = apply_corrections(w["word"])
 
             logger.info(f"转录完成，共 {len(words)} 个词")
             return words
@@ -339,72 +332,65 @@ class SpeechTranscriber:
         self,
         audio: np.ndarray,
         sr: int,
-        window_sec: float = 25,
+        window_sec: float = 15,
         overlap_sec: float = 5,
         start_time: float = 0,
         end_time: float = None,
         progress_callback=None,
         on_segment=None,
     ) -> List[Dict]:
-        """滑动窗口分段转录"""
+        """滑动窗口分段转录(工业标准:先纠错去重,只推增量)"""
         if end_time is None:
             end_time = len(audio) / sr
 
         step = window_sec - overlap_sec
         if step <= 0:
-            raise ValueError("window_sec 必须大于 overlap_sec")
+            raise ValueError("window_sec must be greater than overlap_sec")
 
-        # 预生成窗口
         windows = []
         t = float(start_time)
         while t < end_time:
-            end = min(t + window_sec, end_time)
-            windows.append((t, end))
+            cur_end = min(t + window_sec, end_time)
+            windows.append((t, cur_end))
             t += step
 
-        # 尾段太短则合并到前一段
         if len(windows) >= 2:
             last_s, last_e = windows[-1]
             if (last_e - last_s) < 6.0:
-                prev_s, _ = windows[-2]
+                prev_s, prev_e = windows[-2]
                 windows[-2] = (prev_s, end_time)
                 windows.pop()
 
         all_words = []
+        last_truncated_end = 0.0
 
-        for i, (t, end) in enumerate(windows, start=1):
-            # 更新进度
+        for i, (t, cur_end) in enumerate(windows, start=1):
             if progress_callback:
                 progress_callback(t, end_time)
 
-            # 切片音频
             start_sample = int(t * sr)
-            end_sample = min(int(end * sr), len(audio))
-            segment_audio = audio[start_sample:end_sample]
+            end_sample = min(int(cur_end * sr), len(audio))
+            seg_audio = audio[start_sample:end_sample]
 
-            # 跳过过短或静音段
-            if len(segment_audio) < sr * 0.5:
+            if len(seg_audio) < sr * 0.5:
                 continue
-            seg_rms = np.sqrt(np.mean(segment_audio ** 2))
+            seg_rms = np.sqrt(np.mean(seg_audio ** 2))
             if seg_rms < 0.002:
-                logger.debug(f"跳过静音段 {i}/{len(windows)} ({t:.1f}s-{end:.1f}s)")
                 continue
 
-            # 转录
             try:
                 seg_words = []
                 results = self._model.transcribe(
-                    audio=(segment_audio, sr),
+                    audio=(seg_audio, sr),
                     language="Chinese",
                     return_time_stamps=bool(self.aligner_path and os.path.exists(self.aligner_path)),
                 )
-                normalized = normalize_qwen_results(results, duration_seconds=len(segment_audio)/sr)
+                normalized = normalize_qwen_results(results, duration_seconds=len(seg_audio)/sr)
                 for seg in normalized:
                     txt = seg.get("text", "").strip()
-                    # 繁体转简体
                     try:
                         from opencc import OpenCC
-                        cc = OpenCC('t2s')
+                        cc = OpenCC("t2s")
                         txt = cc.convert(txt)
                     except ImportError:
                         pass
@@ -423,17 +409,14 @@ class SpeechTranscriber:
                             ]
                         seg_words.append(seg_item)
 
-                # 重叠区去重：基于词级时间戳的中点切分
+                # overlap dedup
                 if i > 1 and all_words:
                     mid = t + overlap_sec / 2
-
-                    # 前段：保留 mid 之前的内容
                     trimmed_prev = []
                     for w in all_words:
                         if w["end"] <= mid:
                             trimmed_prev.append(w)
                         elif "words" in w and w["words"]:
-                            # 有细粒度词级时间戳：按中点精确切分
                             kept = [wd for wd in w["words"] if wd["start"] < mid]
                             if kept:
                                 trimmed_prev.append({
@@ -445,7 +428,6 @@ class SpeechTranscriber:
                         elif w["start"] < mid:
                             trimmed_prev.append(w)
 
-                    # 当前段：保留 mid 之后的内容
                     trimmed_cur = []
                     for w in seg_words:
                         if w["start"] >= mid:
@@ -464,16 +446,23 @@ class SpeechTranscriber:
                 else:
                     all_words.extend(seg_words)
 
-                # 子窗口级进度更新（每段转录后立即报告）
                 if progress_callback:
-                    progress_callback(end, end_time)
+                    progress_callback(cur_end, end_time)
 
-                # 逐段回调：转录一段就推一段
-                if on_segment and seg_words:
-                    on_segment(seg_words, t, end, end_time)
+                # apply corrections first, then push
+                for w in all_words:
+                    w["word"] = apply_corrections(w["word"])
+
+                all_words = remove_hallucinations(all_words)
+
+                if on_segment:
+                    new_words = [w for w in all_words if w["end"] > last_truncated_end]
+                    if new_words:
+                        on_segment(new_words, t, cur_end, end_time)
+                    last_truncated_end = max(last_truncated_end, cur_end)
 
             except Exception as e:
-                logger.warning(f"片段转录失败 ({t:.1f}-{end:.1f}s): {e}")
+                logger.warning("segment failed (%.1f-%.1fs): %s", t, cur_end, e)
 
         return all_words
 
