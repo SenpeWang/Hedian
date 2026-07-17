@@ -31,7 +31,7 @@ class SSEHandler:
         Returns:
             客户端队列
         """
-        client_queue = queue.Queue(maxsize=256)
+        client_queue = queue.Queue(maxsize=1024)
         with self._lock:
             self._clients.append(client_queue)
         logger.info(f"添加 SSE 客户端，当前 {len(self._clients)} 个")
