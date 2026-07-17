@@ -377,7 +377,7 @@ class TrackerModule(BaseModule):
 
 
                 # 可视化：在帧上画跟踪结果 + 距离 + 注视结果
-                if frame_count % 2 == 0:
+                if frame_count % 6 == 0:
                     try:
                         vis_frame = frame.copy()
                         # 1. 画跟踪框和角色
@@ -398,7 +398,7 @@ class TrackerModule(BaseModule):
                                         cv2.putText(vis_frame, f"{_rn} {int(d)}px", mid, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
                         # 3. 画注视结果（ROI + 头部框 + 注视线 + 告警）
                         vis_frame = self._draw_gaze(vis_frame, frame_count, ts, tracks)
-                        _, jpeg = cv2.imencode(".jpg", vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
+                        _, jpeg = cv2.imencode(".jpg", vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 50])
 
                         # 通过 DisplayBuffer 推送视频帧（与其他事件对齐）
                         import base64
