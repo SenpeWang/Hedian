@@ -4,6 +4,7 @@
 继承 BaseModule，实现统一接口。
 """
 import os
+import json
 import logging
 import numpy as np
 
