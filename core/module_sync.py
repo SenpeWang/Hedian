@@ -189,7 +189,6 @@ class ModuleSync:
                     logger.debug(f"计算全局时钟: global_sec={global_sec:.2f}")
                     self._push_events_up_to(global_sec)
                     self._redis.set(self._KEY_CLOCK, str(global_sec), ex=10)
-                    self._do_push({"type": "clock_sync", "localSec": global_sec})
             except Exception as e:
                 logger.error(f"聚合循环中发生异常: {e}")
 
