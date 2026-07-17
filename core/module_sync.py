@@ -189,7 +189,7 @@ class ModuleSync:
                     logger.debug(f"计算全局时钟: global_sec={global_sec:.2f}")
                     self._push_events_up_to(global_sec)
                     self._redis.set(self._KEY_CLOCK, str(global_sec), ex=10)
-                    self._do_push({"type": "clock_sync", "localSec": global_sec})
+                    # clock_sync 已包含在 batch 中
             except Exception as e:
                 logger.error(f"聚合循环中发生异常: {e}")
 
@@ -235,11 +235,12 @@ class ModuleSync:
                     self._redis.xdel(self._KEY_EVENT_STREAM, entry_id)
 
             if events_to_push:
-                logger.info(f"推送对齐事件: {len(events_to_push)} 个, global_sec={global_sec:.2f}")
                 context = self._get_context()
                 for event in events_to_push:
                     event["context"] = context
-                    self._do_push(event)
+                batch = {"type": "batch", "events": events_to_push, "globalSec": global_sec}
+                self._do_push(batch)
+                logger.info(f"批推送: {len(events_to_push)} 个事件, global_sec={global_sec:.2f}")
 
         except Exception as e:
             logger.error(f"对齐并推送事件失败: {e}")
