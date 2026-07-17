@@ -161,7 +161,7 @@ def create_app(
 
         status_val = pipeline_state["status"]
         # 如果 Redis 中 pipeline:status 不存在或 done，代表没有活跃推理，重置为空闲
-        if redis_status is None or redis_status == "done":
+        if redis_status == "done":
             status_val = "idle"
             pipeline_state["status"] = "idle"
 
