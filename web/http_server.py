@@ -67,6 +67,7 @@ def create_app(
         """启动流水线（设置启动信号）— 仅接受 POST"""
         import redis
         r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        r.delete("pipeline:status")  # 启动新推理时，清除上一次的完成标志
         r.set("pipeline:start_signal", "start", ex=3600)
         r.close()
         pipeline_state["status"] = "running"
@@ -153,8 +154,19 @@ def create_app(
     @app.route("/status")
     def status():
         """获取状态"""
+        import redis
+        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        redis_status = r.get("pipeline:status")
+        r.close()
+
+        status_val = pipeline_state["status"]
+        # 如果 Redis 中 pipeline:status 是 done，代表推理已经全部跑完，重置为空闲
+        if redis_status == "done":
+            status_val = "idle"
+            pipeline_state["status"] = "idle"
+
         return jsonify({
-            "pipeline": pipeline_state["status"],
+            "pipeline": status_val,
             "sse_clients": sse_handler.get_client_count(),
         })
 
