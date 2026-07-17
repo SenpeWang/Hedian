@@ -259,6 +259,12 @@ let clockStuckCount = 0;
 
 function handleEvent(d){
   try{
+  if(d.type==="batch"){
+    for(const ev of d.events){
+      handleEvent(ev);
+    }
+    return;
+  }
   if(d.type==='clock_sync'){
       if (d.localSec === lastClockSec) {
           clockStuckCount++;
