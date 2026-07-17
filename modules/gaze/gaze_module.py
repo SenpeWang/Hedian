@@ -236,7 +236,8 @@ class GazeModule:
                 # 记录“没有看盘台持续XX秒”异常状态到 _events， localSec 采用事件开始时间
                 self._events.append({
                     "localSec": round(self._away_start_ts, 2),
-                    "key_moment": f"没有看盘台持续{round(duration, 1)}秒"
+                    "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
+                    "source": "gaze"
                 })
                 # 推送到推理流
                 if self._display_fn:
@@ -277,7 +278,8 @@ class GazeModule:
                 if not result.has_turned:
                     self._events.append({
                         "localSec": round(self._attn_window_start, 2),
-                        "key_moment": "没有给予关注"
+                        "key_moment": "没有给予关注",
+                        "source": "gaze"
                     })
                 # 发布到消息总线（供 info_notice_rule 规则订阅判定）
                 if self._event_bus:
