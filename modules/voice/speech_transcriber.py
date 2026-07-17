@@ -312,10 +312,10 @@ class SpeechTranscriber:
 
             logger.info(f"音频时长: {audio_duration:.1f}s, 有效时长: {effective_end:.1f}s")
 
-            # 滑动窗口分段转录（与备份版本一致：window=25, overlap=5）
-            words = self._transcribe_segmented(
+            # 分段转录
+            words = self._transcribe_segments(
                 audio, sr,
-                window_sec=20, overlap_sec=5,
+                window_sec=20,
                 start_time=0, end_time=effective_end,
                 progress_callback=progress_callback,
                 on_segment=on_segment,
@@ -328,41 +328,28 @@ class SpeechTranscriber:
             logger.error(f"转录失败: {e}", exc_info=True)
             return []
 
-    def _transcribe_segmented(
+    def _transcribe_segments(
         self,
         audio: np.ndarray,
         sr: int,
-        window_sec: float = 15,
-        overlap_sec: float = 5,
+        window_sec: float = 20,
         start_time: float = 0,
         end_time: float = None,
         progress_callback=None,
         on_segment=None,
     ) -> List[Dict]:
-        """滑动窗口分段转录(工业标准:先纠错去重,只推增量)"""
+        """segment transcription, no overlap"""
         if end_time is None:
             end_time = len(audio) / sr
-
-        step = window_sec - overlap_sec
-        if step <= 0:
-            raise ValueError("window_sec must be greater than overlap_sec")
 
         windows = []
         t = float(start_time)
         while t < end_time:
             cur_end = min(t + window_sec, end_time)
             windows.append((t, cur_end))
-            t += step
-
-        if len(windows) >= 2:
-            last_s, last_e = windows[-1]
-            if (last_e - last_s) < 6.0:
-                prev_s, prev_e = windows[-2]
-                windows[-2] = (prev_s, end_time)
-                windows.pop()
+            t += window_sec
 
         all_words = []
-        last_truncated_end = 0.0
 
         for i, (t, cur_end) in enumerate(windows, start=1):
             if progress_callback:
@@ -379,13 +366,14 @@ class SpeechTranscriber:
                 continue
 
             try:
-                seg_words = []
                 results = self._model.transcribe(
                     audio=(seg_audio, sr),
                     language="Chinese",
                     return_time_stamps=bool(self.aligner_path and os.path.exists(self.aligner_path)),
                 )
                 normalized = normalize_qwen_results(results, duration_seconds=len(seg_audio)/sr)
+
+                seg_words = []
                 for seg in normalized:
                     txt = seg.get("text", "").strip()
                     try:
@@ -409,63 +397,23 @@ class SpeechTranscriber:
                             ]
                         seg_words.append(seg_item)
 
-                # overlap dedup
-                if i > 1 and all_words:
-                    mid = t + overlap_sec / 2
-                    trimmed_prev = []
-                    for w in all_words:
-                        if w["end"] <= mid:
-                            trimmed_prev.append(w)
-                        elif "words" in w and w["words"]:
-                            kept = [wd for wd in w["words"] if wd["start"] < mid]
-                            if kept:
-                                trimmed_prev.append({
-                                    "word": "".join(wd["word"] for wd in kept),
-                                    "start": w["start"],
-                                    "end": kept[-1]["end"],
-                                    "words": kept,
-                                })
-                        elif w["start"] < mid:
-                            trimmed_prev.append(w)
-
-                    trimmed_cur = []
-                    for w in seg_words:
-                        if w["start"] >= mid:
-                            trimmed_cur.append(w)
-                        elif "words" in w and w["words"]:
-                            kept = [wd for wd in w["words"] if wd["start"] >= mid]
-                            if kept:
-                                trimmed_cur.append({
-                                    "word": "".join(wd["word"] for wd in kept),
-                                    "start": kept[0]["start"],
-                                    "end": w["end"],
-                                    "words": kept,
-                                })
-
-                    all_words = trimmed_prev + trimmed_cur
-                else:
-                    all_words.extend(seg_words)
+                all_words.extend(seg_words)
 
                 if progress_callback:
                     progress_callback(cur_end, end_time)
 
-                # apply corrections first, then push
-                for w in all_words:
-                    w["word"] = apply_corrections(w["word"])
-
-                all_words = remove_hallucinations(all_words)
-
-                if on_segment:
-                    new_words = [w for w in all_words if w["end"] > last_truncated_end]
-                    if new_words:
-                        on_segment(new_words, t, cur_end, end_time)
-                    last_truncated_end = max(last_truncated_end, cur_end)
+                if seg_words and on_segment:
+                    corrected = []
+                    for w in seg_words:
+                        cw = dict(w)
+                        cw["word"] = apply_corrections(cw["word"])
+                        corrected.append(cw)
+                    on_segment(corrected, t, cur_end, end_time)
 
             except Exception as e:
                 logger.warning("segment failed (%.1f-%.1fs): %s", t, cur_end, e)
 
         return all_words
-
     def _detect_speech_end(self, audio: np.ndarray, sr: int, frame_len=2048, hop=512, rms_threshold=0.005) -> float:
         """从音频尾部向前扫描，找到最后一个 RMS > threshold 的位置（秒）"""
         n_frames = 1 + (len(audio) - frame_len) // hop
