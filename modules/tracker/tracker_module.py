@@ -257,7 +257,8 @@ class TrackerModule(BaseModule):
                     # 记录监护请求事件
                     self._events.append({
                         "localSec": round(ts, 2),
-                        "key_moment": f"请求监护,ID:{hand_role}",
+                        "key_moment": "请求监护",
+                        "ID": hand_role,
                         "source": "tracker",
                     })
 
@@ -267,7 +268,8 @@ class TrackerModule(BaseModule):
 
                     self._events.append({
                         "localSec": round(ts, 2),
-                        "key_moment": f"举手,ID:{hand_role}",
+                        "key_moment": "举手",
+                        "ID": hand_role,
                         "source": "tracker",
                     })
 
@@ -324,7 +326,8 @@ class TrackerModule(BaseModule):
                                 # 保存事件到本地记录
                                 self._events.append({
                                     "localSec": round(ts, 2),
-                                    "key_moment": f"{state_label},{road_name}",
+                                    "key_moment": state_label,
+                                    "ID": road_name,
                                     "source": "tracker",
                                 })
 
