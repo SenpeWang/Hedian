@@ -214,6 +214,11 @@ function connectSSE(onReady){
 function checkRunning(){
   fetch('/status').then(r=>r.json()).then(d=>{
     if(d.pipeline==='running'){
+      // 清除旧内容再连接
+      document.getElementById("textScroll").innerHTML="";
+      document.getElementById("detBody").innerHTML="<div id=distDashboard\ style=display:none\></div>";
+      document.getElementById("segCards").innerHTML="";
+      segScores=[];supN=0;ticketN=0;noticeN=0;
       // 流水线已在运行，自动连接 SSE
       const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
       $('statusDot').className='active';$('headerStatus').textContent='🔄 已在运行，连接中…';
