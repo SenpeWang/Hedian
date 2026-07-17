@@ -378,7 +378,7 @@ class TrackerModule(BaseModule):
 
 
                 # 可视化：在帧上画跟踪结果 + 距离 + 注视结果
-                if frame_count % 3 == 0:
+                if frame_count % 2 == 0:
                     try:
                         vis_frame = frame.copy()
                         # 1. 画跟踪框和角色
