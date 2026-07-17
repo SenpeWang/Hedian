@@ -527,26 +527,48 @@ def normalize_spoken_text(text):
     # 只保留字母数字和小数点
     return re.sub(r"[^A-Z0-9\.]", "", text)
 
+
+
+KEYWORD_PINYIN = {
+    "请求监护": ["qing", "qiu", "jian", "hu"],
+    "执行":     ["zhi", "xing"],
+    "核对":     ["he", "dui"],
+    "核实":     ["he", "shi"],
+    "信息通报": ["xin", "xi", "tong", "bao"],
+    "信息通告": ["xin", "xi", "tong", "gao"],
+    "通报完毕": ["tong", "bao", "wan", "bi"],
+    "通告完毕": ["tong", "gao", "wan", "bi"],
+    "收到":     ["shou", "dao"],
+}
+
+
+def match_keyword_by_pinyin(text: str, keyword: str, threshold: float = 0.4) -> bool:
+    """用拼音相似度判断text是否包含keyword的语义"""
+    import pypinyin
+    text_py = " ".join(pypinyin.lazy_pinyin(text))
+    target_syllables = KEYWORD_PINYIN.get(keyword, [])
+    if not target_syllables:
+        return False
+    hits = sum(1 for s in target_syllables if s in text_py)
+    return hits / len(target_syllables) >= threshold
+
+
 def get_key_moment(text: str, device: str) -> str:
-    """根据匹配到的语音关键字返回对应的 key_moment"""
+    """拼音匹配 + 设备码提取"""
+    for keyword, label in [
+        ("请求监护", "请求监护"), ("执行", "执行"),
+        ("核对", "核对"), ("核实", "核对"),
+        ("信息通报", "信息通报"), ("信息通告", "信息通告"),
+        ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕"),
+        ("收到", "收到"),
+    ]:
+        if keyword == "收到":
+            if text.strip() == "收到" or match_keyword_by_pinyin(text, keyword):
+                return label
+        elif match_keyword_by_pinyin(text, keyword):
+            return label
     if device:
         return device
-    if "监护" in text:
-        return "请求监护"
-    if "执行" in text:
-        return "执行"
-    if "核对" in text or "核实" in text:
-        return "核对"
-    if "信息通报" in text:
-        return "信息通报"
-    if "信息通告" in text:
-        return "信息通告"
-    if "通报完毕" in text:
-        return "通报完毕"
-    if "通告完毕" in text:
-        return "通告完毕"
-    if text.strip() == "收到":
-        return "收到"
     return ""
 
 def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
@@ -583,17 +605,22 @@ def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) 
         m = NORM_DEVICE_PATTERN.search(norm_text)
         device = m.group(1) if m else ""
 
-        # 收集所有匹配的关键字
+        # 收集所有匹配的关键字(拼音匹配,不依赖精确文本)
         found_keywords = set()
         if device:
             found_keywords.add(device)
-        for kw, label in [("监护", "请求监护"), ("执行", "执行"), ("核对", "核对"), ("核实", "核对"),
-                          ("信息通报", "信息通报"), ("信息通告", "信息通告"),
-                          ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕")]:
-            if kw in text:
+        for keyword, label in [
+            ("请求监护", "请求监护"), ("执行", "执行"),
+            ("核对", "核对"), ("核实", "核对"),
+            ("信息通报", "信息通报"), ("信息通告", "信息通告"),
+            ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕"),
+            ("收到", "收到"),
+        ]:
+            if keyword == "收到":
+                if text.strip() == "收到" or match_keyword_by_pinyin(text, keyword):
+                    found_keywords.add(label)
+            elif match_keyword_by_pinyin(text, keyword):
                 found_keywords.add(label)
-        if text.strip() == "收到":
-            found_keywords.add("收到")
 
         # 每句先推完整文本（仅第一个事件带 text）
         first = True
