@@ -315,10 +315,10 @@ class SpeechTranscriber:
 
             logger.info(f"音频时长: {audio_duration:.1f}s, 有效时长: {effective_end:.1f}s")
 
-            # 分段转录
+            # 分段转录(5s重叠)
             words = self._transcribe_segments(
                 audio, sr,
-                window_sec=20,
+                window_sec=20, overlap_sec=5,
                 start_time=0, end_time=effective_end,
                 progress_callback=progress_callback,
                 on_segment=on_segment,
@@ -336,21 +336,26 @@ class SpeechTranscriber:
         audio: np.ndarray,
         sr: int,
         window_sec: float = 20,
+        overlap_sec: float = 0,
         start_time: float = 0,
         end_time: float = None,
         progress_callback=None,
         on_segment=None,
     ) -> List[Dict]:
-        """segment transcription, no overlap"""
+        """分段转录(带重叠)，每段独立转录，midpoint去重"""
         if end_time is None:
             end_time = len(audio) / sr
+
+        step = window_sec - overlap_sec
+        if step <= 0:
+            step = window_sec
 
         windows = []
         t = float(start_time)
         while t < end_time:
             cur_end = min(t + window_sec, end_time)
             windows.append((t, cur_end))
-            t += window_sec
+            t += step
 
         all_words = []
 
@@ -400,6 +405,25 @@ class SpeechTranscriber:
                             ]
                         seg_words.append(seg_item)
 
+                # midpoint去重: 只取当前窗口新增的后半段
+                if overlap_sec > 0 and i > 1 and all_words:
+                    mid = t + overlap_sec / 2
+                    # 只保留当前窗口 > mid 的内容
+                    new_words = []
+                    for w in seg_words:
+                        if w["start"] >= mid:
+                            new_words.append(w)
+                        elif "words" in w and w["words"]:
+                            kept = [wd for wd in w["words"] if wd["start"] >= mid]
+                            if kept:
+                                new_words.append({
+                                    "word": "".join(wd["word"] for wd in kept),
+                                    "start": kept[0]["start"],
+                                    "end": w["end"],
+                                    "words": kept,
+                                })
+                    seg_words = new_words
+
                 all_words.extend(seg_words)
 
                 if progress_callback:
@@ -417,6 +441,8 @@ class SpeechTranscriber:
                 logger.warning("segment failed (%.1f-%.1fs): %s", t, cur_end, e)
 
         return all_words
+
+
     def _detect_speech_end(self, audio: np.ndarray, sr: int, frame_len=2048, hop=512, rms_threshold=0.005) -> float:
         """从音频尾部向前扫描，找到最后一个 RMS > threshold 的位置（秒）"""
         n_frames = 1 + (len(audio) - frame_len) // hop
