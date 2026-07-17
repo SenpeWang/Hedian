@@ -98,7 +98,7 @@ class VoiceModule(BaseModule):
                     if key_moment:
                         self.push_event(EventTopic.VOICE_KEY_MOMENT, {
                             "localSec": local_sec,
-                            "key_moment": key_moment
+                            "key_moment": key_moment,
                         }, ts=local_sec)
 
                     self._events.append(event)
@@ -152,7 +152,8 @@ class VoiceModule(BaseModule):
             if key_moment:
                 key_moment_events.append({
                     "localSec": event.get("localSec"),
-                    "key_moment": key_moment
+                    "key_moment": key_moment,
+                    "source": "voice",
                 })
 
         # 调用存储器，解耦保存
