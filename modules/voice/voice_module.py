@@ -79,7 +79,7 @@ class VoiceModule(BaseModule):
                 """每段转录完成后的回调：分句后按需推送推理流与事件流"""
                 if not words:
                     return
-                events = process_transcribed_words(words, sentence_gap_sec=voice_config.get(sentence_gap_sec, 1.5))
+                events = process_transcribed_words(words, sentence_gap_sec=1.5)
                 for event in events:
                     local_sec = event.get("localSec", 0.0)
                     text = event.get("text", "")
