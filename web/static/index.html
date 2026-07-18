@@ -346,10 +346,12 @@ function updateProgress(d){
   const moduleMap={voice:"prVoice",tracker:"prMot",gaze:"prGaze"};
   $('progressGroup').style.display='';
   const iconMap={voice:'🎤',tracker:'🎯',gaze:'👁️'};
-  const rid=moduleMap[d.label];
-  if(!rid){$('headerStatus').textContent=d.detail||(d.pct !== undefined ? d.pct.toFixed(1) : '0.0')+'%';return}
-  const icon=iconMap[d.label]||'📊';
-  const pct=Math.max(0,Math.min(100,d.pct||0)),bl=20,f=Math.round(pct/100*bl);
+  const dt=d.data||{};
+  const label=dt.label||d.label||'';
+  const rid=moduleMap[label];
+  if(!rid){$('headerStatus').textContent=dt.detail||(dt.pct !== undefined ? dt.pct.toFixed(1) : '0.0')+'%';return}
+  const icon=iconMap[label]||'📊';
+  const pct=Math.max(0,Math.min(100,dt.pct||0)),bl=20,f=Math.round(pct/100*bl);
   const bar=pct>=100?'█'.repeat(bl):'█'.repeat(f)+'░'.repeat(bl-f);
   const cls=pct>=100?'tqdm-done':'tqdm-bar';
   $(rid).innerHTML=`${icon} |<span class=${cls}>${bar}</span>| ${pct.toFixed(1)}%`;
@@ -369,6 +371,19 @@ function addDetEvent(d){
   const dt=d.data||{};
   const st=dt.state||'';
   const tagName=d.tag||'';
+
+  // 人数更新
+  if(tagName==='PEOPLE_COUNT_UPDATE'){
+    $('peopleCountVal').textContent=dt.count||'--';
+    if(dt.state_alert){
+      $('peopleStatusAlert').textContent='⚠️ '+dt.state_alert;
+      $('peopleStatusAlert').style.color='#ff4d4d';
+    }else{
+      $('peopleStatusAlert').textContent='✅ 当前人数正常';
+      $('peopleStatusAlert').style.color='#00ff88';
+    }
+    return;
+  }
 
   if(st==='监护中'){
     el.style.borderLeftColor='#00d4ff';
