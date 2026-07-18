@@ -188,11 +188,8 @@ class GazeModule:
         if self._display_fn:
             self._display_fn("gaze", {
                 "localSec": round(ts, 2),
-                "source": "gaze",
-                "event": "gaze_status",
-                "has_heads": self._cached_has_heads,
-                "any_in_roi": self._cached_any_in_roi,
-                "heads_count": len(self._cached_results),
+                "tag": "gaze_status",
+                "data": {"has_heads": self._cached_has_heads, "any_in_roi": self._cached_any_in_roi, "heads_count": len(self._cached_results)},
             })
 
         # 告警逻辑：无人注视超过60秒
@@ -217,7 +214,7 @@ class GazeModule:
                 # 告警开始时先不保存到 _events，因为不知道最终持续了多少秒。等结束或录制终止时统一计算时长并保存。
                 # 推送到推理流
                 if self._display_fn:
-                    self._display_fn("gaze", event)
+                    self._display_fn("gaze", {"localSec": event.get("localSec"), "tag": event.get("event"), "data": event})
                 # 推送到事件流（消息总线）
                 if self._event_bus:
                     from core.event_bus import EventTopic
@@ -241,7 +238,7 @@ class GazeModule:
                 })
                 # 推送到推理流
                 if self._display_fn:
-                    self._display_fn("gaze", event)
+                    self._display_fn("gaze", {"localSec": event.get("localSec"), "tag": event.get("event"), "data": event})
                 # 推送到事件流（消息总线）
                 if self._event_bus:
                     from core.event_bus import EventTopic
@@ -266,13 +263,8 @@ class GazeModule:
                 if self._display_fn:
                     self._display_fn("gaze", {
                         "localSec": round(ts, 2),
-                        "source": "gaze",
-                        "event": "ATTENTION_RESULT",
-                        "has_turned": result.has_turned,
-                        "displacement": round(result.total_displacement, 1),
-                        "sample_count": result.sample_count,
-                        "reason": result.reason,
-                        "window": f"{self._attn_window_start:.1f}s~{ts:.1f}s",
+                        "tag": "ATTENTION_RESULT",
+                        "data": {"has_turned": result.has_turned, "displacement": round(result.total_displacement, 1), "sample_count": result.sample_count, "reason": result.reason, "window": f"{self._attn_window_start:.1f}s~{ts:.1f}s"},
                     })
                 # 如果评估为“未转动”（即没有给予关注），则记录至关键时刻 _events 中
                 if not result.has_turned:
