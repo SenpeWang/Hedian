@@ -239,7 +239,7 @@ class ModuleSync:
                     source = ev.get("type", "unknown")
                     if source not in batch:
                         batch[source] = []
-                    batch[source].append({"tag": ev.get("tag"), "data": ev.get("data")})
+                    batch[source].append({"localSec": ev.get("localSec"), "tag": ev.get("tag"), "data": ev.get("data")})
                 self._do_push(batch)
                 logger.info(f"批推送: {sum(len(v) for v in batch.values() if isinstance(v, list))} 个事件, global_sec={global_sec:.2f}")
 
@@ -268,7 +268,7 @@ class ModuleSync:
                     source = ev.get("type", "unknown")
                     if source not in batch:
                         batch[source] = []
-                    batch[source].append({"tag": ev.get("tag"), "data": ev.get("data")})
+                    batch[source].append({"localSec": ev.get("localSec"), "tag": ev.get("tag"), "data": ev.get("data")})
                 self._do_push(batch)
         except Exception as e:
             logger.error(f"清理剩余事件失败: {e}")
