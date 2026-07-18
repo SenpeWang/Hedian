@@ -89,7 +89,8 @@ class VoiceModule(BaseModule):
                     if text:
                         self.push_display("voice", {
                             "localSec": local_sec,
-                            "text": text
+                            "tag": "text",
+                            "data": {"text": text}
                         })
                         # 写入最新语音快照，供追踪事件上下文展示
                         self.display_buffer.update_module_snapshot("voice", {"latest_text": text})
