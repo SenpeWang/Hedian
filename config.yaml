@@ -39,6 +39,7 @@ gaze:
   head_max_size: 300
 
 modules:
+  gaze: true
   voice: true
   tracker: true
   personnel_status: true
