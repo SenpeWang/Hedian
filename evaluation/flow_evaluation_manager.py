@@ -163,8 +163,8 @@ class FlowEvaluationManager:
 
         logger.info(f"流程结束 flow_id={flow_id} @{ts:.1f}s")
 
-        # 触发评估
-        self._evaluate_and_save(flow)
+        # 异步评估(不阻塞主线程处理其他事件)
+        self._executor.submit(self._evaluate_and_save, flow)
 
     def _evaluate_and_save(self, flow: Dict) -> None:
         """
