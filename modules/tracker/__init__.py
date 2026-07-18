@@ -14,13 +14,11 @@
 from modules.tracker.tracker_module import TrackerModule
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
-from modules.tracker.hand_raiser import HandRaiser
 from modules.tracker.storage import TrackerStorage
 
 __all__ = [
     "TrackerModule",
     "ObjectDetector",
     "MultiObjectTracker",
-    "HandRaiser",
     "TrackerStorage",
 ]
