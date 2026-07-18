@@ -15,7 +15,7 @@ from core.path_manager import PathConfig
 
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
-from modules.tracker.hand_raiser import HandRaiser
+from modules.behavior.hand_raiser import HandRaiser
 from modules.tracker.storage import TrackerStorage
 from modules.tracker.visualizer import draw_tracks, draw_supervision
 from modules.gaze.gaze_module import GazeModule
@@ -254,12 +254,12 @@ class TrackerModule(BaseModule):
                         "operator": hand_role,
                     }, ts=ts)
 
-                    # 记录监护请求事件
+                    # 记录监护请求事件(behavior模块)
                     self._events.append({
                         "localSec": round(ts, 2),
                         "key_moment": "请求监护",
                         "ID": hand_role,
-                        "source": "tracker",
+                        "source": "behavior",
                     })
 
                     # 保存关键帧
@@ -270,7 +270,7 @@ class TrackerModule(BaseModule):
                         "localSec": round(ts, 2),
                         "key_moment": "举手",
                         "ID": hand_role,
-                        "source": "tracker",
+                        "source": "behavior",
                     })
 
                     logger.info(f"举手检测: {hand_role} @{ts:.1f}s")
@@ -441,6 +441,19 @@ class TrackerModule(BaseModule):
         # 保存盘台违规记录
         if self._panel_violation_records:
             self._result_storage.save_panel_violations(run_id, self._panel_violation_records)
+
+        # 保存举手事件 (behavior_key_moments.json)
+        try:
+            hand_events = [e for e in self._events if e.get("source") == "behavior"]
+            if hand_events:
+                bh_dir = self.paths.result_root / run_id / "behavior"
+                bh_dir.mkdir(parents=True, exist_ok=True)
+                bh_path = bh_dir / "behavior_key_moments.json"
+                with open(bh_path, "w", encoding="utf-8") as f:
+                    json.dump(hand_events, f, ensure_ascii=False, indent=2)
+                logger.info(f"保存 {len(hand_events)} 个举手事件到 {bh_path}")
+        except Exception as e:
+            logger.error(f"保存举手事件失败: {e}", exc_info=True)
 
         # 保存注视告警事件 (gaze_key_moments.json)
         try:

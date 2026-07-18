@@ -43,7 +43,7 @@ modules:
   tracker: true
   personnel_status: true
   info_notice: true
-  behavior: false
+  behavior: true
 
 rules:
   supervision: true
