@@ -2,6 +2,7 @@
 行为检测模块
 
 负责：
+- 举手检测（供tracker调用）
 - 手指屏幕检测
 
 使用方式：
@@ -10,9 +11,11 @@
     module.start(video_path, run_id)
 """
 from modules.behavior.behavior_module import BehaviorModule
+from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.finger_screen_detector import FingerScreenDetector
 
 __all__ = [
     "BehaviorModule",
+    "HandRaiser",
     "FingerScreenDetector",
 ]
