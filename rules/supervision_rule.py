@@ -225,9 +225,13 @@ class SupervisionRule(BaseRule):
         if not self._active:
             return
 
-        # 判断任一操纵人员是否处于监护中，以及是否全部操纵人员都离开
+        # 判断任一操纵人员是否处于监护中，以及被监护的操作员是否离开
         any_close = any(s == "监护中" for s in self._operator_states.values())
-        all_far = all(s == "未监护" for s in self._operator_states.values())
+        # 如果绑定了特定操作员，只检查该操作员；否则检查全部
+        if self._target_role:
+            target_far = (self._operator_states.get(self._target_role) == "未监护")
+        else:
+            target_far = all(s == "未监护" for s in self._operator_states.values())
 
         # 状态机转移逻辑
         if self._sm_state == "IDLE":
