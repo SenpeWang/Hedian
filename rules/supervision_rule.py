@@ -258,7 +258,7 @@ class SupervisionRule(BaseRule):
                     operator_name = self._target_role or "未知"
                     self._events.append({
                         "localSec": round(ts, 2),
-                        "key_moment": f"监护员和{operator_name}建立监护关系",
+                        "key_moment": f"监护员已监督{operator_name}",
                         "source": "tracker",
                     })
                     # 发布监护绑定事件
@@ -281,13 +281,7 @@ class SupervisionRule(BaseRule):
                     self._sm_state = "IDLE"
                     logger.info(f"状态转移: BOUND → IDLE @{ts:.1f}s (人员离开超10秒)")
 
-                    operator_name = self._target_role or "未知"
-                    self._events.append({
-                        "localSec": round(ts, 2),
-                        "key_moment": f"监护员和{operator_name}解除监护关系",
-                        "source": "tracker",
-                    })
-                    # 发布监护结束事件
+                    # 发布监护结束事件（解除隐含在结束条件中，不单独保存）
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.TRACKER_SUPERVISION_END, {
                             "localSec": ts,
