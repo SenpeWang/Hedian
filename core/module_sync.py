@@ -111,7 +111,7 @@ class ModuleSync:
             return min(relevant.values())
         except Exception as e:
             logger.error(f"计算全局时钟失败: {e}")
-            return 0.0
+            return float("inf")
 
     def _get_context(self) -> Dict[str, Dict[str, Any]]:
         """获取所有模块的快照"""
