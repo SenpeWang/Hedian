@@ -187,6 +187,7 @@ function startPipeline(){
   $('peopleStatusAlert').textContent = '就绪';
   $('peopleStatusAlert').style.color = '#8899aa';
   updateSummary();
+  $('streamImg').src='';audio.pause();audio.src='';
   connectSSE(function(){fetch('/start',{method:'POST'}).then(r=>r.json())});
 }
 
