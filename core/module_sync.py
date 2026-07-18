@@ -107,15 +107,6 @@ class ModuleSync:
             if not relevant:
                 return float("inf")
 
-            if self._expected_modules:
-                registered = set(all_progress.keys())
-                if not self._expected_modules.issubset(registered):
-                    if not registered:
-                        return 0.0
-                    relevant = {k: float(v) for k, v in all_progress.items() if k in registered}
-                    if not relevant:
-                        return 0.0
-
             return min(relevant.values())
         except Exception as e:
             logger.error(f"计算全局时钟失败: {e}")
@@ -245,18 +236,24 @@ class ModuleSync:
             logger.error(f"对齐并推送事件失败: {e}")
 
     def _flush_remaining_events(self) -> None:
-        """强制刷新剩余的所有事件"""
+        """强制刷新剩余的所有事件(打包为batch)"""
         try:
             entries = self._redis.xrange(self._KEY_EVENT_STREAM, min="-", max="+")
+            if not entries:
+                return
             context = self._get_context()
+            events = []
             for entry_id, fields in entries:
                 try:
                     ev = json.loads(fields["payload"])
                     ev["context"] = context
-                    self._do_push(ev)
+                    events.append(ev)
                 except (json.JSONDecodeError, TypeError):
                     pass
                 self._redis.xdel(self._KEY_EVENT_STREAM, entry_id)
+            if events:
+                batch = {"type": "batch", "events": events, "globalSec": 0}
+                self._do_push(batch)
         except Exception as e:
             logger.error(f"清理剩余事件失败: {e}")
 
