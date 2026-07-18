@@ -234,12 +234,14 @@ class ModuleSync:
                     self._redis.xdel(self._KEY_EVENT_STREAM, entry_id)
 
             if events_to_push:
-                context = self._get_context()
-                for event in events_to_push:
-                    event["context"] = context
-                batch = {"type": "batch", "events": events_to_push, "globalSec": global_sec}
+                batch = {"globalSec": global_sec}
+                for ev in events_to_push:
+                    source = ev.get("type", "unknown")
+                    if source not in batch:
+                        batch[source] = []
+                    batch[source].append({"tag": ev.get("tag"), "data": ev.get("data")})
                 self._do_push(batch)
-                logger.info(f"批推送: {len(events_to_push)} 个事件, global_sec={global_sec:.2f}")
+                logger.info(f"批推送: {sum(len(v) for v in batch.values() if isinstance(v, list))} 个事件, global_sec={global_sec:.2f}")
 
         except Exception as e:
             logger.error(f"对齐并推送事件失败: {e}")
@@ -261,7 +263,12 @@ class ModuleSync:
                     pass
                 self._redis.xdel(self._KEY_EVENT_STREAM, entry_id)
             if events:
-                batch = {"type": "batch", "events": events, "globalSec": 0}
+                batch = {"globalSec": 0}
+                for ev in events:
+                    source = ev.get("type", "unknown")
+                    if source not in batch:
+                        batch[source] = []
+                    batch[source].append({"tag": ev.get("tag"), "data": ev.get("data")})
                 self._do_push(batch)
         except Exception as e:
             logger.error(f"清理剩余事件失败: {e}")

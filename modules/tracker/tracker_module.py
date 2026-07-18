@@ -156,7 +156,7 @@ class TrackerModule(BaseModule):
             logger.info(f"FPS={fps}, 总帧数={total_frames}")
 
             # 通知前端启动视频流
-            self.push_display("video_start", {})
+            self.push_display("video_start", {"localSec": 0, "tag": "start", "data": {}})
 
             tracks = []  # 初始化，确保可视化代码始终可用
 
@@ -175,8 +175,8 @@ class TrackerModule(BaseModule):
                 gaze_pct = min(ts / (total_frames / fps) * 100, 100) if total_frames > 0 else 0
                 self.push_display("progress", {
                     "localSec": round(ts, 2),
-                    "label": "gaze",
-                    "pct": round(gaze_pct, 1),
+                    "tag": "progress",
+                    "data": {"label": "gaze", "pct": round(gaze_pct, 1)},
                 })
 
                 # 更新聚合器快照（供前端 context 使用）
@@ -212,8 +212,8 @@ class TrackerModule(BaseModule):
                     # 推理流：前端展示角色分配结果
                     self.push_display("tracking", {
                         "localSec": round(ts, 2),
-                        "event": "ROLE_ASSIGNED",
-                        "roles_details": self._roles_info,
+                        "tag": "ROLE_ASSIGNED",
+                        "data": {"roles": self._roles_info}
                     })
                     # 事件流：通知规则状态机角色已分配
                     self.push_event(EventTopic.TRACKER_ROLE_ASSIGNED, {
@@ -243,10 +243,8 @@ class TrackerModule(BaseModule):
                     # 推理流：前端展示举手检测
                     self.push_display("tracking", {
                         "localSec": round(ts, 2),
-                        "event": "HAND_RAISED",
-                        "state": "举手",
-                        "operator": hand_role,
-                        "roles_details": self._roles_info,
+                        "tag": "HAND_RAISED",
+                        "data": {"state": "举手", "operator": hand_role}
                     })
                     # 事件流：通知规则状态机有人举手
                     self.push_event(EventTopic.TRACKER_HAND_RAISED, {
@@ -302,11 +300,8 @@ class TrackerModule(BaseModule):
 
                                 event_data = {
                                     "localSec": round(ts, 2),
-                                    "event": "SUPERVISOR_STATUS",
-                                    "state": state_label,
-                                    "operator": road_name,
-                                    "distance_px": int(d),
-                                    "roles_details": self._roles_info,
+                                    "tag": "SUPERVISOR_STATUS",
+                                    "data": {"state": state_label, "operator": road_name, "distance_px": int(d)},
                                 }
 
                                 # 1. 普通推理流推送（只有在监护制激活时才推送到前端展示）
@@ -339,18 +334,18 @@ class TrackerModule(BaseModule):
                         
                         people_data = {
                             "localSec": round(ts, 2),
-                            "event": "PEOPLE_COUNT_UPDATE",
-                            "count": people_count,
+                            "tag": "PEOPLE_COUNT_UPDATE",
+                            "data": {"count": people_count},
                         }
                         
                         # 特殊提醒和警报（写入推理流，触发前端展示）
                         if people_count == 1:
-                            people_data["state"] = "主控室仅有1人"
-                            people_data["state_alert"] = "提醒：当前主控室只有一人，请注意安全！"
+                            people_data["data"]["state"] = "主控室仅有1人"
+                            people_data["data"]["state_alert"] = "提醒：当前主控室只有一人，请注意安全！"
                             self.push_display("tracking", people_data)
                         elif people_count < 1:
-                            people_data["state"] = "主控室无人值守"
-                            people_data["state_alert"] = "警告：当前主控室无人值守！"
+                            people_data["data"]["state"] = "主控室无人值守"
+                            people_data["data"]["state_alert"] = "警告：当前主控室无人值守！"
                             self.push_display("tracking", people_data)
                         else:
                             # 正常情况（>=2人），仅更新人数数据

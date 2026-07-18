@@ -167,10 +167,9 @@ class BaseModule(ABC):
                 self._last_progress_push = now
                 pct = min(100, int(current / total * 100))
                 self.push_display("progress", {
-                    "label": self.module_name,
-                    "pct": pct,
-                    "current": round(current, 1),
-                    "total": round(total, 1),
+                    "localSec": round(current, 2),
+                    "tag": "progress",
+                    "data": {"label": self.module_name, "pct": pct, "current": round(current, 1), "total": round(total, 1)},
                 })
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
