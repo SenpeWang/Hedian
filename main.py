@@ -303,6 +303,9 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
             if event is None or (isinstance(event, dict) and event.get("type") == "done"):
                 app.pipeline_state["status"] = "idle"
                 logger.info("检测到流水线运行结束信号，已将 Web 状态置为 idle")
+                # 保存规则事件到JSON
+                if flow_result_dir:
+                    registry.save_all_results(flow_result_dir)
             app.sse_handler.push(event)
         display_buffer.set_push_callback(push_wrapper)
         display_buffer.start()

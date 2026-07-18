@@ -44,6 +44,10 @@ class BaseRule(ABC):
         """视频结束时关闭流程"""
         pass
 
+    def save_results(self, result_dir: str) -> None:
+        """保存规则事件到JSON(子类可覆盖)"""
+        pass
+
 
 class RuleRegistry:
     """制度注册表 — 自动发现并管理所有制度"""
