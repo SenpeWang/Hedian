@@ -180,6 +180,7 @@ function fmt(s){let m=Math.floor(s/60),ss=Math.floor(s%60);return `${String(m).p
 function startPipeline(){
   const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
   $('statusDot').className='active';$('headerStatus').textContent='🚀 启动中…';
+  $('progressGroup').style.display='';
   segScores=[];supN=0;ticketN=0;noticeN=0;
   $('detBody').innerHTML='<div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none"><div style="display:flex;justify-content:space-between;align-items:center"><span>📏 距离: <b id="distVal">--</b> px</span><span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span></div><div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px"><div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div></div></div>';$('textScroll').innerHTML='';$('segCards').innerHTML='';
   $('peopleCountVal').textContent = '--';
