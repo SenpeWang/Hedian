@@ -83,10 +83,11 @@ class ModuleSync:
         try:
             now = time.time()
             all_progress = self._redis.hgetall(self._KEY_PROGRESS)
+            # 每次读取都刷新活跃模块的时间戳，避免运行中的模块超时被移除
             for name in all_progress.keys():
-                if name not in self._module_last_update:
-                    self._module_last_update[name] = now
+                self._module_last_update[name] = now
 
+            # 只清理已不在 progress 中的模块（不再运行的模块）
             timed_out = []
             for name, last_update in list(self._module_last_update.items()):
                 if now - last_update > self._module_timeout:
