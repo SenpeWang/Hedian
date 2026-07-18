@@ -163,22 +163,30 @@ class ModuleSync:
                 pass
 
     def _aggregation_loop(self) -> None:
-        """对齐推送循环"""
+        """对齐推送循环（带完成自动检测）"""
+        last_global_sec = -1.0
+        stall_count = 0
+        STALL_TIMEOUT = 30.0  # global_sec 停滞超过30秒视为完成
+
         while not self._stop_event.is_set():
             loop_start = time.time()
             try:
-                # 流水线结束检测：main 进程在 join 完所有模块进程后，
-                # 会设置 pipeline:status=done。此时各模块已写完全部事件，
-                # 直接 flush 剩余事件并推送终止信号，让前端恢复交互。
-                if self._redis.get("pipeline:status") == "done":
-                    logger.info("检测到 pipeline:status=done，刷新剩余事件并推送终止信号")
-                    self._flush_remaining_events()
-                    self.push_sentinel()
-                    break
-
                 global_sec = self._compute_global_sec()
                 if global_sec != float("inf"):
-                    logger.debug(f"计算全局时钟: global_sec={global_sec:.2f}")
+                    # 检测 global_sec 是否停滞
+                    if abs(global_sec - last_global_sec) < 0.01:
+                        stall_count += 1
+                    else:
+                        stall_count = 0
+                        last_global_sec = global_sec
+
+                    # 停滞超过30秒 → 所有模块推理完成
+                    if stall_count >= int(STALL_TIMEOUT / self.frame_interval):
+                        logger.info(f"global_sec 停滞 {STALL_TIMEOUT}s，推理完成，刷新剩余事件")
+                        self._flush_remaining_events()
+                        self.push_sentinel()
+                        break
+
                     self._push_events_up_to(global_sec)
                     self._redis.set(self._KEY_CLOCK, str(global_sec), ex=10)
             except Exception as e:

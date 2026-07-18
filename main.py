@@ -415,15 +415,11 @@ def main():
 
     logger.info(f"已启动 {len(processes)} 个进程: {[name for name, _ in processes]}")
 
-    for name, p in processes:
-        if name == "web":
-            continue
-        p.join()
-        logger.info(f"{name} 进程结束")
-
-    r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
-    r.set("pipeline:status", "done", ex=60)
-    r.close()
+    # 只等 web 进程（模块推理完成由 ModuleSync 自主检测）
+    web_p = processes[-1][1] if processes else None
+    if web_p:
+        web_p.join()
+        logger.info("Web 进程结束")
 
     logger.info("═══ 流水线完成 ═══")
     logger.info(f"结果目录: {result_dir}")
