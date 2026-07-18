@@ -100,7 +100,7 @@ def run_voice_process(config_dict, paths_dict, video_path, run_id):
                    consumer_name="voice_process")
     display_buffer = DisplayBuffer(
         fps=config_dict.get("fps", 30),
-        expected_modules={"tracker", "voice", "gaze"},
+        expected_modules={"tracker", "voice", "gaze", "behavior"},
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         writer_only=True,  # 模块进程只写入，不运行聚合循环
     )
@@ -147,7 +147,7 @@ def run_tracker_process(config_dict, paths_dict, video_path, run_id, frame_queue
                    consumer_name="tracker_process")
     display_buffer = DisplayBuffer(
         fps=config_dict.get("fps", 30),
-        expected_modules={"tracker", "voice", "gaze"},
+        expected_modules={"tracker", "voice", "gaze", "behavior"},
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         writer_only=True,
     )
@@ -190,7 +190,7 @@ def run_behavior_process(config_dict, paths_dict, video_path, run_id, frame_queu
                    consumer_name="behavior_process")
     display_buffer = DisplayBuffer(
         fps=config_dict.get("fps", 30),
-        expected_modules={"tracker", "voice", "gaze"},
+        expected_modules={"tracker", "voice", "gaze", "behavior"},
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         writer_only=True,  # 模块进程只写入，不运行聚合循环
     )
@@ -236,7 +236,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                    consumer_name="web_process")
     display_buffer = DisplayBuffer(
         fps=config_dict.get("fps", 30),
-        expected_modules={"tracker", "voice", "gaze"},
+        expected_modules={"tracker", "voice", "gaze", "behavior"},
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         writer_only=False,
     )
