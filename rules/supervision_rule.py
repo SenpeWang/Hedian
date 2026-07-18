@@ -8,6 +8,8 @@
   内容：1.九字码复述  2.执行操作  3.核对确认
   结束：监护员和操作员离开10秒
 """
+import json
+import os
 import logging
 
 from core.event_bus import EventBus, EventTopic
@@ -54,6 +56,7 @@ class SupervisionRule(BaseRule):
         # 举手相关事件追踪，用于判定 5 秒内 举手 + 请求监护
         self._last_hand_raise_ts = -999.0
         self._last_hand_raise_role = None
+        self._events = []  # 保存监护事件(BOUND/UNBOUND)
 
         # 记录操纵人员的最新距离状态，不进行默认绑定
         self._operator_states = {}
@@ -251,6 +254,13 @@ class SupervisionRule(BaseRule):
                     self._far_start_ts = -1.0
                     logger.info(f"状态转移: REQUESTING → BOUND @{ts:.1f}s, 动态监护对象: {self._target_role}")
 
+                    # 保存绑定事件到JSON
+                    operator_name = self._target_role or "未知"
+                    self._events.append({
+                        "localSec": round(ts, 2),
+                        "key_moment": f"监护员和{operator_name}建立监护关系",
+                        "source": "tracker",
+                    })
                     # 发布监护绑定事件
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.TRACKER_SUPERVISION_BOUND, {
@@ -271,6 +281,12 @@ class SupervisionRule(BaseRule):
                     self._sm_state = "IDLE"
                     logger.info(f"状态转移: BOUND → IDLE @{ts:.1f}s (人员离开超10秒)")
 
+                    operator_name = self._target_role or "未知"
+                    self._events.append({
+                        "localSec": round(ts, 2),
+                        "key_moment": f"监护员和{operator_name}解除监护关系",
+                        "source": "tracker",
+                    })
                     # 发布监护结束事件
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.TRACKER_SUPERVISION_END, {
