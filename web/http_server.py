@@ -67,7 +67,15 @@ def create_app(
         """启动流水线（设置启动信号）— 仅接受 POST"""
         import redis
         r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-        r.delete("pipeline:status")  # 启动新推理时，清除上一次的完成标志
+        # 清除上一次的所有缓存数据
+        for key in r.scan_iter("inference:*"):
+            r.delete(key)
+        for key in r.scan_iter("module:*"):
+            r.delete(key)
+        for key in r.scan_iter("pipeline:*"):
+            r.delete(key)
+        for key in r.scan_iter("gaze:*"):
+            r.delete(key)
         r.set("pipeline:start_signal", "start", ex=3600)
         r.close()
         pipeline_state["status"] = "running"
