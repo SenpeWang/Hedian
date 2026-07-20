@@ -1,7 +1,5 @@
 """
-消息总线 — 基于 Redis Stream 的跨进程通信（持久化）
-
-所有模块通过 Redis Stream 通信，消息持久化，不会丢失。
+消息总线 — 基于 Redis Stream 的跨进程通信
 
 消息格式:
   {"type": str, "data": dict, "ts": float}
@@ -32,44 +30,30 @@ class EventTopic:
     VOICE_KEY_MOMENT = "voice.key_moment"
 
     # Tracker -> EventBus
-    TRACKER_HAND_RAISED = "tracker.hand_raised"
-    TRACKER_SUPERVISION_BOUND = "tracker.supervision_bound"
-    TRACKER_SUPERVISION_END = "tracker.supervision_end"
     TRACKER_PROXIMITY = "tracker.proximity"
-    TRACKER_ROLE_ASSIGNED = "tracker.role_assigned"
     TRACKER_HEADCOUNT = "tracker.headcount"
+
+    # Behavior -> EventBus
+    BEHAVIOR_HAND_RAISED = "behavior.hand_raised"
 
     # Gaze -> EventBus
     GAZE_ATTENTION = "gaze.attention"
     GAZE_ALERT = "gaze.alert"
 
-    # Behavior -> EventBus
-    BEHAVIOR_FINGER_SCREEN = "behavior.finger_screen"
-
     # Rules -> EventBus
     FLOW_STARTED = "flow.started"
     FLOW_ENDED = "flow.ended"
+    RULE_KEY_MOMENT = "rule.key_moment"
 
-    # Pipeline 控制
-    PIPELINE_STATUS = "pipeline.status"
-    PIPELINE_PROGRESS = "pipeline.progress"
+    # Evaluation -> All modules：通知各模块立即保存 key_moments
+    SAVE_KEY_MOMENTS = "save.key_moments"
 
 
 class EventBus:
-    """
-    基于 Redis Stream 的发布/订阅消息总线（跨进程，持久化）
-
-    特点：
-    - 消息持久化在 Redis Stream 中，不会丢失
-    - 支持消费者组，每个消费者独立消费
-    - 支持消息回放（新订阅者可以读到历史消息）
-    - 支持消息确认（XACK）
-    """
+    """基于 Redis Stream 的发布/订阅消息总线"""
 
     # Stream key 前缀
     STREAM_PREFIX = "module:events:"
-    # 消费者组名
-    CONSUMER_GROUP = "module_consumers"
 
     def __init__(self, redis_host: str = "localhost", redis_port: int = 6379,
                  redis_db: int = 0, max_workers: int = 4, consumer_name: str = None,
@@ -89,6 +73,8 @@ class EventBus:
             decode_responses=True, socket_connect_timeout=5,
         )
         self._consumer_name = consumer_name or f"consumer_{int(time.time() * 1000)}"
+        # 每进程独立消费组实现跨进程广播
+        self._consumer_group = f"{self._consumer_name}_group"
         self._subscribers: Dict[str, List[Callable]] = {}
         self._lock = threading.Lock()
         self._listener: Optional[threading.Thread] = None
@@ -100,7 +86,7 @@ class EventBus:
         # 测试连接
         try:
             self._redis.ping()
-            logger.info(f"Redis 连接成功: {redis_host}:{redis_port}/{redis_db}")
+            logger.info(f"Redis 连接成功: {redis_host}:{redis_port}/{redis_db}, 消费组: {self._consumer_group}")
         except redis.ConnectionError as e:
             logger.error(f"Redis 连接失败: {e}")
             raise
@@ -113,9 +99,9 @@ class EventBus:
         """确保消费者组存在"""
         try:
             self._redis.xgroup_create(
-                stream_key, self.CONSUMER_GROUP, id="0", mkstream=True
+                stream_key, self._consumer_group, id="0", mkstream=True
             )
-            logger.debug(f"创建消费者组: {stream_key}")
+            logger.debug(f"创建消费者组: {stream_key} / {self._consumer_group}")
         except redis.exceptions.ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
@@ -158,6 +144,12 @@ class EventBus:
         stream_key = self._get_stream_key(msg_type)
         self._ensure_consumer_group(stream_key)
 
+        # 若已 start 但 listener 未运行，现在补启动
+        if self._running and (self._listener is None or not self._listener.is_alive()):
+            self._listener = threading.Thread(target=self._listen_loop, daemon=True)
+            self._listener.start()
+            logger.info(f"延迟启动 listener: {msg_type}")
+
         logger.debug(f"订阅消息: {msg_type}")
 
     def unsubscribe(self, msg_type: str, callback: Callable) -> None:
@@ -199,19 +191,23 @@ class EventBus:
             logger.info("消息总线启动（无订阅频道）")
 
     def _listen_loop(self) -> None:
-        """监听循环：从所有订阅的 Stream 读取消息"""
-        stream_keys = []
-        with self._lock:
-            stream_keys = [self._get_stream_key(ch) for ch in self._subscribers.keys()]
-
-        # 从最新消息开始读取（> 表示只读取新消息）
-        last_ids = {key: ">" for key in stream_keys}
-
+        """监听循环：从所有订阅的 Stream 读取消息（动态支持运行时新增订阅）"""
         while not self._stop_event.is_set():
+            # 每次循环动态读取订阅列表，支持运行时 subscribe 新 topic
+            with self._lock:
+                stream_keys = [self._get_stream_key(ch) for ch in self._subscribers.keys()]
+
+            if not stream_keys:
+                time.sleep(0.5)
+                continue
+
+            # 从最新消息开始读取
+            last_ids = {key: ">" for key in stream_keys}
+
             try:
                 # XREADGROUP 阻塞读取，超时 1 秒
                 results = self._redis.xreadgroup(
-                    self.CONSUMER_GROUP,
+                    self._consumer_group,
                     self._consumer_name,
                     last_ids,
                     count=100,
@@ -238,19 +234,30 @@ class EventBus:
                                 self._executor.submit(self._safe_call, cb, msg, msg_type_actual)
 
                             # 确认消息已处理
-                            self._redis.xack(stream_key, self.CONSUMER_GROUP, entry_id)
+                            self._redis.xack(stream_key, self._consumer_group, entry_id)
 
                         except (json.JSONDecodeError, TypeError) as e:
                             logger.error(f"解析消息失败: {stream_key}, {e}")
                             # 确认消息，避免重复处理
-                            self._redis.xack(stream_key, self.CONSUMER_GROUP, entry_id)
+                            self._redis.xack(stream_key, self._consumer_group, entry_id)
 
             except redis.exceptions.ConnectionError as e:
                 logger.error(f"Redis 连接断开: {e}")
                 time.sleep(1)
             except Exception as e:
-                logger.error(f"监听循环异常: {e}")
-                time.sleep(0.1)
+                err_msg = str(e)
+                # NOGROUP 错误：消费者组不存在，自动重建
+                if "NOGROUP" in err_msg:
+                    for stream_key in stream_keys:
+                        try:
+                            self._ensure_consumer_group(stream_key)
+                        except Exception:
+                            pass
+                    # 短暂休眠避免日志刷屏
+                    time.sleep(0.5)
+                else:
+                    logger.error(f"监听循环异常: {e}")
+                    time.sleep(0.1)
 
     def _safe_call(self, cb: Callable, msg: dict, msg_type: str) -> None:
         """安全调用订阅者回调"""
