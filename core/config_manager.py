@@ -29,9 +29,9 @@ _DEFAULTS = {
         "video": "data/videos/camFRONT.mpg",
     },
     "supervision": {
-        "bind_hold_sec": 3.0,
+        "bind_hold_sec": 10.0,
         "unbind_hold_sec": 20.0,
-        "dist_close_px": 280,
+        "dist_close_px": 200,
         "dist_near_px": 560,
         "vote_window": 3,
         "vote_threshold": 2,

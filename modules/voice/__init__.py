@@ -13,7 +13,7 @@
 """
 from modules.voice.voice_module import VoiceModule
 from modules.voice.speech_transcriber import SpeechTranscriber
-from modules.voice.storage import VoiceResultStorage
+from modules.voice.storage_voice import VoiceResultStorage
 
 __all__ = [
     "VoiceModule",

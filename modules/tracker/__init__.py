@@ -14,7 +14,7 @@
 from modules.tracker.tracker_module import TrackerModule
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
-from modules.tracker.storage import TrackerStorage
+from modules.tracker.storage_tracker import TrackerStorage
 
 __all__ = [
     "TrackerModule",

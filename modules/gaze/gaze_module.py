@@ -12,6 +12,7 @@ from modules.gaze.head_detector import HeadDetector
 from modules.gaze.gaze_estimator import GazeEstimator
 from modules.gaze.roi_classifier import ROIClassifier
 from modules.gaze.gaze_attention import GazePoint, GazeAttentionChecker
+from modules.gaze.storage_gaze import GazeStorage
 
 logger = logging.getLogger("module.gaze.processor")
 
@@ -46,6 +47,7 @@ class GazeModule:
         display_fn: Callable = None,
         event_bus=None,
         progress_fn: Callable = None,
+        paths=None,
     ):
         """
         初始化凝视处理器
@@ -58,11 +60,26 @@ class GazeModule:
             display_fn: 推送推理结果的函数 (event_type, data) -> None
             event_bus: 消息总线（用于关键事件通信）
             progress_fn: 更新进度的函数 (current, total) -> None
+            paths: PathConfig 实例，用于结果保存
         """
         config = config or {}
 
         self._event_bus = event_bus
         self._progress_fn = progress_fn
+        self._storage = GazeStorage(paths) if paths is not None else None
+
+        # 信息通报流程激活标志
+        self._info_notice_active = False
+
+        # 订阅流程开始/结束事件
+        if self._event_bus is not None:
+            try:
+                from core.event_bus import EventTopic
+                self._event_bus.subscribe(EventTopic.FLOW_STARTED, self._on_flow_started)
+                self._event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
+                logger.info("GazeModule 已订阅 FLOW_STARTED/FLOW_ENDED 事件")
+            except Exception as e:
+                logger.warning(f"GazeModule 订阅流程事件失败: {e}")
 
         self._head_detector = HeadDetector(
             model_path=head_model_path,
@@ -81,7 +98,7 @@ class GazeModule:
 
         self._display_fn = display_fn
 
-        # 缓存（每10帧更新一次，其余帧复用）
+        # 缓存
         self._cached_results = []
         self._cached_has_heads = False
         self._cached_any_in_roi = False
@@ -96,64 +113,48 @@ class GazeModule:
         self._events = []
         self._latest_ts = 0.0
 
-        # ── 注视转动判定 ──
+        # 注视转动判定
         self._attention_checker = GazeAttentionChecker(
             min_turn_displacement=config.get("min_turn_displacement", 100.0),
             min_samples=config.get("min_gaze_samples", 5),
         )
         self._attn_window_interval = config.get("attention_window_interval", 3.0)
-        self._attn_label_duration = 2.0  # 标签显示秒数
-        # 动态窗口状态
-        self._attn_window_start = 0.0    # 当前窗口起始时间
-        self._attn_buffer: List[GazePoint] = []  # 当前窗口缓冲
-        self._attn_label = None          # (has_turned: bool, expire_ts: float) 或 None
+        self._attn_label_duration = 2.0
+        self._attn_window_start = 0.0
+        self._attn_buffer: List[GazePoint] = []
+        self._attn_label = None
 
-        logger.info("凝视处理器初始化完成（含注视关注度检查器）")
+        logger.info("凝视处理器初始化完成")
 
     def process_frame(self, frame: np.ndarray, ts: float, frame_count: int) -> np.ndarray:
-        """
-        处理一帧：检测、估计、可视化、推送
-
-        Args:
-            frame: BGR图像
-            ts: 时间戳（秒）
-            frame_count: 帧号
-
-        Returns:
-            画了凝视可视化的帧
-        """
+        """处理一帧：检测、估计、可视化、推送"""
         self._latest_ts = ts
         vis = frame.copy()
         h, w = vis.shape[:2]
 
-        # 1. 画 ROI 区域（半透明黄色）
+        # 画 ROI 区域
         self._draw_rois(vis)
-
-        # 2. 画 head_zones（蓝色虚线）
+        # 画 head_zones
         self._draw_head_zones(vis)
 
-        # 3. 每N帧做一次凝视检测
+        # 每N帧做一次凝视检测
         if frame_count % self._gaze_interval == 0:
             self._run_gaze_detection(frame, w, h, ts)
 
-        # 3.5 注视转动判定：收集注视点 + 窗口评估
+        # 注视转动判定
         self._update_attention(ts)
 
         # 更新进度时间
         if self._progress_fn:
             self._progress_fn(ts, None)
 
-        # 4. 用缓存结果画头部框+注视线+注视点
+        # 画头部框+注视线+注视点
         self._draw_gaze_results(vis, ts)
-
-        # 5. 画告警条
-        self._draw_alert_banner(vis, w, ts)
 
         return vis
 
     def _run_gaze_detection(self, frame: np.ndarray, w: int, h: int, ts: float):
-        """运行凝视检测（整帧检测，过滤head_zones）"""
-        # 在整帧上做头部检测
+        """运行凝视检测"""
         all_heads = self._head_detector.detect(frame)
         # 过滤：头部在 head_zones 内
         heads = self._roi_classifier.filter_heads_by_zone(all_heads)
@@ -184,12 +185,22 @@ class GazeModule:
                         "status": status,
                     })
 
+        # 计算当前 away 时长（无人注视盘台的持续秒数，用于前端进度条展示）
+        away_dur = 0.0
+        if self._cached_has_heads and not self._cached_any_in_roi and self._away_start_ts is not None:
+            away_dur = ts - self._away_start_ts
+
         # 推送凝视推理结果到推理流
         if self._display_fn:
             self._display_fn("gaze", {
                 "localSec": round(ts, 2),
                 "tag": "gaze_status",
-                "data": {"has_heads": self._cached_has_heads, "any_in_roi": self._cached_any_in_roi, "heads_count": len(self._cached_results)},
+                "data": {
+                    "has_heads": self._cached_has_heads,
+                    "any_in_roi": self._cached_any_in_roi,
+                    "heads_count": len(self._cached_results),
+                    "away_duration": round(away_dur, 2),
+                },
             })
 
         # 告警逻辑：无人注视超过60秒
@@ -203,51 +214,75 @@ class GazeModule:
             away_dur = ts - self._away_start_ts
             if away_dur >= self._away_threshold and not self._alerting:
                 self._alerting = True
-                event = {
-                    "localSec": round(ts, 2),
-                    "source": "gaze",
-                    "event": "GAZE_ALERT",
-                    "state": "无人注视盘台",
-                    "away_duration": round(away_dur, 2),
-                    "heads_count": len(self._cached_results),
-                }
-                # 告警开始时先不保存到 _events，因为不知道最终持续了多少秒。等结束或录制终止时统一计算时长并保存。
-                # 推送到推理流
+                # 推理流：data 只含纯展示字段
                 if self._display_fn:
-                    self._display_fn("gaze", {"localSec": event.get("localSec"), "tag": event.get("event"), "data": event})
-                # 推送到事件流（消息总线）
+                    self._display_fn("gaze", {
+                        "localSec": round(ts, 2),
+                        "tag": "GAZE_ALERT",
+                        "data": {
+                            "state": "无人注视盘台",
+                            "away_duration": round(away_dur, 2),
+                        },
+                    })
+                # 事件流：完整字段供规则状态机使用
                 if self._event_bus:
                     from core.event_bus import EventTopic
-                    self._event_bus.publish(EventTopic.GAZE_ALERT, event, ts=ts)
+                    self._event_bus.publish(EventTopic.GAZE_ALERT, {
+                        "localSec": round(ts, 2),
+                        "state": "无人注视盘台",
+                        "away_duration": round(away_dur, 2),
+                        "heads_count": len(self._cached_results),
+                    }, ts=ts)
                 logger.warning(f"凝视告警: 无人注视盘台 {away_dur:.1f}秒 @{ts:.1f}s")
         else:
             if self._alerting:
-                # 违规结束，此时计算并记录真实的持续秒数异常关键时刻
+                # 违规结束，记录持续秒数到关键时刻
                 duration = ts - self._away_start_ts if self._away_start_ts else 0.0
-                event = {
-                    "localSec": round(ts, 2),
-                    "source": "gaze",
-                    "event": "GAZE_VIOLATION_END",
-                    "duration": round(duration, 2),
-                }
-                # 记录“没有看盘台持续XX秒”异常状态到 _events， localSec 采用事件开始时间
                 self._events.append({
                     "localSec": round(self._away_start_ts, 2),
                     "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
-                    "source": "gaze"
                 })
-                # 推送到推理流
+                # 推理流：通知前端告警结束
                 if self._display_fn:
-                    self._display_fn("gaze", {"localSec": event.get("localSec"), "tag": event.get("event"), "data": event})
-                # 推送到事件流（消息总线）
+                    self._display_fn("gaze", {
+                        "localSec": round(ts, 2),
+                        "tag": "GAZE_VIOLATION_END",
+                        "data": {
+                            "state": "无人注视盘台",
+                            "duration": round(duration, 2),
+                        },
+                    })
+                # 事件流：完整字段供规则状态机使用
                 if self._event_bus:
                     from core.event_bus import EventTopic
-                    self._event_bus.publish(EventTopic.GAZE_ALERT, event, ts=ts)
+                    self._event_bus.publish(EventTopic.GAZE_ALERT, {
+                        "localSec": round(ts, 2),
+                        "state": "violation_end",
+                        "duration": round(duration, 2),
+                    }, ts=ts)
             self._away_start_ts = None
             self._alerting = False
 
+    def _on_flow_started(self, msg: dict) -> None:
+        """流程开始事件回调：信息通报流程开始时，激活 ATTENTION_RESULT 推送"""
+        data = msg.get("data", {})
+        if data.get("flow_type") == "info_notice":
+            self._info_notice_active = True
+            logger.info("GazeModule: 信息通报流程激活")
+
+    def _on_flow_ended(self, msg: dict) -> None:
+        """流程结束事件回调：信息通报流程结束时，关闭 ATTENTION_RESULT 推送"""
+        data = msg.get("data", {})
+        if data.get("flow_type") == "info_notice":
+            self._info_notice_active = False
+            logger.info("GazeModule: 信息通报流程结束")
+
     def _update_attention(self, ts: float):
-        """收集当前帧注视点到窗口缓冲区，窗口结束时评估。"""
+        """收集当前帧注视点到窗口缓冲区，窗口结束时评估
+
+        推送策略：推理流 ATTENTION_RESULT 仅在信息通报流程激活时推送；
+        事件流 GAZE_ATTENTION 始终发布，供 info_notice_rule 规则订阅判定。
+        """
         # 从当前帧缓存结果中取所有注视点的均值作为代表点
         if self._cached_results:
             gx_mean = sum(r["gaze_pt"][0] for r in self._cached_results) / len(self._cached_results)
@@ -259,27 +294,27 @@ class GazeModule:
             if self._attn_buffer:
                 result = self._attention_checker.evaluate(self._attn_buffer)
                 self._attn_label = (result.has_turned, ts + self._attn_label_duration)
-                # 推送到推理流
-                if self._display_fn:
+                # 推理流：仅在信息通报流程激活时推送
+                if self._display_fn and self._info_notice_active:
                     self._display_fn("gaze", {
                         "localSec": round(ts, 2),
                         "tag": "ATTENTION_RESULT",
-                        "data": {"has_turned": result.has_turned, "displacement": round(result.total_displacement, 1), "sample_count": result.sample_count, "reason": result.reason, "window": f"{self._attn_window_start:.1f}s~{ts:.1f}s"},
+                        "data": {
+                            "has_turned": result.has_turned,
+                            "displacement": round(result.total_displacement, 1),
+                        },
                     })
-                # 如果评估为“未转动”（即没有给予关注），则记录至关键时刻 _events 中
-                if not result.has_turned:
+                # 未转动则记录至关键时刻
+                if not result.has_turned and self._info_notice_active:
                     self._events.append({
                         "localSec": round(self._attn_window_start, 2),
                         "key_moment": "没有给予关注",
-                        "source": "gaze"
                     })
-                # 发布到消息总线（供 info_notice_rule 规则订阅判定）
+                # 事件流：始终发布
                 if self._event_bus:
                     from core.event_bus import EventTopic
                     self._event_bus.publish(EventTopic.GAZE_ATTENTION, {
                         "localSec": round(ts, 2),
-                        "source": "gaze",
-                        "event": "ATTENTION_RESULT",
                         "has_turned": result.has_turned,
                         "displacement": round(result.total_displacement, 1),
                         "sample_count": result.sample_count,
@@ -287,10 +322,11 @@ class GazeModule:
                         "window": f"{self._attn_window_start:.1f}s~{ts:.1f}s",
                     }, ts=ts)
                 logger.info(
-                    "注视转动窗口 %.1f-%.1fs: %s (位移 %.1f px, %d 样本)",
+                    "注视转动窗口 %.1f-%.1fs: %s (位移 %.1f px, %d 样本) info_notice_active=%s",
                     self._attn_window_start, ts,
                     "已关注" if result.has_turned else "未关注",
                     result.total_displacement, result.sample_count,
+                    self._info_notice_active,
                 )
             # 开启下一个窗口
             self._attn_window_start = ts
@@ -311,7 +347,7 @@ class GazeModule:
         cv2.addWeighted(overlay, 0.25, vis, 0.75, 0, vis)
 
     def _draw_head_zones(self, vis: np.ndarray):
-        """画head_zones（蓝色虚线）"""
+        """画head_zones（绿色虚线）"""
         zones = self._roi_classifier._head_zones
         if not zones:
             return
@@ -319,7 +355,7 @@ class GazeModule:
             pts = contour.astype(np.int32).reshape(-1, 2)
             for j in range(len(pts)):
                 if j % 2 == 0:
-                    cv2.line(vis, tuple(pts[j]), tuple(pts[(j+1)%len(pts)]), (255, 150, 0), 1, cv2.LINE_AA)
+                    cv2.line(vis, tuple(pts[j]), tuple(pts[(j+1)%len(pts)]), (0, 255, 0), 1, cv2.LINE_AA)
 
     def _draw_gaze_results(self, vis: np.ndarray, ts: float = 0.0):
         """画头部框+注视线+注视点+关注度标签"""
@@ -352,25 +388,18 @@ class GazeModule:
             else:
                 self._attn_label = None
 
-    def _draw_alert_banner(self, vis: np.ndarray, w: int, ts: float):
-        """画告警条（红色半透明横条）"""
-        if self._cached_has_heads and not self._cached_any_in_roi:
-            away_dur = ts - self._away_start_ts if self._away_start_ts else 0.0
-            overlay = vis.copy()
-            cv2.rectangle(overlay, (0, 0), (w, 40), (0, 0, 200), -1)
-            cv2.addWeighted(overlay, 0.6, vis, 0.4, 0, vis)
-            alert_text = f"ALERT: Gaze outside ROI! {int(away_dur)}/60S"
-            cv2.putText(vis, alert_text, (w // 2 - 200, 28),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 255), 2)
-
     def get_events(self) -> list:
-        """获取凝视事件"""
+        """获取凝视关键时刻事件"""
         events = list(self._events)
-        # 如果当前视频结束时仍处于未看盘台的告警状态中，自动计算到当前帧为止的持续时间并追加返回
+        # 视频结束时若仍处于告警状态，按当前帧计算持续时间并追加
         if self._alerting and self._away_start_ts is not None:
             duration = self._latest_ts - self._away_start_ts
             events.append({
                 "localSec": round(self._away_start_ts, 2),
-                "key_moment": f"没有看盘台持续{round(duration, 1)}秒"
+                "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
             })
         return events
+
+    def save_results(self, run_id: str) -> None:
+        """保存凝视关键事件到 gaze/gaze_key_moments.json（委托给 GazeStorage）"""
+        self._storage.save_key_moments(run_id, self.get_events())

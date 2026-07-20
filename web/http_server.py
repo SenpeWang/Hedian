@@ -6,10 +6,8 @@ HTTP 服务器模块
 import os
 import json
 import logging
-import queue
-import threading
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable
 
 from flask import Flask, Response, request, jsonify, send_file
 
@@ -24,7 +22,6 @@ def create_app(
     registry,
     paths,
     pipeline_runner: Callable = None,
-    frame_queues: dict = None,
 ) -> Flask:
     """
     创建 Flask 应用
@@ -50,13 +47,6 @@ def create_app(
     # 流水线状态
     pipeline_state = {"status": "idle", "thread": None}
 
-    # 视频帧队列（从外部传入，与模块共享）
-    if frame_queues is None:
-        frame_queues = {
-            "tracker": queue.Queue(maxsize=8),
-            "behavior": queue.Queue(maxsize=8),
-        }
-
     @app.route("/")
     def index():
         """首页"""
@@ -64,10 +54,11 @@ def create_app(
 
     @app.route("/start", methods=["POST"])
     def start():
-        """启动流水线（设置启动信号）— 仅接受 POST"""
+        """启动流水线：清理 Redis 缓存后设置带时间戳的代际信号，动态更新 run_id"""
         import redis
+        import time as _time
         r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
-        # 清除上一次的所有缓存数据
+        # 清除上一次的缓存数据
         for key in r.scan_iter("inference:*"):
             r.delete(key)
         for key in r.scan_iter("module:*"):
@@ -76,30 +67,44 @@ def create_app(
             r.delete(key)
         for key in r.scan_iter("gaze:*"):
             r.delete(key)
-        r.set("pipeline:start_signal", "start", ex=3600)
+        
+        sig_time = _time.time()
+        # 设置代际信号
+        r.set("pipeline:start_signal", str(sig_time), ex=3600)
         r.close()
+        
+        # 动态生成本轮推理的 run_id，彻底隔绝物理目录干扰
+        from datetime import datetime
+        new_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
+        config["run_id"] = new_run_id
+        
+        # 广播新推理代际启动事件，驱动规则记录与评价器就地重置路径
+        event_bus.publish("pipeline.start", {"run_id": new_run_id}, ts=sig_time)
+        
         pipeline_state["status"] = "running"
-        logger.info(f"启动信号已设置，来源: {request.remote_addr}")
+        logger.info(f"启动信号已设置，生成动态运行批次 run_id={new_run_id}，来源: {request.remote_addr}")
         return jsonify({"status": "started"})
 
-    @app.route("/events")
-    def events():
-        """SSE 事件流"""
+    @app.route("/data")
+    def data_stream():
+        """推理流 SSE"""
+        logger.info(f"SSE /data 连接建立，来源: {request.remote_addr}")
+
         def generate():
             client_queue = sse_handler.add_client()
             try:
                 while True:
                     try:
-                        event = client_queue.get(timeout=25)
+                        item = client_queue.get(timeout=25)
                     except Exception:
                         yield ": keepalive\n\n"
                         continue
 
-                    if event is None:
-                        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+                    if item is None:
+                        yield f"data: {json.dumps({'source': 'done'})}\n\n"
                         break
 
-                    yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
+                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
             finally:
                 sse_handler.remove_client(client_queue)
 
@@ -113,50 +118,14 @@ def create_app(
             },
         )
 
-    @app.route("/stream")
-    def stream():
-        """MOT 视频流"""
-        def generate():
-            q = frame_queues["tracker"]
-            while True:
-                try:
-                    data = q.get(timeout=5)
-                except Exception:
-                    continue
-                if data is None:
-                    break
-                yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + data + b"\r\n")
-        return Response(
-            generate(),
-            mimetype="multipart/x-mixed-replace; boundary=frame",
-        )
-
-    @app.route("/stream2")
-    def stream2():
-        """行为检测视频流"""
-        def generate():
-            q = frame_queues["behavior"]
-            while True:
-                try:
-                    data = q.get(timeout=5)
-                except Exception:
-                    continue
-                if data is None:
-                    break
-                yield (b"--frame\r\n"
-                       b"Content-Type: image/jpeg\r\n\r\n" + data + b"\r\n")
-        return Response(
-            generate(),
-            mimetype="multipart/x-mixed-replace; boundary=frame",
-        )
-
     @app.route("/audio")
     def audio():
-        """音频文件"""
-        wav = str(paths.data_root / "raw_from_video.wav")
-        if os.path.exists(wav):
-            return send_file(wav, mimetype="audio/wav")
+        """音频文件：严格只动态读取当前运行批次下的音频"""
+        run_id = config.get("run_id")
+        if run_id:
+            wav = str(paths.get_result_path(run_id=run_id, module="voice", filename="audio.wav"))
+            if os.path.exists(wav):
+                return send_file(wav, mimetype="audio/wav")
         return "", 404
 
     @app.route("/status")
@@ -168,7 +137,7 @@ def create_app(
         r.close()
 
         status_val = pipeline_state["status"]
-        # 如果 Redis 中 pipeline:status 不存在或 done，代表没有活跃推理，重置为空闲
+        # Redis 显示 done 则重置为空闲
         if redis_status == "done":
             status_val = "idle"
             pipeline_state["status"] = "idle"
@@ -192,29 +161,7 @@ def create_app(
 
     # 保存引用供外部使用
     app.sse_handler = sse_handler
-    app.frame_queues = frame_queues
     app.pipeline_state = pipeline_state
 
     return app
 
-
-def _run_pipeline(
-    pipeline_runner: Callable,
-    sse_handler: SSEHandler,
-    pipeline_state: dict,
-) -> None:
-    """
-    运行流水线
-
-    Args:
-        pipeline_runner: 流水线运行函数
-        sse_handler: SSE 处理器
-        pipeline_state: 流水线状态
-    """
-    try:
-        pipeline_runner()
-    except Exception as e:
-        logger.error(f"流水线错误: {e}", exc_info=True)
-        sse_handler.push({"type": "error", "message": str(e)})
-    finally:
-        pipeline_state["status"] = "idle"

@@ -11,9 +11,7 @@ logger = logging.getLogger("core.inference_bus")
 
 
 class InferenceBus:
-    """
-    推理总线 (只写模式)
-    """
+    """推理总线（只写模式）"""
 
     def __init__(
         self,
@@ -39,14 +37,13 @@ class InferenceBus:
 
         # 立即推送的事件类型
         self._immediate_types: Set[str] = {
-            "status", "progress", "video_start", "done", "report_progress",
+            "progress", "video_start",
         }
 
-        # 进度计数器（防止 Stream 消息ID冲突）
         self._event_counter = 0
 
     def update_module_time(self, module_name: str, sec: float) -> None:
-        """更新模块的当前进度（时间戳）"""
+        """更新模块的当前进度"""
         try:
             self._redis.hset(self._KEY_PROGRESS, module_name, str(sec))
         except Exception as e:
@@ -83,33 +80,11 @@ class InferenceBus:
             return {}
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
-        """
-        向 Redis 推送模块推理事件
-
-        Args:
-            event_type: 事件类型
-            data: 事件数据
-        """
-        ev = {"type": event_type, **data}
-        logger.debug(f"InferenceBus 收到事件: type={event_type}, localSec={data.get('localSec', 'N/A')}")
+        """向 Redis 推送模块推理事件"""
+        ev = {"source": event_type, **data}
+        logger.debug(f"InferenceBus 收到事件: source={event_type}, localSec={data.get('localSec', 'N/A')}")
 
         try:
-            # video_frame 图像帧特殊处理：将大图保存在单独 webd 目录，减小 Stream 大小
-            if event_type == "video_frame":
-                frame_data = data.get("frame_data")
-                local_sec = data.get("localSec", 0)
-                if frame_data:
-                    frame_key = f"inference:video_frame:{local_sec}"
-                    self._redis.set(frame_key, frame_data, ex=300)  # 5分钟过期
-                ev_light = {"type": "video_frame", "localSec": local_sec, "source": data.get("source", "")}
-                self._event_counter += 1
-                self._redis.xadd(self._KEY_EVENT_STREAM, {
-                    "local_sec": str(local_sec),
-                    "counter": str(self._event_counter),
-                    "payload": json.dumps(ev_light, ensure_ascii=False),
-                })
-                return
-
             if event_type in self._immediate_types:
                 if "localSec" in ev:
                     ev["context"] = self._get_context()

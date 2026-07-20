@@ -10,11 +10,12 @@
 """
 import os
 import json
+import time
 import logging
 import threading
 import concurrent.futures
 import redis
-from typing import Dict, List, Optional, Callable
+from typing import Dict, List, Callable
 
 from core.event_bus import EventBus, EventTopic
 from evaluation.flow_data_extractor import FlowDataExtractor
@@ -37,7 +38,7 @@ class FlowEvaluationManager:
         fps: float = 30.0,
         model_path: str = None,
         display_fn: Callable = None,
-    ):
+        ):
         """
         初始化评估编排器
 
@@ -53,12 +54,12 @@ class FlowEvaluationManager:
         self._fps = fps
         self._display_fn = display_fn
 
-        # 默认模型路径
+        # 默认模型路径（Qwen3-8B，部署在 GPU 0）
         if model_path is None:
             from pathlib import Path
-            model_path = str(Path(__file__).parent.parent / "models" / "evaluation")
+            model_path = str(Path(__file__).parent.parent / "models" / "evaluation" / "Qwen3-8B")
 
-        # 数据提取器（传入 Redis 客户端用于读取模块进度）
+        # 数据提取器
         redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
         self._data_extractor = FlowDataExtractor(result_dir, redis_client=redis_client)
 
@@ -66,7 +67,6 @@ class FlowEvaluationManager:
         self._qwen_evaluator = QwenEvaluator(model_path=model_path)
 
         # 流程管理
-        self._active_flows = {}
         self._completed_flows = []
         self._segment_reports = []
 
@@ -87,98 +87,80 @@ class FlowEvaluationManager:
 
         logger.info("FlowEvaluationManager 初始化完成")
 
+    def set_result_dir(self, result_dir: str) -> None:
+        """动态更新评估结果目录"""
+        self._result_dir = result_dir
+        self._qwen_dir = os.path.join(result_dir, "qwen")
+        os.makedirs(self._qwen_dir, exist_ok=True)
+        if hasattr(self, "_data_extractor") and self._data_extractor:
+            self._data_extractor._result_dir = result_dir
+        logger.info(f"FlowEvaluationManager 结果目录动态更新为: {result_dir}")
+
     def _on_flow_started(self, msg: dict) -> None:
-        """处理流程开始事件"""
+        """处理流程开始事件：仅用于实时将流程启动信号推送到前端显示，不保存冗余状态"""
         data = msg.get("data", {})
         flow_id = data.get("flow_id", 0)
         flow_type = data.get("flow_type", "unknown")
         ts = data.get("flow_start_sec", msg.get("ts", 0))
 
-        flow = {
-            "flow_id": flow_id,
-            "flow_type": flow_type,
-            "flow_start_sec": ts,
-            "start_source": data.get("start_source", "unknown"),
-            "flow_end_sec": None,
-            "end_source": None,
-            "device_code": data.get("device_code", ""),
-            "content_checklist": data.get("content_checklist", {}),
-            "sub_flows": [],
-        }
-
-        with self._lock:
-            self._active_flows[flow_id] = flow
-
         if self._display_fn:
             self._display_fn("flow_start", {
                 "localSec": ts,
-                "flowId": flow_id,
-                "flow_type": flow_type,
-                "flow_start_sec": ts,
-                "start_source": data.get("start_source", "unknown"),
+                "tag": "flow_start",
+                "data": {
+                    "flow_id": flow_id,
+                    "flow_type": flow_type,
+                    "flow_start_sec": ts,
+                    "start_source": data.get("start_source", "unknown"),
+                },
             })
 
         logger.info(f"流程开始 flow_id={flow_id} type={flow_type} @{ts:.1f}s")
 
     def _on_flow_ended(self, msg: dict) -> None:
-        """处理流程结束事件"""
-        data = msg.get("data", {})
-        flow_id = data.get("flow_id", 0)
-        ts = data.get("flow_end_sec", msg.get("ts", 0))
+        """处理流程结束事件：直接利用消息中携带的完备 flow 数据，无需从内存中 pop 合并"""
+        flow = msg.get("data", {})
+        flow_id = flow.get("flow_id", 0)
+        if not flow_id:
+            logger.warning("FLOW_ENDED 事件缺少 flow_id")
+            return
 
         with self._lock:
-            flow = self._active_flows.pop(flow_id, None)
-            if flow is None:
-                flow = {
-                    "flow_id": flow_id,
-                    "flow_type": data.get("flow_type", "unknown"),
-                    "flow_start_sec": data.get("flow_start_sec", 0),
-                    "start_source": data.get("start_source", "unknown"),
-                }
-
-            flow["flow_end_sec"] = ts
-            flow["end_source"] = data.get("end_source", "unknown")
-            flow["flow_continue_sec"] = data.get(
-                "flow_continue_sec",
-                round(ts - flow.get("flow_start_sec", 0), 2),
-            )
-            flow["content_checklist"] = data.get("content_checklist", {})
-            flow["device_code"] = data.get("device_code", "")
             self._completed_flows.append(flow)
-
-        # 持久化流程事件
-        self._save_flow_events()
 
         if self._display_fn:
             self._display_fn("flow_end", {
-                "localSec": ts,
-                "flowId": flow_id,
-                "flow_type": flow.get("flow_type"),
-                "flow_start_sec": flow.get("flow_start_sec"),
-                "flow_end_sec": ts,
-                "flow_continue_sec": flow.get("flow_continue_sec"),
-                "end_source": data.get("end_source"),
-                "content_checklist": flow.get("content_checklist"),
+                "localSec": flow.get("flow_end_sec", 0),
+                "tag": "flow_end",
+                "data": flow,
             })
 
-        logger.info(f"流程结束 flow_id={flow_id} @{ts:.1f}s")
+        logger.info(f"流程结束 flow_id={flow_id}")
 
-        # 异步评估(不阻塞主线程处理其他事件)
-        self._executor.submit(self._evaluate_and_save, flow)
+        future = self._executor.submit(self._extract_save_and_evaluate, flow)
+        with self._eval_lock:
+            self._eval_futures[f"extract_{flow_id}"] = future
+        future.add_done_callback(
+            lambda f, fid=flow_id: self._on_extract_done(fid)
+        )
 
-    def _evaluate_and_save(self, flow: Dict) -> None:
-        """
-        触发评估并保存结果
+    def _on_extract_done(self, flow_id: int) -> None:
+        """数据提取完成回调"""
+        with self._eval_lock:
+            self._eval_futures.pop(f"extract_{flow_id}", None)
 
-        Args:
-            flow: 流程数据
-        """
+    def _extract_save_and_evaluate(self, flow: Dict) -> None:
+        """提取流程数据 → 保存到 extracted_{flow_type}_{flow_id}.json → 立即评估"""
         start_sec = flow.get("flow_start_sec", 0)
         end_sec = flow.get("flow_end_sec") or start_sec
 
-        # 使用数据提取器加载事件
-        voice_events, tracker_events, gaze_events = self._data_extractor.extract(
-            start_sec, end_sec, wait=True, timeout=300
+        self._data_extractor._wait_all_modules(end_sec, timeout=300)
+
+        self._event_bus.publish(EventTopic.SAVE_KEY_MOMENTS, {"flow_id": flow.get("flow_id")}, ts=end_sec)
+        time.sleep(2.0)
+
+        voice_events, tracker_events, gaze_events, behavior_events = self._data_extractor.extract(
+            start_sec, end_sec, wait=False, timeout=300
         )
 
         flow_data = {
@@ -195,34 +177,78 @@ class FlowEvaluationManager:
             "voice_events": voice_events,
             "tracker_events": tracker_events,
             "gaze_events": gaze_events,
+            "behavior_events": behavior_events,
         }
-
-        # 保存提取并拼接的 JSON 文件到 evaluation 文件夹内
-        self._data_extractor.save_extracted_data(flow_data)
 
         if flow.get("flow_type") in ("supervision", "info_notice"):
             flow_data["content_checklist"] = flow.get("content_checklist", {})
         if flow.get("flow_type") == "self_ticket":
             flow_data["device_code"] = flow.get("device_code", "")
 
-        # 异步评估
-        future = self._executor.submit(self._do_evaluate, flow_data)
-        with self._eval_lock:
-            self._eval_futures[flow["flow_id"]] = future
-        future.add_done_callback(
-            lambda f, fid=flow["flow_id"]: self._on_eval_done(f, fid)
+        self._data_extractor.save_extracted_data(flow_data)
+        logger.info(f"flow_id={flow.get('flow_id')} 数据已提取保存，准备立即评估")
+
+        flow_id = flow.get("flow_id")
+        flow_type = flow.get("flow_type", "unknown")
+        saved_data = self._load_extracted_flow(flow_type, flow_id)
+        if not saved_data:
+            logger.error(
+                f"flow_type={flow_type} flow_id={flow_id} 读取 "
+                f"extracted_{flow_type}_{flow_id}.json 失败，跳过评估"
+            )
+            return
+
+        flow_counts = self._get_flow_counts_by_type()
+        total_flows = flow_counts.get(flow_type, 0)
+        logger.info(
+            f"flow_type={flow_type} flow_id={flow_id} 开始评估，"
+            f"当前 {flow_type} 类型共 {total_flows} 个流程，"
+            f"全部流程计数: {flow_counts}"
         )
 
-    def _do_evaluate(self, flow_data: Dict) -> tuple:
-        """
-        执行评估
+        future = self._executor.submit(self._do_evaluate, saved_data, total_flows)
+        with self._eval_lock:
+            self._eval_futures[flow_id] = future
+        future.add_done_callback(
+            lambda f, fid=flow_id: self._on_eval_done(f, fid)
+        )
 
-        Args:
-            flow_data: 流程数据
+    def _load_extracted_flow(self, flow_type: str, flow_id: int) -> Dict:
+        """从 extracted_{flow_type}_{flow_id}.json 读取流程数据"""
+        path = os.path.join(
+            self._result_dir, "evaluation", f"extracted_{flow_type}_{flow_id}.json"
+        )
+        try:
+            with open(path, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.error(f"读取 extracted_{flow_type}_{flow_id}.json 失败: {e}")
+            return {}
 
-        Returns:
-            (评估结果, 流程数据)
-        """
+    def _get_flow_counts_by_type(self) -> Dict[str, int]:
+        """按 flow_type 统计每种流程类型的数量（max flow_id）"""
+        eval_dir = os.path.join(self._result_dir, "evaluation")
+        counts: Dict[str, int] = {}
+        if not os.path.exists(eval_dir):
+            return counts
+        for fn in os.listdir(eval_dir):
+            if fn.startswith("extracted_") and fn.endswith(".json"):
+                name_part = fn[len("extracted_"):-len(".json")]
+                # flow_type 可能含下划线（如 self_ticket），从右边分
+                idx = name_part.rfind("_")
+                if idx <= 0:
+                    continue
+                flow_type = name_part[:idx]
+                try:
+                    fid = int(name_part[idx + 1:])
+                    if fid > counts.get(flow_type, 0):
+                        counts[flow_type] = fid
+                except ValueError:
+                    continue
+        return counts
+
+    def _do_evaluate(self, flow_data: Dict, total_flows: int = 0) -> tuple:
+        """执行评估，返回 (评估结果, 流程数据)"""
         flow_id = flow_data["flow_id"]
         eval_local_sec = flow_data.get("flow_end_sec", flow_data.get("flow_start_sec", 0))
 
@@ -230,18 +256,20 @@ class FlowEvaluationManager:
             if self._display_fn:
                 self._display_fn("segment_report_stream", {
                     "localSec": eval_local_sec,
-                    "flowId": flow_id,
-                    "chunk": text_chunk,
+                    "tag": "segment_report_stream",
+                    "data": {
+                        "flow_id": flow_id,
+                        "chunk": text_chunk,
+                    },
                 })
 
         try:
-            # Qwen 大模型评估
             qwen_report = self._qwen_evaluator.evaluate(
                 flow_data,
                 stream_callback=stream_cb,
+                total_flows=total_flows,
             )
 
-            # 结果
             report = {
                 "flow_type": qwen_report.get("flow_type", "未知"),
                 "score": qwen_report.get("score", 0),
@@ -279,11 +307,15 @@ class FlowEvaluationManager:
                 "flow_type": "未知",
                 "score": 0,
                 "report_text": f"评估失败: {e}",
-                "rule_score": 0,
-                "rule_report": "",
                 "prompt": "",
             }
-            flow_data = {"flow_continue_sec": 0}
+            flow_data = {"flow_id": flow_id, "flow_continue_sec": 0}
+
+        # 给 report 加上 flow_id 便于追溯
+        report["flow_id"] = flow_id
+
+        # 单独保存该 flow 的 LLM 评估结果（包含 prompt + 报告 + 流程数据）
+        self._save_flow_llm_response(flow_id, report, flow_data)
 
         with self._lock:
             self._segment_reports.append(report)
@@ -296,27 +328,36 @@ class FlowEvaluationManager:
                     "flow_end_sec",
                     flow_data.get("flow_start_sec", 0),
                 ),
-                "flowId": flow_data.get("flow_id"),
-                "flow_type": report.get("flow_type"),
-                "score": report.get("score", 0),
-                "report_text": report.get("report_text", ""),
-                "flow_continue_sec": flow_data.get("flow_continue_sec"),
+                "tag": "segment_report",
+                "data": {
+                    "flow_id": flow_id,
+                    "flow_type": report.get("flow_type"),
+                    "score": report.get("score", 0),
+                    "report_text": report.get("report_text", ""),
+                    "flow_continue_sec": flow_data.get("flow_continue_sec"),
+                },
             })
 
-    def _save_flow_events(self) -> None:
-        """保存流程事件（开始/结束时间）"""
-        path = os.path.join(self._result_dir, "flow_events.json")
-
-        with self._lock:
-            flows = list(self._completed_flows)
-
+    def _save_flow_llm_response(self, flow_id: int, report: Dict, flow_data: Dict) -> None:
+        """保存单个 flow 的 LLM 评估结果到 qwen_response_{flow_id}.json"""
         try:
+            payload = {
+                "flow_id": flow_id,
+                "flow_type": report.get("flow_type", "未知"),
+                "flow_start_sec": flow_data.get("flow_start_sec"),
+                "flow_end_sec": flow_data.get("flow_end_sec"),
+                "flow_continue_sec": flow_data.get("flow_continue_sec"),
+                "score": report.get("score", 0),
+                "prompt": report.get("prompt", ""),
+                "report_text": report.get("report_text", ""),
+                "flow_data": flow_data,
+            }
+            path = os.path.join(self._qwen_dir, f"qwen_response_{flow_id}.json")
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(flows, f, ensure_ascii=False, indent=2)
-            logger.info(f"保存 {len(flows)} 个流程事件")
-
+                json.dump(payload, f, ensure_ascii=False, indent=2)
+            logger.info(f"flow_id={flow_id} LLM 响应已保存到 {path}")
         except Exception as e:
-            logger.error(f"保存流程事件失败: {e}", exc_info=True)
+            logger.error(f"保存 flow_id={flow_id} LLM 响应失败: {e}", exc_info=True)
 
     def _save_segment_reports(self) -> None:
         """保存分段评估报告"""
@@ -334,26 +375,33 @@ class FlowEvaluationManager:
             logger.error(f"保存分段评估报告失败: {e}", exc_info=True)
 
     def finalize(self) -> None:
-        """视频结束时的清理"""
-        with self._lock:
-            for flow_id, flow in list(self._active_flows.items()):
-                flow["flow_end_sec"] = flow.get("flow_start_sec", 0) + 60.0
-                flow["end_source"] = "finalize"
-                self._completed_flows.append(flow)
-            self._active_flows.clear()
-
-        # 持久化流程事件
-        self._save_flow_events()
-
+        """视频结束时的清理：等待所有评估任务完成"""
         for flow in self._completed_flows:
-            already = any(
-                r.get("flow_id") == flow["flow_id"]
-                for r in self._segment_reports
+            fid = flow.get("flow_id")
+            ftype = flow.get("flow_type", "unknown")
+            already = any(r.get("flow_id") == fid for r in self._segment_reports)
+            extracted_path = os.path.join(
+                self._result_dir, "evaluation", f"extracted_{ftype}_{fid}.json"
             )
-            if not already:
-                self._evaluate_and_save(flow)
+            if not already and not os.path.exists(extracted_path):
+                self._extract_save_and_evaluate(flow)
 
-        with self._eval_lock:
-            pending = list(self._eval_futures.values())
-        if pending:
-            concurrent.futures.wait(pending, timeout=300)
+        # 阻塞等待所有大模型数据提取与评估任务全部完成
+        logger.info("开始等待所有大模型数据提取与评估任务完成...")
+        import time
+        start_wait = time.time()
+        while True:
+            with self._eval_lock:
+                active_futures = list(self._eval_futures.values())
+            if not active_futures:
+                break
+            
+            # 等待当前的所有活跃任务
+            concurrent.futures.wait(active_futures, timeout=1.0)
+            
+            # 超时保护（300秒）
+            if time.time() - start_wait > 300.0:
+                logger.warning("等待大模型评估完成超时！强行终止")
+                break
+            time.sleep(0.5)
+        logger.info("所有大模型数据提取与评估任务已全部完成")

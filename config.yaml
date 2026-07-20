@@ -12,9 +12,9 @@ paths:
   video: "data/videos/camFRONT.mpg"
 
 supervision:
-  bind_hold_sec: 3.0
+  bind_hold_sec: 10.0
   unbind_hold_sec: 10.0
-  dist_close_px: 280
+  dist_close_px: 200
   dist_near_px: 560
   vote_window: 3
   vote_threshold: 2
@@ -25,7 +25,7 @@ bus:
 
 voice:
   sample_rate: 16000
-  sentence_gap_sec: 1.5
+  sentence_gap_sec: 0.6
   asr_engine: "qwen3"
   model_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0.6B"
   aligner_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0.6B"

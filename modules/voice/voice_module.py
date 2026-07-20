@@ -8,11 +8,15 @@ import logging
 
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
-from core.display_buffer import DisplayBuffer
+from core.inference_bus import InferenceBus
 from core.path_manager import PathConfig
 
-from modules.voice.speech_transcriber import SpeechTranscriber, process_transcribed_words
-from modules.voice.storage import VoiceResultStorage
+from modules.voice.speech_transcriber import (
+    SpeechTranscriber,
+    process_transcribed_words,
+    normalize_devices_in_text,
+)
+from modules.voice.storage_voice import VoiceResultStorage
 
 logger = logging.getLogger("module.voice")
 
@@ -29,7 +33,7 @@ class VoiceModule(BaseModule):
         event_bus: EventBus,
         config: dict,
         paths: PathConfig,
-        display_buffer: DisplayBuffer,
+        display_buffer: InferenceBus,
     ):
         super().__init__(event_bus, config, paths, display_buffer)
         self._transcriber = None
@@ -48,6 +52,7 @@ class VoiceModule(BaseModule):
             voice_config = self.config.get("voice", {})
             self._transcriber = SpeechTranscriber(
                 model_path=voice_config.get("model_path"),
+                aligner_path=voice_config.get("aligner_path"),
                 sample_rate=voice_config.get("sample_rate", 16000),
                 device="cuda",
                 torch_dtype=voice_config.get("torch_dtype"),
@@ -64,7 +69,7 @@ class VoiceModule(BaseModule):
             return False
 
     def process_video(self, video_path: str) -> None:
-        """处理视频，逐段转录、逐段分类、逐段推送（与其他模块时间对齐）"""
+        """处理视频，逐段转录、逐段分类、逐段推送"""
         try:
             # 提取音频
             audio_path = self._extract_audio(video_path)
@@ -72,36 +77,42 @@ class VoiceModule(BaseModule):
                 logger.error("音频提取失败")
                 return
 
-            # 逐段转录，每段完成后立即分类并推送
             logger.info("开始语音转文字（逐段模式）...")
 
             def on_segment_done(words, seg_start, seg_end, total_dur):
-                """每段转录完成后的回调：分句后按需推送推理流与事件流"""
+                """每段转录完成后的回调"""
                 if not words:
                     return
-                events = process_transcribed_words(words, sentence_gap_sec=1.5)
+                events = process_transcribed_words(words, sentence_gap_sec=self.config.get("voice", {}).get("sentence_gap_sec", 0.6))
                 for event in events:
                     local_sec = event.get("localSec", 0.0)
                     text = event.get("text", "")
                     key_moment = event.get("key_moment", "")
 
-                    # 1. 推送推理流：完全的实时转录结果 (只包含时间轴和转录文本)
+                    # 推理流：实时转录结果（设备码归一化为纯英文+数字，仅用于展示）
                     if text:
+                        display_text = normalize_devices_in_text(text)
                         self.push_display("voice", {
                             "localSec": local_sec,
                             "tag": "text",
-                            "data": {"text": text}
+                            "data": {"text": display_text}
                         })
-                        # 写入最新语音快照，供追踪事件上下文展示
-                        self.display_buffer.update_module_snapshot("voice", {"latest_text": text})
+                        self.display_buffer.update_module_snapshot("voice", {"latest_text": display_text})
 
-                    # 2. 推送事件流：仅核心关键字（含 localSec 和 key_moment）
+                    # key_moment 既推推理流又推事件流
                     if key_moment:
+                        self.push_display("voice", {
+                            "localSec": local_sec,
+                            "tag": "key_moment",
+                            "data": {"key_moment": key_moment}
+                        })
                         self.push_event(EventTopic.VOICE_KEY_MOMENT, {
                             "localSec": local_sec,
                             "key_moment": key_moment,
                         }, ts=local_sec)
 
+                    # 保存归一化后的文本，确保 voice_full_text.json 中的设备码为纯英文数字
+                    event["text"] = display_text if text else event.get("text", "")
                     self._events.append(event)
                 self.update_progress(seg_end, total_dur)
                 logger.debug("voice segment %.1f-%.1fs: %d events", seg_start, seg_end, len(events))
@@ -124,8 +135,9 @@ class VoiceModule(BaseModule):
         """从视频提取音频"""
         import subprocess
 
+        # 使用当前推理的 run_id，确保音频文件与其他结果位于同一 result_dir
         audio_path = str(self.paths.get_result_path(
-            run_id="temp",
+            run_id=self._run_id,
             module="voice",
             filename="audio.wav",
         ))
@@ -141,27 +153,5 @@ class VoiceModule(BaseModule):
             return None
 
     def save_results(self, run_id: str) -> None:
-        """保存语音结果"""
-        if not self._events:
-            logger.warning("没有事件可保存")
-            return
-
-        # 仅保留具有有效关键时刻的事件，并且每一项格式严格为 localSec 与 key_moment (无 text 字段)
-        key_moment_events = []
-        for event in self._events:
-            key_moment = event.get("key_moment")
-            if key_moment:
-                key_moment_events.append({
-                    "localSec": event.get("localSec"),
-                    "key_moment": key_moment,
-                    "source": "voice",
-                })
-
-        # 调用存储器，解耦保存
-        self._result_storage.save_key_moments(run_id, key_moment_events)
-
-        # 保存完整文本
-        full_text = " ".join(event.get("text", "") for event in self._events)
-        self._result_storage.save_full_text(run_id, full_text)
-
-        logger.info(f"语音结果已保存到 {run_id}")
+        """保存语音结果（委托给 VoiceResultStorage）"""
+        self._result_storage.save_results(run_id, self._events)
