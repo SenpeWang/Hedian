@@ -9,15 +9,16 @@
 ```
 main.py (协调器)
 ├── voice 进程    → 语音转文字 + key_moment提取
-├── tracker 进程  → 目标检测+跟踪+举手检测(内部调用GazeProcessor)
-├── gaze 进程     → 头部检测+凝视估计(嵌入tracker内)
-├── behavior 进程 → 行为检测(举手检测,占位图)
-└── web 进程      → Flask + SSE推送
+├── tracker 进程  → 目标检测+跟踪+举手检测(内部调用 GazeModule)
+├── behavior 进程 → 行为检测(手指指屏幕)
+└── web 进程      → Flask + SSE推送 + ModuleSync对齐 + Evaluation评估
 ```
 
-**双流机制：**
-- **推理流（展示流）**：`push_display()` → Redis Stream → ModuleSync对齐 → batch → SSE → 前端
-- **事件流**：`push_event()` → EventBus → 规则订阅（监护制/自唱票/信息通报/人员状态）
+> gaze 不是独立进程，作为 `GazeModule` 嵌入 tracker 进程内调用。
+
+**双流机制（严格解耦）：**
+- **推理流（前端可视化）**：`push_display(source, data)` → Redis Stream → ModuleSync 按 globalSec 对齐打包 batch → SSE → 前端
+- **事件流（模型间通信）**：`push_event(EventTopic.XXX, data, ts)` → EventBus → 规则订阅（监护制/自唱票/信息通报/人员状态）
 
 ---
 
@@ -27,19 +28,19 @@ main.py (协调器)
 
 ```json
 {
-  "source": "voice|tracking|gaze|video|progress",
+  "source": "voice|tracking|gaze|video|progress|behavior",
   "localSec": 12.5,
   "tag": "text|status|alert|frame|progress",
-  "data": { ... }
+  "data": { ... 纯展示字段 ... }
 }
 ```
 
 | 字段 | 说明 | 必填 |
 |------|------|------|
-| `source` | 模块来源，前端路由用 | 是 |
+| `source` | 模块来源，前端 batch 路径按此分组分发 | 是 |
 | `localSec` | 对齐时间戳，有=需要对齐，无=立即推 | 对齐数据必填 |
 | `tag` | 事件类型，区分同模块的不同事件 | 是 |
-| `data` | 具体业务数据 | 是 |
+| `data` | 纯展示业务数据，**严禁夹带** source/type/event/localSec 等元字段 | 是 |
 
 ### 各模块推理流字段
 
@@ -47,13 +48,13 @@ main.py (协调器)
 |------|--------|-----|------|
 | **voice** | `"voice"` | `"text"` | `{"text": "请求监护"}` |
 | **tracking** | `"tracking"` | `"SUPERVISOR_STATUS"` | `{"state": "监护中", "operator": "ROAD1", "distance_px": 150}` |
-| **tracking** | `"tracking"` | `"HAND_RAISED"` | `{"state": "举手", "operator": "ROAD1"}` |
+| **behavior** | `"behavior"` | `"HAND_RAISED"` | `{"state": "举手", "operator": "ROAD1"}` |
 | **tracking** | `"tracking"` | `"ROLE_ASSIGNED"` | `{"roles": {"LEADER": 3, ...}}` |
 | **tracking** | `"tracking"` | `"PEOPLE_COUNT_UPDATE"` | `{"count": 3, "state": "主控室仅有1人", "state_alert": "..."}` |
 | **gaze** | `"gaze"` | `"gaze_status"` | `{"has_heads": true, "any_in_roi": true, "heads_count": 2}` |
 | **gaze** | `"gaze"` | `"GAZE_ALERT"` | `{"state": "无人注视盘台", "away_duration": 65.2}` |
 | **gaze** | `"gaze"` | `"ATTENTION_RESULT"` | `{"has_turned": true, "displacement": 120.5}` |
-| **video** | `"video"` | `"frame"` | `{"frame_data": "/9j/4..."}` |
+| **video** | `"video"` | `"frame"` | `{"frame_data": "/9j/4...", "frame_id": 1234}` |
 | **progress** | `"progress"` | `"progress"` | `{"label": "gaze", "pct": 15.0}` |
 
 ### 代码示例
@@ -76,11 +77,14 @@ self._display_fn("gaze", {
     "data": {"state": "无人注视盘台", "away_duration": away_dur}
 })
 
-# video
+# video（统一走 source="video" + tag="frame"，不再使用 video_frame 特殊路径）
 self.push_display("video", {
     "localSec": round(ts, 2),
     "tag": "frame",
-    "data": {"frame_data": base64.b64encode(jpeg.tobytes()).decode("utf-8")}
+    "data": {
+        "frame_data": base64.b64encode(jpeg.tobytes()).decode("utf-8"),
+        "frame_id": frame_count,
+    }
 })
 
 # progress
@@ -90,6 +94,18 @@ self.push_display("progress", {
     "data": {"label": "gaze", "pct": round(gaze_pct, 1)}
 })
 ```
+
+### 评估层单事件（绕过对齐，直接推送）
+
+`FlowEvaluationManager` 通过 `display_buffer.push_display` 推送的事件由 `ModuleSync.push_display` 直接转发到 SSE（不经过 Redis Stream 对齐），前端走单事件路径识别：
+
+| source | 时机 | 主要字段 |
+|--------|------|---------|
+| `flow_start` | 流程开始 | `flowId, flow_type, flow_start_sec` |
+| `flow_end` | 流程结束 | `flowId, flow_type, flow_end_sec, flow_continue_sec` |
+| `segment_report_stream` | 大模型流式评估 | `flowId, chunk` |
+| `segment_report` | 评估完成 | `flowId, flow_type, score, report_text` |
+| `done` | 流水线结束 | （空） |
 
 ---
 
@@ -163,7 +179,7 @@ self._do_push(batch)
 evtSource.onmessage = function(e) {
     const d = JSON.parse(e.data);
     handleEvent(d);
-    if (d.type === 'done') { evtSource.close(); }
+    if (d.source === 'done') { evtSource.close(); }
 };
 ```
 
@@ -176,13 +192,18 @@ function handleEvent(d) {
         if (d.voice) for (const ev of d.voice) addVoiceItem(ev);
         if (d.tracking) for (const ev of d.tracking) addDetEvent(ev);
         if (d.gaze) for (const ev of d.gaze) addGazeEvent(ev);
-        if (d.video) streamImg.src = 'data:image/jpeg;base64,' + d.video[0].data.frame_data;
+        if (d.video) for (const ev of d.video) streamImg.src = 'data:image/jpeg;base64,' + ev.data.frame_data;
         if (d.progress) for (const ev of d.progress) updateProgress(ev);
         return;
     }
-    // 单个事件（flow_start/flow_end/segment_report/done 等）
-    if (d.type === 'flow_start') addFlowStart(d);
-    else if (d.type === 'done') { /* 完成处理 */ }
+    // 单事件（flow_start/flow_end/segment_report/done 等评估层事件，绕过对齐直接推送）
+    if (d.source === 'flow_start') addFlowStart(d);
+    else if (d.source === 'flow_end') addFlowEnd(d);
+    else if (d.source === 'segment_report') addSegCard(d);
+    else if (d.source === 'segment_report_stream') addSegStream(d);
+    else if (d.source === 'progress') updateProgress(d);
+    else if (d.source === 'video_start') { /* 启动音频 */ }
+    else if (d.source === 'done') { /* 完成处理 */ }
 }
 ```
 
@@ -208,29 +229,35 @@ class EventTopic:
     VOICE_KEY_MOMENT = "voice.key_moment"       # {localSec, key_moment}
 
     # Tracker -> Rules
-    TRACKER_HAND_RAISED = "tracker.hand_raised" # {localSec, operator}
     TRACKER_PROXIMITY = "tracker.proximity"     # {localSec, state, operator, distance_px}
-    TRACKER_ROLE_ASSIGNED = "tracker.role_assigned"  # {localSec, roles}
     TRACKER_HEADCOUNT = "tracker.headcount"     # {localSec, count}
 
+    # Behavior -> Rules（举手检测嵌入 tracker 调用，但归属 behavior）
+    BEHAVIOR_HAND_RAISED = "behavior.hand_raised"  # {localSec, operator}
+
     # Gaze -> Rules
-    GAZE_ALERT = "gaze.alert"                   # {localSec, away_duration}
-    GAZE_ATTENTION = "gaze.attention"           # {localSec, has_turned, displacement}
+    GAZE_ALERT = "gaze.alert"                   # {localSec, state, away_duration, ...}
+    GAZE_ATTENTION = "gaze.attention"           # {localSec, has_turned, displacement, ...}
 
     # Rules -> Evaluation
     FLOW_STARTED = "flow.started"               # {flow_id, flow_type, flow_start_sec}
     FLOW_ENDED = "flow.ended"                   # {flow_id, flow_type, flow_end_sec}
 ```
 
+> 已删除的死代码 EventTopic（无订阅者）：`TRACKER_SUPERVISION_BOUND`、`TRACKER_SUPERVISION_END`、`TRACKER_ROLE_ASSIGNED`、`BEHAVIOR_FINGER_SCREEN`、`PIPELINE_STATUS`、`PIPELINE_PROGRESS`、`TRACKER_HAND_RAISED`（已改名 `BEHAVIOR_HAND_RAISED`）。
+
 ### 规则订阅
 
 | 规则 | 订阅事件 | 来源 |
 |------|---------|------|
-| 监护制 | `VOICE_KEY_MOMENT`, `TRACKER_HAND_RAISED`, `TRACKER_PROXIMITY` | voice, tracker |
-| 自唱票 | `VOICE_KEY_MOMENT`, `FLOW_ENDED` | voice, rules |
-| 信息通报 | `VOICE_KEY_MOMENT`, `TRACKER_HAND_RAISED`, `GAZE_ATTENTION`, `FLOW_ENDED` | voice, tracker, gaze |
+| 监护制 | `VOICE_KEY_MOMENT`, `BEHAVIOR_HAND_RAISED`, `TRACKER_PROXIMITY` | voice, behavior, tracker |
+| 自唱票 | `VOICE_KEY_MOMENT` | voice |
+| 信息通报 | `VOICE_KEY_MOMENT`, `BEHAVIOR_HAND_RAISED`, `GAZE_ATTENTION` | voice, behavior, gaze |
 | 人员状态 | `GAZE_ALERT`, `TRACKER_HEADCOUNT` | gaze, tracker |
 | 评价层 | `FLOW_STARTED`, `FLOW_ENDED` | rules |
+| Tracker 模块 | `FLOW_STARTED`, `FLOW_ENDED` | rules（用于本地维护 `_supervision_active` 标志） |
+
+> 三大流程（监护/自唱票/信息通报）相互独立，各自拥有独立的开始与结束条件，不存在跨流程联动收尾。
 
 ---
 
@@ -306,17 +333,21 @@ self._event_bus.publish(EventTopic.GAZE_ALERT, event, ts=ts)
 | 文件 | 说明 |
 |------|------|
 | `main.py` | 入口，启动所有进程 |
-| `core/module_sync.py` | ModuleSync 对齐引擎，global_sec 计算，batch 打包 |
-| `core/inference_bus.py` | 推理流写入端（模块进程使用） |
+| `core/module_sync.py` | ModuleSync 对齐引擎，global_sec 计算，batch 打包；`push_display` 直接转发评估层单事件 |
+| `core/inference_bus.py` | 推理流写入端（模块进程使用），统一格式 `{source, localSec, tag, data}` |
 | `core/display_buffer.py` | 包装器，writer_only=True→InferenceBus, False→ModuleSync |
-| `core/event_bus.py` | 事件总线，EventTopic 定义 |
-| `core/base_module.py` | 模块基类，push_display/push_event |
+| `core/event_bus.py` | 事件总线，EventTopic 定义（仅保留有订阅者） |
+| `core/base_module.py` | 模块基类，push_display/push_event/update_progress（1秒节流） |
 | `modules/voice/voice_module.py` | 语音模块 |
-| `modules/tracker/tracker_module.py` | 跟踪模块（内部调用 GazeProcessor + HandRaiser） |
-| `modules/gaze/gaze_module.py` | GazeProcessor 凝视处理器 |
+| `modules/tracker/tracker_module.py` | 跟踪模块（内部调用 GazeModule + HandRaiser），含可视化帧推送 |
+| `modules/gaze/gaze_module.py` | GazeModule 凝视处理器（嵌入 tracker 进程） |
 | `modules/behavior/hand_raiser.py` | 举手检测器（供 tracker 调用） |
+| `modules/behavior/behavior_module.py` | 行为模块（手指指屏幕检测） |
 | `rules/supervision_rule.py` | 监护制状态机 |
-| `web/http_server.py` | Flask 服务器，SSE 端点 |
+| `rules/rule_base.py` | 规则注册表 |
+| `evaluation/flow_evaluation_manager.py` | 流程评估管理器，推送 flow_start/flow_end/segment_report |
+| `web/http_server.py` | Flask 服务器，SSE 端点（已移除 /stream /stream2 MJPEG 路由） |
+| `web/sse_handler.py` | SSE 推送处理器 |
 | `web/static/index.html` | 前端页面 |
 
 ---

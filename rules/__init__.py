@@ -12,6 +12,7 @@ from rules.supervision_rule import SupervisionRule
 from rules.self_ticket_rule import SelfTicketRule
 from rules.personnel_status_rule import PersonnelStatusRule
 from rules.info_notice_rule import InfoNoticeRule
+from rules.flow_recorder import FlowEventRecorder
 
 __all__ = [
     "BaseRule",
@@ -20,4 +21,5 @@ __all__ = [
     "SelfTicketRule",
     "PersonnelStatusRule",
     "InfoNoticeRule",
+    "FlowEventRecorder",
 ]

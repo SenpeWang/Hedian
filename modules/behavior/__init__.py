@@ -13,9 +13,11 @@
 from modules.behavior.behavior_module import BehaviorModule
 from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.finger_screen_detector import FingerScreenDetector
+from modules.behavior.storage_behavior import BehaviorStorage
 
 __all__ = [
     "BehaviorModule",
     "HandRaiser",
     "FingerScreenDetector",
+    "BehaviorStorage",
 ]

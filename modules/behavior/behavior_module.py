@@ -2,17 +2,17 @@
 行为检测模块入口
 
 继承 BaseModule，实现统一接口。
+统一保存所有行为事件（举手、手指屏幕等）到 behavior_key_moments.json。
 """
-import os
-import json
 import logging
 
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
-from core.display_buffer import DisplayBuffer
+from core.inference_bus import InferenceBus
 from core.path_manager import PathConfig
 
 from modules.behavior.finger_screen_detector import FingerScreenDetector
+from modules.behavior.storage_behavior import BehaviorStorage
 
 logger = logging.getLogger("module.behavior")
 
@@ -21,7 +21,9 @@ class BehaviorModule(BaseModule):
     """
     行为检测模块
 
-    负责手指屏幕检测。
+    负责手指屏幕检测，并统一保存所有行为事件：
+    - 举手事件（由 tracker 嵌入检测，通过 BEHAVIOR_HAND_RAISED 事件流推送过来）
+    - 手指屏幕事件（本进程检测）
     """
 
     def __init__(
@@ -29,11 +31,12 @@ class BehaviorModule(BaseModule):
         event_bus: EventBus,
         config: dict,
         paths: PathConfig,
-        display_buffer: DisplayBuffer,
+        display_buffer: InferenceBus,
     ):
         super().__init__(event_bus, config, paths, display_buffer)
         self._detector = None
-        self._events = []
+        self._result_storage = None
+        self._events = []  # 统一保存所有行为事件（举手 + 手指屏幕 + ...）
 
     @property
     def module_name(self) -> str:
@@ -48,62 +51,33 @@ class BehaviorModule(BaseModule):
                 finger_model_path=self.paths.get_model_path("behavior", "yolov8_finger.pt"),
             )
 
-            logger.info("行为检测模块初始化完成")
+            # 初始化结果存储
+            self._result_storage = BehaviorStorage(self.paths)
+
+            # 订阅举手事件（由 tracker 嵌入检测后通过事件流推送，本进程统一保存）
+            self.event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised)
+
+            logger.info("行为检测模块初始化完成（已订阅 BEHAVIOR_HAND_RAISED）")
             return True
 
         except Exception as e:
             logger.error(f"行为检测模块初始化失败: {e}", exc_info=True)
             return False
 
+    def _on_hand_raised(self, msg: dict) -> None:
+        """订阅 BEHAVIOR_HAND_RAISED：接收 tracker 检测到的举手事件，统一保存"""
+        data = msg.get("data", {})
+        ts = data.get("localSec", msg.get("ts", 0))
+        operator = data.get("operator", "UNKNOWN")
+        self._events.append({
+            "localSec": round(ts, 2),
+            "key_moment": f"{operator}举手",
+        })
+        logger.info(f"行为模块收到举手事件: {operator} @{ts:.1f}s")
+
     def process_video(self, video_path: str) -> None:
-        """处理视频，进行行为检测"""
+        """处理视频，进行行为检测（推理流统一格式：{source, localSec, tag, data}）"""
         import cv2
-        import queue as queue_mod
-        import numpy as np
-
-        # 获取视频帧队列（支持 Redis 和内存两种模式）
-        frame_queue = self.config.get("_frame_queue", None)
-        if frame_queue is None:
-            redis_key = self.config.get("_frame_queue_redis_key", None)
-            if redis_key:
-                from core.redis_queue import RedisQueue
-                frame_queue = RedisQueue(
-                    key=redis_key,
-                    redis_host=self.config.get("_redis_host", "localhost"),
-                    redis_port=self.config.get("_redis_port", 6379),
-                    redis_db=self.config.get("_redis_db", 0),
-                    maxsize=8,
-                )
-
-        # 生成占位图（等待模块开发）
-        if frame_queue is not None:
-            placeholder = np.zeros((480, 640, 3), dtype=np.uint8)
-            placeholder[:] = (20, 20, 30)  # 深色背景
-            # 文字
-            cv2.putText(placeholder, "Behavior Detection", (120, 200),
-                        cv2.FONT_HERSHEY_SIMPLEX, 1.2, (0, 212, 255), 2)
-            cv2.putText(placeholder, "Waiting for module...", (140, 260),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.9, (100, 120, 144), 2)
-            cv2.putText(placeholder, "No camera angle available", (110, 320),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.7, (80, 100, 120), 2)
-            # 边框
-            cv2.rectangle(placeholder, (10, 10), (630, 470), (0, 212, 255), 2)
-            _, jpeg = cv2.imencode(".jpg", placeholder, [cv2.IMWRITE_JPEG_QUALITY, 70])
-            # 持续推送占位图
-            import time
-            while self._running:
-                try:
-                    frame_queue.put_nowait(jpeg.tobytes())
-                except Exception:
-                    try:
-                        frame_queue.get_nowait()
-                    except Exception:
-                        pass
-                    try:
-                        frame_queue.put_nowait(jpeg.tobytes())
-                    except Exception:
-                        pass
-                time.sleep(0.1)  # 10fps
 
         try:
             cap = cv2.VideoCapture(video_path)
@@ -132,44 +106,25 @@ class BehaviorModule(BaseModule):
                 # 检测手指屏幕
                 events = self._detector.detect(frame, frame_count, fps)
 
-                # 保存事件
+                # 保存并推送事件
                 for event in events:
                     event["localSec"] = round(ts, 2)
-                    self._events.append(event)
+                    self._events.append({
+                        "localSec": event["localSec"],
+                        "key_moment": event.get("type", "behavior"),
+                    })
 
-                    # 推理流：前端展示手指指屏幕行为
-                    self.push_display("behavior", event)
-                    # 事件流：通知规则状态机
-                    self.push_event(EventTopic.BEHAVIOR_FINGER_SCREEN, event, ts=ts)
+                    # 推理流：前端展示行为检测
+                    self.push_display("behavior", {
+                        "localSec": event["localSec"],
+                        "tag": event.get("type", "BEHAVIOR"),
+                        "data": {k: v for k, v in event.items() if k not in ("localSec",)},
+                    })
 
                 # 进度日志
                 if frame_count % 300 == 0:
                     pct = frame_count * 100 // total_frames if total_frames else 0
                     logger.info(f"{frame_count}/{total_frames}帧 {pct}%")
-
-                # 可视化帧（每10帧）
-                if frame_queue is not None and frame_count % 10 == 0:
-                    try:
-                        vis_frame = frame.copy()
-                        # 画检测结果
-                        if events:
-                            for event in events:
-                                ev_type = event.get("type", "")
-                                if "finger" in ev_type.lower():
-                                    cv2.putText(vis_frame, f"FINGER: {ev_type}",
-                                                (10, 30), cv2.FONT_HERSHEY_SIMPLEX,
-                                                0.7, (0, 0, 255), 2)
-                        _, jpeg = cv2.imencode(".jpg", vis_frame, [cv2.IMWRITE_JPEG_QUALITY, 70])
-                        try:
-                            frame_queue.put_nowait(jpeg.tobytes())
-                        except Exception:
-                            try:
-                                frame_queue.get_nowait()
-                            except Exception:
-                                pass
-                            frame_queue.put_nowait(jpeg.tobytes())
-                    except Exception as e:
-                        logger.warning(f"可视化帧失败: {e}")
 
             cap.release()
             logger.info(f"视频处理完成，共 {frame_count} 帧")
@@ -178,23 +133,5 @@ class BehaviorModule(BaseModule):
             logger.error(f"视频处理失败: {e}", exc_info=True)
 
     def save_results(self, run_id: str) -> None:
-        """保存行为检测结果"""
-        if not self._events:
-            logger.warning("没有事件可保存")
-            return
-
-        # 保存关键事件
-        output_path = self.paths.get_result_path(
-            run_id=run_id,
-            module="behavior",
-            filename="Behavior_key_moments.json",
-        )
-
-        try:
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(self._events, f, ensure_ascii=False, indent=2)
-
-            logger.info(f"保存 {len(self._events)} 个关键事件到 {output_path}")
-
-        except Exception as e:
-            logger.error(f"保存关键事件失败: {e}", exc_info=True)
+        """保存行为检测结果（委托给 BehaviorStorage）"""
+        self._result_storage.save_key_moments(run_id, self._events)

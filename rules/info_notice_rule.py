@@ -57,9 +57,8 @@ class InfoNoticeRule(BaseRule):
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
-        event_bus.subscribe(EventTopic.TRACKER_HAND_RAISED, self._on_hand_raised)
+        event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised)
         event_bus.subscribe(EventTopic.GAZE_ATTENTION, self._on_gaze_status)
-        event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
 
     def is_active(self) -> bool:
         """是否有活跃流程"""
@@ -142,14 +141,13 @@ class InfoNoticeRule(BaseRule):
         return flow
 
     def _on_hand_raised(self, msg: dict) -> None:
-        """处理 MOT 举手"""
+        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}）"""
         data = msg.get("data", {})
-        event = data.get("event", "")
         ts = data.get("localSec", msg.get("ts", 0))
 
-        if event == "HAND_RAISED":
-            self._last_hand_raise_ts = ts
-            logger.debug(f"信息通报: 收到举手事件 @{ts:.1f}s（单独举手不触发信息通报流程）")
+        # 记录举手时间，用于 _start_flow 判定 5 秒内是否伴随举手
+        self._last_hand_raise_ts = ts
+        logger.debug(f"信息通报: 收到举手事件 @{ts:.1f}s（单独举手不触发信息通报流程）")
 
     def _on_voice_intent(self, msg: dict) -> None:
         """处理语音事件（仅包含 localSec 和 key_moment 字段）"""
@@ -180,36 +178,17 @@ class InfoNoticeRule(BaseRule):
                 logger.info(f"信息通报: 收到'收到'语音回应 @{ts:.1f}s")
 
     def _on_gaze_status(self, msg: dict) -> None:
-        """处理 Gaze 关注度状态"""
+        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}）"""
         if not self._active:
             return
         data = msg.get("data", {})
-        event = data.get("event", "")
         ts = data.get("localSec", msg.get("ts", 0))
+        has_turned = data.get("has_turned", False)
 
-        if event == "ATTENTION_RESULT":
-            has_turned = data.get("has_turned", False)
-            if has_turned:
-                self._checklist["others_attended"] = True
-                self._checklist["others_stopped_and_listened"] = True
-                logger.info(f"信息通报: 团队成员均予以关注 @{ts:.1f}s")
-
-    def _on_flow_ended(self, msg: dict) -> None:
-        """处理其他流程结束事件（互斥）"""
-        if not self._active:
-            return
-        data = msg.get("data", {})
-        flow_id = data.get("flow_id", 0)
-        flow_type = data.get("flow_type", "")
-        ts = data.get("localSec", msg.get("ts", 0))
-
-        # 如果是本流程的结束事件，不作处理
-        if flow_type == "info_notice" and flow_id == self._flow_id:
-            return
-
-        # 其他流程强制开启/结束，导致本流程强制关闭
-        logger.info(f"信息通报: 检测到其他流程 {flow_type}#{flow_id}，本流程强制关闭")
-        self._close_flow(ts, source="conflict")
+        if has_turned:
+            self._checklist["others_attended"] = True
+            self._checklist["others_stopped_and_listened"] = True
+            logger.info(f"信息通报: 团队成员均予以关注 @{ts:.1f}s")
 
 
 

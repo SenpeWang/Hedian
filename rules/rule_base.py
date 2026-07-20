@@ -60,10 +60,10 @@ class RuleRegistry:
         手动注册一个制度
 
         Args:
-            regulation: 制度实例
+            rule: 制度实例
         """
         self._rules[rule.name()] = rule
-        logger.info(f"注册制度: {regulation.name()}")
+        logger.info(f"注册制度: {rule.name()}")
 
     def discover(self) -> None:
         """扫描 rules/ 子目录，动态加载规则"""
@@ -117,3 +117,24 @@ class RuleRegistry:
         for reg in self._rules.values():
             reg.subscribe_events(event_bus)
             logger.info(f"制度 {reg.name()} 已订阅事件")
+
+    def save_all_results(self, result_dir: str) -> None:
+        """
+        流水线结束时统一收尾：
+          1. 对每个制度调用 finalize() —— 关闭仍处于活跃状态的流程，会触发 FLOW_ENDED 事件
+          2. 对每个制度调用 save_results(result_dir) —— 持久化制度自身的产物（默认 pass，子类按需覆盖）
+
+        Args:
+            result_dir: 结果目录路径
+        """
+        for reg in self._rules.values():
+            try:
+                flow = reg.finalize()
+                if flow:
+                    logger.info(f"制度 {reg.name()} finalize 关闭流程 flow_id={flow.get('flow_id')}")
+            except Exception as e:
+                logger.error(f"制度 {reg.name()} finalize 失败: {e}", exc_info=True)
+            try:
+                reg.save_results(result_dir)
+            except Exception as e:
+                logger.error(f"制度 {reg.name()} save_results 失败: {e}", exc_info=True)

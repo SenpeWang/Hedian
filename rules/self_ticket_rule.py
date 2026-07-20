@@ -19,12 +19,7 @@ class SelfTicketRule(BaseRule):
     """自唱票制度"""
 
     def __init__(self, config: dict = None):
-        """
-        初始化自唱票制度
-
-        Args:
-            config: 配置字典
-        """
+        """初始化自唱票制度"""
         self._config = config or {}
         self._event_bus = None
 
@@ -47,7 +42,6 @@ class SelfTicketRule(BaseRule):
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
-        event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
 
     def is_active(self) -> bool:
         """是否有活跃流程"""
@@ -132,30 +126,21 @@ class SelfTicketRule(BaseRule):
         return flow
 
     def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音事件（仅包含 localSec 和 key_moment 字段）"""
+        """处理语音事件"""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0.0))
         key_moment = data.get("key_moment", "")
         if not key_moment:
             return
 
-        # 判断是否为设备码 (不属于任何标准控制词且非空即判定为设备码)
+        # 不是控制关键字则视为设备识别码
         is_device = key_moment not in ["监护", "请求监护", "执行", "核对", "收到", "信息通报", "信息通告", "通报完毕", "通告完毕"]
         if is_device:
-            # TODO: 等弹窗模块实现后，改为由弹窗信号触发
+            # TODO: 等弹窗模块实现后由弹窗信号触发
             # 现在不自动启动自唱票
             # self._start_flow(ts, device_code=key_moment)
             if self._active:
                 self._code_read = True
-
-    def _on_flow_ended(self, msg: dict) -> None:
-        """处理流程结束事件（监护制结束时关闭自唱票）"""
-        data = msg.get("data", {})
-        flow_type = data.get("flow_type", "")
-
-        if flow_type == "supervision" and self._active:
-            ts = data.get("flow_end_sec", 0)
-            self._close_flow(ts, source="supervision_end")
 
 def register():
     """模块注册入口"""

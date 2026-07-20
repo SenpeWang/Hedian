@@ -1,552 +1,1034 @@
 <!DOCTYPE html>
 <html lang="zh">
+
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>核电站行为合规检测系统</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Segoe UI',sans-serif;background:#0a0e1a;color:#e0e6f0;overflow:hidden;height:100vh;display:flex;flex-direction:column}
-::-webkit-scrollbar{width:4px}::-webkit-scrollbar-track{background:#0a0e1a}::-webkit-scrollbar-thumb{background:#1e2a42;border-radius:2px}
-.header{display:flex;align-items:center;padding:5px 14px;background:linear-gradient(135deg,#0d1224,#141b2d);border-bottom:1px solid #1e2a42;justify-content:space-between;min-height:36px}
-.header h1{font-size:15px;color:#00d4ff;white-space:nowrap}
-#startBtn{padding:5px 20px;border:1px solid #00d4ff;border-radius:5px;background:linear-gradient(135deg,rgba(0,212,255,.1),rgba(0,100,200,.15));color:#00d4ff;cursor:pointer;font-size:13px;font-weight:600;transition:.3s}
-#startBtn:hover{transform:scale(1.05);box-shadow:0 0 10px rgba(0,212,255,.3)}
-#startBtn:disabled{opacity:.5;cursor:default;transform:none}
-.header-right{display:flex;align-items:center;gap:8px}
-#statusDot{width:7px;height:7px;border-radius:50%;background:#6b7a90;flex-shrink:0}
-#statusDot.active{background:#00ff88;animation:pulse 1.5s infinite}
-#headerStatus{font-size:11px;color:#e0e6f0;white-space:nowrap;max-width:350px;overflow:hidden;text-overflow:ellipsis}
-.progress-group{display:flex;flex-direction:column;gap:1px;min-width:260px}
-.progress-row{font-family:'Consolas',monospace;font-size:10px;color:#8899aa;white-space:nowrap;line-height:1.2}
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>核电站行为合规检测系统</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box
+    }
 
-.main{display:flex;flex:1;min-height:0;gap:5px;padding:0 5px 5px}
-.left{display:flex;flex-direction:column;flex:1;min-width:0;gap:5px;min-width:280px}
-.right{display:flex;flex-direction:column;flex:3;min-width:0;gap:5px}
-.panel{background:#141b2d;border:1px solid #1e2a42;border-radius:5px;display:flex;flex-direction:column;overflow:hidden}
-.panel-title{font-size:11px;font-weight:600;padding:5px 8px;border-bottom:1px solid #1e2a42;color:#8899aa;display:flex;align-items:center;justify-content:space-between}
-.panel-body{flex:1;overflow-y:auto;padding:5px;position:relative}
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #0a0e1a;
+      color: #e0e6f0;
+      overflow: hidden;
+      height: 100vh;
+      display: flex;
+      flex-direction: column
+    }
 
-#streamImg{width:100%;height:100%;object-fit:contain;display:block}
-#streamImg2{width:100%;height:100%;object-fit:contain;display:block}
-.video-placeholder{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;color:#6b7a90;gap:6px}
-.video-placeholder .icon{font-size:28px}
-.video-placeholder .text{font-size:12px}
+    ::-webkit-scrollbar {
+      width: 4px
+    }
 
-.text-item{padding:2px 4px;margin-bottom:2px;border-radius:2px;font-size:11px;line-height:1.4;animation:fadeIn .3s}
-.text-item .ts{color:#6b7a90;margin-right:4px;font-size:9px}
-.intent-badge{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;margin-left:2px;vertical-align:middle}
-.intent-监护请求,.intent-监护确认{background:rgba(255,77,77,.25);color:#ff4d4d}
-.intent-核对确认{background:rgba(255,170,0,.25);color:#ffaa00}
-.intent-确认{background:rgba(0,255,136,.2);color:#00ff88}
-.intent-收到{background:rgba(0,255,136,.2);color:#00ff88}
-.intent-操作指令,.intent-操作说明,.intent-操作结束{background:rgba(0,212,255,.2);color:#00d4ff}
+    ::-webkit-scrollbar-track {
+      background: #0a0e1a
+    }
 
-.intent-其他{background:rgba(107,122,144,.2);color:#6b7a90}
-.type-badge{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;margin-left:2px;vertical-align:middle;background:rgba(107,122,144,.2);color:#8899aa}
-.type-信号信号{background:rgba(255,77,77,.15);color:#ff8888}
-.type-执行信号{background:rgba(0,212,255,.15);color:#66d9ff}
-.type-核对信号{background:rgba(255,170,0,.15);color:#ffcc66}
-.type-设备信号{background:rgba(0,212,255,.15);color:#66d9ff}
-.type-确认信号{background:rgba(0,255,136,.15);color:#88ffa3}
-.kw-red{color:#ff4d4d;font-weight:700}.kw-green{color:#00ff88;font-weight:700}.kw-blue{color:#00d4ff;font-weight:700}
+    ::-webkit-scrollbar-thumb {
+      background: #1e2a42;
+      border-radius: 2px
+    }
 
-.bottom{display:grid;grid-template-columns:1fr 1fr;gap:5px;padding:0 5px 5px;flex:2;min-height:0}
+    .header {
+      display: flex;
+      align-items: center;
+      padding: 5px 14px;
+      background: linear-gradient(135deg, #0d1224, #141b2d);
+      border-bottom: 1px solid #1e2a42;
+      justify-content: space-between;
+      min-height: 36px
+    }
 
-.det-event{padding:3px 5px;margin-bottom:2px;border-radius:3px;font-size:11px;animation:fadeIn .3s;border-left:3px solid #1e2a42}
-.det-event .ts{color:#6b7a90;font-size:9px;margin-right:3px}
-.det-event .ev-label{font-weight:600}
-.state-监护{color:#00ff88}.state-接近中{color:#ffaa00}.state-未监护{color:#ff4d4d}
-.flow-tag{display:inline-block;padding:0 4px;border-radius:2px;font-size:8px;font-weight:600;margin-left:3px}
-.flow-supervision{background:rgba(0,212,255,.2);color:#00d4ff;border:1px solid rgba(0,212,255,.3)}
-.flow-self-ticket{background:rgba(255,170,0,.2);color:#ffaa00;border:1px solid rgba(255,170,0,.3)}
-.flow-info-notice{background:rgba(0,255,204,.2);color:#00ffcc;border:1px solid rgba(0,255,204,.3)}
-.flow-active{animation:pulse 1.5s infinite}
+    .header h1 {
+      font-size: 15px;
+      color: #00d4ff;
+      white-space: nowrap
+    }
 
-.summary-grid{display:grid;grid-template-columns:1fr 1fr 1fr 1fr 1fr;gap:3px;margin-bottom:5px;text-align:center}
-.summary-grid div{background:#0a0e1a;border-radius:3px;padding:3px}
-.summary-grid .val{font-size:16px;font-weight:700;color:#00d4ff}
-.summary-grid .lbl{font-size:8px;color:#6b7a90;margin-top:1px}
+    #startBtn {
+      padding: 5px 20px;
+      border: 1px solid #00d4ff;
+      border-radius: 5px;
+      background: linear-gradient(135deg, rgba(0, 212, 255, .1), rgba(0, 100, 200, .15));
+      color: #00d4ff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: .3s
+    }
 
-.seg-card{background:#0a0e1a;border-radius:3px;padding:4px 6px;margin-bottom:3px;border-left:3px solid #6b7a90;animation:fadeIn .3s}
-.seg-card .sc-head{display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px}
-.seg-card .sc-score{font-weight:700}
-.seg-card .sc-bar{height:2px;background:#1e2a42;border-radius:1px;margin:2px 0}
-.seg-card .sc-bar-fill{height:100%;border-radius:1px;transition:width .6s}
-.seg-card .sc-detail{font-size:9px;color:#8899aa;line-height:1.3}
+    #startBtn:hover {
+      transform: scale(1.05);
+      box-shadow: 0 0 10px rgba(0, 212, 255, .3)
+    }
 
-.qr-placeholder{text-align:center;padding:15px;color:#6b7a90;font-size:12px}
-.qr-placeholder .icon{font-size:24px;margin-bottom:4px}
-.qr-title{font-size:12px;font-weight:700;color:#ffd700;padding:3px 0 2px;border-bottom:1px solid #1e2a42;margin-bottom:2px}
-.qr-score-line{text-align:center;font-size:18px;font-weight:700;padding:6px;margin:3px 0}
-.qr-item{font-size:11px;padding:1px 0;line-height:1.4}
+    #startBtn:disabled {
+      opacity: .5;
+      cursor: default;
+      transform: none
+    }
 
-@keyframes fadeIn{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    .header-right {
+      display: flex;
+      align-items: center;
+      gap: 8px
+    }
 
-.status-stats{flex:1;background:rgba(10,14,26,0.65);border-bottom:1px solid #1e2a42;padding:6px 10px;display:flex;flex-direction:column;justify-content:center;z-index:10;backdrop-filter:blur(8px)}
-.status-stats .stat-item{display:flex;align-items:center;font-size:12px;font-weight:600;color:#e0e6f0}
-.status-stats .stat-label{color:#8899aa;margin-right:6px}
-.status-stats .stat-val{font-size:18px;font-weight:700;color:#00ff88;margin-right:2px}
-.status-stats .stat-alert{font-size:9px;color:#8899aa;margin-top:1px;font-weight:normal}
-</style>
+    #statusDot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #6b7a90;
+      flex-shrink: 0
+    }
+
+    #statusDot.active {
+      background: #00ff88;
+      animation: pulse 1.5s infinite
+    }
+
+    #headerStatus {
+      font-size: 11px;
+      color: #e0e6f0;
+      white-space: nowrap;
+      max-width: 350px;
+      overflow: hidden;
+      text-overflow: ellipsis
+    }
+
+    .progress-group {
+      display: flex;
+      flex-direction: column;
+      gap: 1px;
+      min-width: 260px
+    }
+
+    .progress-row {
+      font-family: 'Consolas', monospace;
+      font-size: 10px;
+      color: #8899aa;
+      white-space: nowrap;
+      line-height: 1.2
+    }
+
+    .main {
+      display: flex;
+      flex: 1;
+      min-height: 0;
+      gap: 5px;
+      padding: 0 5px 5px
+    }
+
+    .left {
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+      min-width: 0;
+      gap: 5px;
+      min-width: 280px
+    }
+
+    .right {
+      display: flex;
+      flex-direction: column;
+      flex: 3;
+      min-width: 0;
+      gap: 5px
+    }
+
+    .panel {
+      background: #141b2d;
+      border: 1px solid #1e2a42;
+      border-radius: 5px;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden
+    }
+
+    .panel-title {
+      font-size: 11px;
+      font-weight: 600;
+      padding: 5px 8px;
+      border-bottom: 1px solid #1e2a42;
+      color: #8899aa;
+      display: flex;
+      align-items: center;
+      justify-content: space-between
+    }
+
+    .panel-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 5px;
+      position: relative
+    }
+
+    #streamImg {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block
+    }
+
+    #streamImg2 {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      display: block
+    }
+
+    .video-placeholder {
+      position: absolute;
+      inset: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      color: #6b7a90;
+      gap: 6px
+    }
+
+    .video-placeholder .icon {
+      font-size: 28px
+    }
+
+    .video-placeholder .text {
+      font-size: 12px
+    }
+
+    .text-item {
+      padding: 2px 4px;
+      margin-bottom: 2px;
+      border-radius: 2px;
+      font-size: 11px;
+      line-height: 1.4;
+      animation: fadeIn .3s
+    }
+
+    .text-item .ts {
+      color: #6b7a90;
+      margin-right: 4px;
+      font-size: 9px
+    }
+
+    .kw-red {
+      color: #ff4d4d;
+      font-weight: 700
+    }
+
+    .kw-green {
+      color: #00ff88;
+      font-weight: 700
+    }
+
+    .kw-blue {
+      color: #00d4ff;
+      font-weight: 700
+    }
+
+    .bottom {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 5px;
+      padding: 0 5px 5px;
+      flex: 2;
+      min-height: 0
+    }
+
+    .summary-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr 1fr;
+      gap: 3px;
+      margin-bottom: 5px;
+      text-align: center
+    }
+
+    .summary-grid div {
+      background: #0a0e1a;
+      border-radius: 3px;
+      padding: 3px
+    }
+
+    .summary-grid .val {
+      font-size: 16px;
+      font-weight: 700;
+      color: #00d4ff
+    }
+
+    .summary-grid .lbl {
+      font-size: 8px;
+      color: #6b7a90;
+      margin-top: 1px
+    }
+
+    .seg-card {
+      background: #0a0e1a;
+      border-radius: 3px;
+      padding: 4px 6px;
+      margin-bottom: 3px;
+      border-left: 3px solid #6b7a90;
+      animation: fadeIn .3s
+    }
+
+    .seg-card .sc-head {
+      display: flex;
+      justify-content: space-between;
+      font-size: 10px;
+      margin-bottom: 2px
+    }
+
+    .seg-card .sc-score {
+      font-weight: 700
+    }
+
+    .seg-card .sc-bar {
+      height: 2px;
+      background: #1e2a42;
+      border-radius: 1px;
+      margin: 2px 0
+    }
+
+    .seg-card .sc-bar-fill {
+      height: 100%;
+      border-radius: 1px;
+      transition: width .6s
+    }
+
+    .seg-card .sc-detail {
+      font-size: 9px;
+      color: #8899aa;
+      line-height: 1.3
+    }
+
+    /* 大模型流式思考（Reasoning）样式设计 */
+    think {
+      display: block;
+      background: #f8fafc;
+      border-left: 4px solid #cbd5e1;
+      padding: 12px 16px;
+      margin: 12px 0;
+      color: #475569;
+      font-size: 13px;
+      line-height: 1.6;
+      border-radius: 4px;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      white-space: pre-wrap;
+    }
+    
+    think::before {
+      content: "🤔 思考过程：";
+      display: block;
+      font-weight: 600;
+      color: #64748b;
+      margin-bottom: 6px;
+      font-size: 12px;
+    }
+
+    .seg-card.collapsed .sc-bar,
+    .seg-card.collapsed .sc-detail {
+      display: none !important;
+    }
+
+    .seg-card .sc-head {
+      cursor: pointer;
+      user-select: none;
+    }
+
+    .seg-card .sc-head:hover {
+      opacity: 0.8;
+    }
+
+    .sc-toggle-icon {
+      font-size: 8px;
+      color: #8899aa;
+      margin-left: 6px;
+      display: inline-block;
+      vertical-align: middle;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+        transform: translateY(4px)
+      }
+
+      to {
+        opacity: 1;
+        transform: translateY(0)
+      }
+    }
+
+    @keyframes pulse {
+
+      0%,
+      100% {
+        opacity: 1
+      }
+
+      50% {
+        opacity: .4
+      }
+    }
+
+    /* 固定栏：监控室人数 + 凝视状态（位于系统通知面板顶部，不滚动） */
+    .status-stats {
+      flex: none;
+      background: rgba(10, 14, 26, 0.65);
+      border-bottom: 1px solid #1e2a42;
+      padding: 6px 10px;
+      display: flex;
+      flex-direction: column;
+      z-index: 10;
+      backdrop-filter: blur(8px)
+    }
+
+    .status-stats .stat-item {
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      font-weight: 600;
+      color: #e0e6f0
+    }
+
+    .status-stats .stat-label {
+      color: #8899aa;
+      margin-right: 6px
+    }
+
+    .status-stats .stat-val {
+      font-size: 18px;
+      font-weight: 700;
+      color: #00ff88;
+      margin-right: 2px
+    }
+
+    .status-stats .stat-alert {
+      font-size: 9px;
+      color: #8899aa;
+      margin-top: 1px;
+      font-weight: normal
+    }
+
+    /* 状态分块网格（参考 summary-grid 隔断风格） */
+    .stat-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      margin-bottom: 4px
+    }
+
+    .stat-block {
+      background: #0a0e1a;
+      border: 1px solid #1e2a42;
+      border-radius: 4px;
+      padding: 5px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px
+    }
+
+    .stat-block-label {
+      font-size: 10px;
+      color: #6b7a90;
+      font-weight: 600
+    }
+
+    .stat-block-content {
+      display: flex;
+      align-items: baseline;
+      gap: 2px
+    }
+
+    .stat-unit {
+      font-size: 12px;
+      color: #8899aa;
+      font-weight: 600
+    }
+
+    /* 流程事件列表（系统通知面板内的流程开始/结束事件，占满剩余空间并滚动） */
+    .flow-events {
+      flex: 1;
+      overflow-y: auto;
+      padding: 4px 6px;
+      border-top: 1px solid #1e2a42;
+      margin-top: 4px;
+      min-height: 0
+    }
+
+    .flow-events:empty {
+      display: none
+    }
+
+    .flow-event {
+      font-size: 11px;
+      padding: 5px 8px;
+      border-left: 3px solid #00d4ff;
+      margin-bottom: 4px;
+      background: #0a0e1a;
+      border-radius: 3px;
+      color: #e0e6f0;
+      animation: fadeIn .3s
+    }
+
+    .flow-event .ts {
+      color: #6b7a90;
+      margin-right: 6px;
+      font-family: 'JetBrains Mono', monospace
+    }
+
+    /* 凝视告警进度条 (0/60S) */
+    .gaze-progress-wrap {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-top: 4px;
+      font-size: 10px
+    }
+
+    .gaze-progress-track {
+      flex: 1;
+      height: 3px;
+      background: #1e2a42;
+      border-radius: 2px;
+      overflow: hidden
+    }
+
+    .gaze-progress-bar {
+      height: 100%;
+      width: 0%;
+      background: #ffaa00;
+      border-radius: 2px;
+      transition: width .3s, background .3s
+    }
+
+    .gaze-progress-text {
+      color: #8899aa;
+      font-weight: 600;
+      min-width: 50px;
+      text-align: right
+    }
+  </style>
 </head>
+
 <body>
-<div class="header">
-  <h1><span>⚛️</span>核电站行为合规检测系统</h1>
-  <button id="startBtn" onclick="startPipeline()">👤 开始测试</button>
-  <div class="header-right">
-    <div id="statusDot"></div>
-    <span id="headerStatus">就绪</span>
-    <div class="progress-group" id="progressGroup" style="display:none">
-      <div class="progress-row" id="prVoice">🎤 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
-      <div class="progress-row" id="prMot">🎯 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
-      <div class="progress-row" id="prGaze">👁️ |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+  <div class="header">
+    <h1><span>⚛️</span>核电站行为合规检测系统</h1>
+    <button id="startBtn" onclick="startPipeline()">👤 开始测试</button>
+    <div class="header-right">
+      <div id="statusDot"></div>
+      <span id="headerStatus">就绪</span>
+      <div class="progress-group" id="progressGroup" style="display:none">
+        <div class="progress-row" id="prVoice">🎤 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+        <div class="progress-row" id="prMot">🎯 |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+        <div class="progress-row" id="prGaze">👁️ |░░░░░░░░░░░░░░░░░░░░| 0%</div>
+      </div>
     </div>
   </div>
-</div>
 
-<div class="main">
-  <div class="left">
-    <div class="panel" style="flex:1">
-      <div class="panel-title">🎤 人员对话记录</div>
-      <div class="panel-body" id="textScroll"></div>
-    </div>
-  </div>
-  <div class="right">
-    <div class="panel" style="flex:4;display:flex;flex-direction:row;min-height:0">
-      <div style="flex:1;display:flex;flex-direction:column;min-width:0">
-        <div class="panel-title">🎥 目标跟踪</div>
-        <div class="panel-body" style="padding:0;flex:1;position:relative">
-          <img id="streamImg" alt="">
-          <div class="video-placeholder" id="overlay1"><div class="icon">🎥</div><div class="text">等待视频输入</div></div>
-        </div>
-      </div>
-      <div style="flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid #1e2a42">
-        <div class="panel-title">🎥 行为检测</div>
-        <div class="panel-body" style="padding:0;flex:1;position:relative">
-          <img id="streamImg2" alt="">
-          <div class="video-placeholder" id="overlay2"><div class="icon">✋</div><div class="text">行为检测（手指指向等）待完善</div></div>
-        </div>
+  <div class="main">
+    <div class="left">
+      <div class="panel" style="flex:1">
+        <div class="panel-title">🎤 人员对话记录</div>
+        <div class="panel-body" id="textScroll"></div>
       </div>
     </div>
-    <div class="bottom">
-      <div class="panel">
-        <div class="panel-title">📊 系统通知 <span id="flowTag" style="display:none"></span></div>
-        <div class="status-stats" id="statusStats">
-          <div class="stat-item">
-            <span class="stat-label">👥 监控室人数:</span>
-            <span class="stat-val" id="peopleCountVal">--</span>人
-          </div>
-          <div class="stat-alert" id="peopleStatusAlert">就绪</div>
-        </div>
-        <div class="panel-body" id="detBody" style="flex:4">
-          <div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none">
-            <div style="display:flex;justify-content:space-between;align-items:center">
-              <span>📏 距离: <b id="distVal">--</b> px</span>
-              <span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span>
+    <div class="right">
+      <div class="panel" style="flex:4;display:flex;flex-direction:row;min-height:0">
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+          <div class="panel-title">🎥 目标跟踪</div>
+          <div class="panel-body" style="padding:0;flex:1;position:relative">
+            <img id="streamImg" alt="">
+            <div class="video-placeholder" id="overlay1">
+              <div class="icon">🎥</div>
+              <div class="text">等待视频输入</div>
             </div>
-            <div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px">
-              <div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div>
+          </div>
+        </div>
+        <div style="flex:1;display:flex;flex-direction:column;min-width:0;border-left:1px solid #1e2a42">
+          <div class="panel-title">🎥 行为检测</div>
+          <div class="panel-body" style="padding:0;flex:1;position:relative">
+            <img id="streamImg2" alt="">
+            <div class="video-placeholder" id="overlay2">
+              <div class="icon">✋</div>
+              <div class="text">行为检测（手指指向等）待完善</div>
             </div>
           </div>
         </div>
       </div>
-      <div class="panel">
-        <div class="panel-title">📋 评价报告</div>
-        <div class="panel-body">
-          <div class="summary-grid">
-            <div><div class="val" id="msSup">0</div><div class="lbl">监护制流程</div></div>
-            <div><div class="val" id="msTicket">0</div><div class="lbl">自唱票流程</div></div>
-            <div><div class="val" id="msNotice">0</div><div class="lbl">信息通报</div></div>
-            <div><div class="val" id="msAvg">-</div><div class="lbl">平均分</div></div>
-            <div><div class="val" id="msTotal">-</div><div class="lbl">总分</div></div>
+      <div class="bottom">
+        <div class="panel">
+          <div class="panel-title">📊 系统通知</div>
+          <div class="status-stats" id="statusStats">
+            <div class="stat-grid">
+              <!-- 块1: 监控室人数 -->
+              <div class="stat-block">
+                <div class="stat-block-label">👥 监控室人数</div>
+                <div class="stat-block-content">
+                  <span class="stat-val" id="peopleCountVal">--</span>
+                  <span class="stat-unit">人</span>
+                </div>
+                <div class="stat-alert" id="peopleStatusAlert">就绪</div>
+              </div>
+              <!-- 块2: 凝视状态 -->
+              <div class="stat-block">
+                <div class="stat-block-label">👁️ 凝视状态</div>
+                <div class="stat-block-content">
+                  <span class="stat-val" id="gazeStatusNum" style="color:#6b7a90">待检测</span><span class="stat-unit"
+                    id="gazeStatusUnit" style="display:none"></span>
+                </div>
+                <!-- 凝视告警进度条 (0/60S, 超过60秒转红色告警) -->
+                <div class="gaze-progress-wrap" id="gazeProgressWrap" style="display:none">
+                  <div class="gaze-progress-track">
+                    <div class="gaze-progress-bar" id="gazeProgressBar"></div>
+                  </div>
+                  <span class="gaze-progress-text" id="gazeProgressText">0/60S</span>
+                </div>
+              </div>
+            </div>
           </div>
-          <div id="segCards"></div>
+          <!-- 流程开始/结束事件列表（仅展示流程事件，滚动追加） -->
+          <div class="flow-events" id="flowEventsBody"></div>
+        </div>
+        <div class="panel">
+          <div class="panel-title">📋 评价报告</div>
+          <div class="panel-body">
+            <div class="summary-grid">
+              <div>
+                <div class="val" id="msSup">0</div>
+                <div class="lbl">监护制流程</div>
+              </div>
+              <div>
+                <div class="val" id="msTicket">0</div>
+                <div class="lbl">自唱票流程</div>
+              </div>
+              <div>
+                <div class="val" id="msNotice">0</div>
+                <div class="lbl">信息通报</div>
+              </div>
+              <div>
+                <div class="val" id="msAvg">-</div>
+                <div class="lbl">平均分</div>
+              </div>
+              <div>
+                <div class="val" id="msTotal">-</div>
+                <div class="lbl">总分</div>
+              </div>
+            </div>
+            <div id="segCards"></div>
+          </div>
         </div>
       </div>
     </div>
   </div>
-</div>
 
-<audio id="audioPlayer" preload="none" style="display:none"></audio>
+  <audio id="audioPlayer" preload="none" style="display:none"></audio>
 
-<script>
-const $=id=>document.getElementById(id);
-let evtSource=null,segScores=[],supN=0,ticketN=0,noticeN=0;
-const audio=$('audioPlayer');
-function fmt(s){let m=Math.floor(s/60),ss=Math.floor(s%60);return `${String(m).padStart(2,'0')}:${String(ss).padStart(2,'0')}`}
+  <script>
+    const $ = id => document.getElementById(id);
+    let dataSource = null, segScores = [], supN = 0, ticketN = 0, noticeN = 0, _completedFlows = new Set();
+    const audio = $('audioPlayer');
+    function fmt(s) { let m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` }
 
-function startPipeline(){
-  const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
-  $('statusDot').className='active';$('headerStatus').textContent='🚀 启动中…';
-  $('progressGroup').style.display='';
-  segScores=[];supN=0;ticketN=0;noticeN=0;
-  $('detBody').innerHTML='<div id="distDashboard" style="position:sticky;top:0;background:#0a0e1a;padding:5px;border-bottom:1px solid #1e2a42;z-index:10;display:none"><div style="display:flex;justify-content:space-between;align-items:center"><span>📏 距离: <b id="distVal">--</b> px</span><span id="distStatus" style="padding:2px 8px;border-radius:3px;font-size:10px;background:#1e2a42;color:#6b7a90">未监护</span></div><div style="height:3px;background:#1e2a42;border-radius:2px;margin-top:3px"><div id="distBar" style="height:100%;width:0%;background:#00ff88;border-radius:2px;transition:width .3s,background .3s"></div></div></div>';$('textScroll').innerHTML='';$('segCards').innerHTML='';
-  $('peopleCountVal').textContent = '--';
-  $('peopleStatusAlert').textContent = '就绪';
-  $('peopleStatusAlert').style.color = '#8899aa';
-  updateSummary();
-  $('streamImg').src='';audio.pause();audio.src='';
-  connectSSE(function(){fetch('/start',{method:'POST'}).then(r=>r.json())});
-}
+    function startPipeline() {
+      const btn = $('startBtn'); btn.disabled = true; btn.textContent = '⏳ 推理中...';
+      $('statusDot').className = 'active'; $('headerStatus').textContent = '🚀 启动中…';
+      $('progressGroup').style.display = '';
+      segScores = []; supN = 0; ticketN = 0; noticeN = 0;
+      _completedFlows.clear();
+      _streamBuffers = {};
+      $('textScroll').innerHTML = ''; $('segCards').innerHTML = '';
+      $('peopleCountVal').textContent = '--';
+      $('peopleStatusAlert').textContent = '就绪';
+      $('peopleStatusAlert').style.color = '#8899aa';
+      // 重置凝视状态指示器
+      $('gazeStatusNum').textContent = '待检测';
+      $('gazeStatusNum').style.color = '#6b7a90';
+      $('gazeStatusUnit').style.display = 'none';
+      $('gazeProgressWrap').style.display = 'none';
+      // 重置流程事件列表（清除上次测试的流程开始/结束记录）
+      $('flowEventsBody').innerHTML = '';
+      updateSummary();
+      $('streamImg').src = ''; audio.pause(); audio.src = '';
+      connectSSE(function () {
+        fetch('/start', { method: 'POST' })
+          .then(r => r.json())
+          .catch(function (err) {
+            console.error('启动失败:', err);
+            $('headerStatus').textContent = '❌ 启动失败';
+            $('statusDot').className = '';
+            $('startBtn').disabled = false; $('startBtn').textContent = '👤 开始测试';
+          });
+      });
+    }
 
-function connectSSE(onReady){
-  if(evtSource){evtSource.close();evtSource=null}
-  evtSource=new EventSource('/events');
-  evtSource.onopen=function(){
-    // 视频帧统一由 SSE 的 video_frame 事件驱动（已按 global_sec 对齐），
-    // 不再使用 /stream MJPEG 实时流，避免两条链路互相覆盖导致画面回跳。
-    $('overlay1').style.display='none';
-    $('overlay2').style.display='none';
+    function connectSSE(onReady) {
+      if (dataSource) { dataSource.close(); dataSource = null }
+      dataSource = new EventSource('/data');
+      dataSource.onopen = function () {
+        // 视频帧统一由推理流 batch.video 驱动（已按 global_sec 对齐）
+        $('overlay1').style.display = 'none';
+        $('overlay2').style.display = 'none';
 
-    // 连接成功后，更新 headerStatus 为正常的推理中状态，避免卡在“已在运行，连接中…”
-    $('headerStatus').textContent = '⏳ 推理中...';
-    const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
-    $('statusDot').className='active';
+        // 连接成功后，更新 headerStatus 为正常的推理中状态，避免卡在“已在运行，连接中…”
+        $('headerStatus').textContent = '⏳ 推理中...';
+        const btn = $('startBtn'); btn.disabled = true; btn.textContent = '⏳ 推理中...';
+        $('statusDot').className = 'active';
 
-    audio.src='/audio?t='+Date.now();audio.load();audio.currentTime=0;audio.play().catch(()=>{});
-    if(onReady)onReady();
-  };
-  evtSource.onmessage=function(e){try{const d=JSON.parse(e.data);handleEvent(d);if(d.type==='done'){evtSource.close();evtSource=null}}catch(ex){}};
-  evtSource.onerror=function(){
-    // SSE连接断开,重置状态为就绪
-    $('statusDot').className='';
-    $('headerStatus').textContent='就绪';
-    $('startBtn').disabled=false;$('startBtn').textContent='👤 开始测试';
-    setTimeout(function(){
-      if(evtSource)return;
-      fetch('/status').then(r=>r.json()).then(function(d){
-        if(d.pipeline==='idle'){
-          $('progressGroup').style.display='none';
+        audio.src = '/audio?t=' + Date.now(); audio.load(); audio.currentTime = 0; audio.play().catch(() => { });
+        if (onReady) onReady();
+      };
+      dataSource.onmessage = function (e) { try { const d = JSON.parse(e.data); handleData(d); if (d.source === 'done') { dataSource.close(); dataSource = null } } catch (ex) { } };
+      dataSource.onerror = function () {
+        // 推理流连接断开,重置状态为就绪
+        $('statusDot').className = '';
+        $('headerStatus').textContent = '就绪';
+        $('startBtn').disabled = false; $('startBtn').textContent = '👤 开始测试';
+        setTimeout(function () {
+          if (dataSource) return;
+          fetch('/status').then(r => r.json()).then(function (d) {
+            if (d.pipeline === 'idle') {
+              $('progressGroup').style.display = 'none';
+            }
+          }).catch(function () { });
+        }, 3000);
+      };
+    }
+
+    // 页面加载时不自动恢复（用户要求：刷新即干净状态，必须点击"开始测试"触发全新推理）
+
+    function updateSummary() {
+      $('msSup').textContent = supN; $('msTicket').textContent = ticketN; $('msNotice').textContent = noticeN;
+      if (segScores.length > 0) {
+        const total = segScores.reduce((a, b) => a + b, 0);
+        $('msTotal').textContent = total;
+        $('msAvg').textContent = (total / segScores.length).toFixed(1);
+      }
+    }
+
+
+
+
+    // 单条推理流事件分发（推理流统一格式 {source, localSec, tag, data}）
+    // batch 模式下每个 item 也走此分发，确保所有 source 都被处理（包括 video_start/flow_start 等过去被 batch 漏掉的）
+    function dispatchItem(d) {
+      const source = d.source;
+      if (source === 'voice') addVoiceItem(d);
+      else if (source === 'tracking') addDetData(d);
+      else if (source === 'behavior') addBehaviorData(d);
+      else if (source === 'gaze') addGazeData(d);
+      else if (source === 'video') { if (d.data && d.data.frame_data) $('streamImg').src = 'data:image/jpeg;base64,' + d.data.frame_data; }
+      else if (source === 'progress') updateProgress(d);
+      else if (source === 'flow_start') addFlowStart(d);
+      else if (source === 'flow_end') addFlowEnd(d);
+      else if (source === 'segment_report') addSegCard(d);
+      else if (source === 'segment_report_stream') addSegStream(d);
+      else if (source === 'video_start') {
+        // 隐藏占位符，启动音频（视频帧由后续 source='video' 的 batch 驱动）
+        $('overlay1').style.display = 'none';
+        $('overlay2').style.display = 'none';
+        audio.src = '/audio?t=' + Date.now(); audio.load(); audio.currentTime = 0; audio.play().catch(() => { });
+      }
+      else if (source === 'done') {
+        $('statusDot').className = ''; $('startBtn').disabled = false; $('startBtn').textContent = '🔄 重新测试';
+        $('headerStatus').textContent = '✅ 完成'; $('progressGroup').style.display = 'none'; audio.pause();
+      }
+    }
+
+    function handleData(d) {
+      try {
+        if (d.globalSec !== undefined) {
+          // 用 batch.globalSec 同步音频
+          if (typeof lastClockSec === 'undefined') { lastClockSec = -1; }
+          if (d.globalSec !== lastClockSec) {
+            lastClockSec = d.globalSec;
+            // 工业级音视频对齐：利用 playbackRate 动态调速进行无缝漂移补偿，从根本上杜绝 seek 造成的声卡爆音
+            const drift = audio.currentTime - d.globalSec;
+            const absDrift = Math.abs(drift);
+            
+            if (absDrift > 4.0) {
+              // 只有在发生超过 4 秒的极端断层偏移时（如首次加载、切换后台标签页），才使用硬跳转一键对齐
+              audio.currentTime = d.globalSec;
+              audio.playbackRate = 1.0;
+            } else if (absDrift > 0.3) {
+              // 偏移在 0.3s ~ 4s 之间：采用动态调速进行渐进式微调进度
+              // 音频快于视频 -> 减速 5% (0.95x)；音频慢于视频 -> 加速 5% (1.05x)
+              audio.playbackRate = drift > 0 ? 0.95 : 1.05;
+            } else {
+              // 偏差小于 300ms（完美对齐区间），恢复标准 1.0x 播放速率
+              audio.playbackRate = 1.0;
+            }
+            if (audio.paused && d.globalSec > 0.1) {
+              let p = audio.play();
+              if (p !== undefined) p.catch(function () { });
+            }
+          }
+          // batch 模式：遍历所有 source 键，逐项分发
+          // 这样 video_start/flow_start 等过去被漏掉的 source 也能被正确处理
+          for (const key in d) {
+            if (key === 'globalSec') continue;
+            const items = d[key];
+            if (!Array.isArray(items)) continue;
+            for (const item of items) {
+              // batch 中的 item 没有 source 字段，补上 key 作为 source
+              dispatchItem(Object.assign({ source: key }, item));
+            }
+          }
+          return;
         }
-      }).catch(function(){});
-    },3000);
-  };
-}
-
-// 页面加载时检查流水线是否已在运行
-function checkRunning(){
-  fetch('/status').then(r=>r.json()).then(d=>{
-    if(d.pipeline==='running'){
-      // 清除旧内容再连接
-      document.getElementById("textScroll").innerHTML="";
-      document.getElementById("detBody").innerHTML="<div id=distDashboard\ style=display:none\></div>";
-      document.getElementById("segCards").innerHTML="";
-      segScores=[];supN=0;ticketN=0;noticeN=0;
-      // 流水线已在运行，自动连接 SSE
-      const btn=$('startBtn');btn.disabled=true;btn.textContent='⏳ 推理中...';
-      $('statusDot').className='active';$('headerStatus').textContent='🔄 已在运行，连接中…';
-      connectSSE(null);
-      // 视频帧通过 SSE 接收，不需要独立的视频流
-      $('overlay1').style.display='none';
-      $('overlay2').style.display='none';
+        // 单条事件直接分发
+        dispatchItem(d);
+      } catch (ex) { console.error(d.source || 'batch', ex) }
     }
-  }).catch(()=>{});
-}
 
-function highlightText(t){
-  // 1. 监护制与信息通报的核心语音关键字标红
-  const redWords = [
-    "请求监护", "请监护", "申请监护", "监护",
-    "可以执行", "REST执行", "REST 执行", "执行",
-    "核对",
-    "信息通报", "信息通告",
-    "通报完毕", "通告完毕",
-    "收到"
-  ];
-  redWords.forEach(w => {
-    const reg = new RegExp(w, 'g');
-    t = t.replace(reg, `<span class="kw-red">${w}</span>`);
-  });
+    function updateProgress(d) {
+      const moduleMap = { voice: "prVoice", tracker: "prMot", gaze: "prGaze" };
+      $('progressGroup').style.display = '';
+      const iconMap = { voice: '🎤', tracker: '🎯', gaze: '👁️' };
+      const dt = d.data || {};
+      const label = dt.label || d.label || '';
+      const rid = moduleMap[label];
+      if (!rid) { $('headerStatus').textContent = dt.detail || (dt.pct !== undefined ? dt.pct.toFixed(1) : '0.0') + '%'; return }
+      const icon = iconMap[label] || '📊';
+      const pct = Math.max(0, Math.min(100, dt.pct || 0)), bl = 20, f = Math.round(pct / 100 * bl);
+      const bar = pct >= 100 ? '█'.repeat(bl) : '█'.repeat(f) + '░'.repeat(bl - f);
+      const cls = pct >= 100 ? 'tqdm-done' : 'tqdm-bar';
+      $(rid).innerHTML = `${icon} |<span class=${cls}>${bar}</span>| ${pct.toFixed(1)}%`;
+    }
 
-  // 2. 自唱票与监护制的设备九字码标红 (原为蓝色)
-  t = t.replace(/(1ES\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)/gi, '<span class="kw-red">$1</span>');
+    function highlightText(t) {
+      if (!t) return '';
+      // 1. 核心关键字标红
+      const redWords = [
+        "请求监护", "请监护", "申请监护", "监护",
+        "可以执行", "REST执行", "REST 执行", "执行",
+        "核对", "核实",
+        "信息通报", "信息通告",
+        "通报完毕", "通告完毕",
+        "收到", "确认", "没问题"
+      ];
+      redWords.forEach(w => {
+        const reg = new RegExp(w, 'g');
+        t = t.replace(reg, `<span class="kw-red">${w}</span>`);
+      });
 
-  return t;
-}
+      // 2. 设备九字码标红
+      t = t.replace(/(1ES\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)/gi, '<span class="kw-red">$1</span>');
+      return t;
+    }
 
-function updateSummary(){
-  $('msSup').textContent=supN;$('msTicket').textContent=ticketN;$('msNotice').textContent=noticeN;
-  if(segScores.length>0)$('msAvg').textContent=(segScores.reduce((a,b)=>a+b,0)/segScores.length).toFixed(1);
-}
-
-
-
-
-function handleEvent(d){
-  try{
-  if(d.globalSec!==undefined){
-    // 用 batch.globalSec 同步音频
-    if(typeof lastClockSec==='undefined'){lastClockSec=-1;}
-    if(d.globalSec!==lastClockSec){
-      lastClockSec=d.globalSec;
-      if(Math.abs(audio.currentTime-d.globalSec)>1.5){
-        audio.currentTime=d.globalSec;
+    function addVoiceItem(d) {
+      const dt = d.data || {};
+      const tag = d.tag || 'text';
+      if (tag === 'key_moment') {
+        // 不再创建独立的行展示 key_moment，直接忽略
+        return;
       }
-      if(audio.paused&&d.globalSec>0.1){
-        let p=audio.play();
-        if(p!==undefined)p.catch(function(){});
+      const el = document.createElement('div'); el.className = 'text-item';
+      const txt = dt.text || '';
+      const highlighted = highlightText(txt);
+      const textLine = txt ? `<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlighted}</div>` : '';
+      el.innerHTML = `<span class="ts">[${fmt(d.localSec)}]</span>${textLine}`;
+      $('textScroll').appendChild(el); el.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    function addDetData(d) {
+      const dt = d.data || {};
+      const tagName = d.tag || '';
+
+      // 人数更新（仍需更新状态栏，但不再追加滚动事件）
+      if (tagName === 'PEOPLE_COUNT_UPDATE') {
+        $('peopleCountVal').textContent = dt.count || '--';
+        if (dt.state_alert) {
+          $('peopleStatusAlert').textContent = '⚠️ ' + dt.state_alert;
+          $('peopleStatusAlert').style.color = '#ff4d4d';
+        } else {
+          $('peopleStatusAlert').textContent = '✅ 当前人数正常';
+          $('peopleStatusAlert').style.color = '#00ff88';
+        }
+        return;
+      }
+
+      // 其他 tracking 事件（ROLE_ASSIGNED/监护中/接近中等）不再追加展示，仅日志
+    }
+
+    function addGazeData(d) {
+      const tagName = d.tag || '';
+      const dt = d.data || {};
+
+      // gaze_status: 实时状态（仅更新状态栏的凝视指示器，不追加滚动事件）
+      if (tagName === 'gaze_status') {
+        const numEl = $('gazeStatusNum');
+        const unitEl = $('gazeStatusUnit');
+        const wrapEl = $('gazeProgressWrap');
+        const barEl = $('gazeProgressBar');
+        const textEl = $('gazeProgressText');
+        if (numEl && unitEl) {
+          const heads = dt.heads_count || 0;
+          const inRoi = dt.any_in_roi;
+          const awayDur = dt.away_duration || 0;
+          if (!dt.has_heads) {
+            // 无人：仅文本，无数字，无进度条
+            numEl.textContent = '无人';
+            unitEl.style.display = 'none';
+            numEl.style.color = '#6b7a90';
+            wrapEl.style.display = 'none';
+          } else if (inRoi) {
+            // 注视盘台：数字绿色，无进度条
+            numEl.textContent = heads;
+            unitEl.textContent = '人注视盘台';
+            unitEl.style.display = '';
+            numEl.style.color = '#00ff88';
+            wrapEl.style.display = 'none';
+          } else {
+            // 未看盘台：数字橙色 + 显示进度条
+            numEl.textContent = heads;
+            unitEl.textContent = '人未看盘台';
+            unitEl.style.display = '';
+            numEl.style.color = '#ffaa00';
+            wrapEl.style.display = 'flex';
+            const pct = Math.min(100, (awayDur / 60) * 100);
+            barEl.style.width = pct.toFixed(0) + '%';
+            if (awayDur >= 60) {
+              // 超过60秒：转红色告警
+              barEl.style.background = '#ff4d4d';
+              textEl.style.color = '#ff4d4d';
+              textEl.textContent = '⚠️ ' + Math.round(awayDur) + '/60S 告警';
+            } else {
+              // 0-60秒：橙色进度
+              barEl.style.background = '#ffaa00';
+              textEl.style.color = '#8899aa';
+              textEl.textContent = Math.round(awayDur) + '/60S';
+            }
+          }
+        }
+        return;
+      }
+
+      // 其他 gaze 事件（ATTENTION_RESULT/GAZE_ALERT/GAZE_VIOLATION_END 等）不再追加展示
+    }
+
+    function addBehaviorData(d) {
+      // 行为模块事件（HAND_RAISED 等）不再追加展示，仅日志
+    }
+
+    function addFlowStart(d) {
+      const body = $('flowEventsBody');
+      const el = document.createElement('div'); el.className = 'flow-event';
+      const dt = d.data || d;  // 兼容 batch（字段在 data 里）和单事件（字段在顶层）
+      let color, label;
+      if (dt.flow_type === 'supervision') {
+        color = '#00d4ff'; label = '监护制开始';
+      } else if (dt.flow_type === 'info_notice') {
+        color = '#00ffcc'; label = '信息通报开始';
+      } else {
+        color = '#ffaa00'; label = '自唱票开始';
+      }
+      el.style.borderLeftColor = color;
+      el.innerHTML = `<span class="ts">[${fmt(dt.flow_start_sec)}]</span> <span style="color:${color}">${label}</span>`;
+      body.appendChild(el);
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function addFlowEnd(d) {
+      const body = $('flowEventsBody');
+      const el = document.createElement('div'); el.className = 'flow-event';
+      const dt = d.data || d;  // 兼容 batch（字段在 data 里）和单事件（字段在顶层）
+      let color, label;
+      if (dt.flow_type === 'supervision') {
+        color = '#00d4ff'; label = '监护制结束';
+      } else if (dt.flow_type === 'info_notice') {
+        color = '#00ffcc'; label = '信息通报结束';
+      } else {
+        color = '#ffaa00'; label = '自唱票结束';
+      }
+      el.style.borderLeftColor = color;
+      el.innerHTML = `<span class="ts">[${fmt(dt.flow_end_sec)}]</span> <span style="color:${color}">${label}</span>`;
+      body.appendChild(el);
+      el.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+
+    function toggleCard(card) {
+      card.classList.toggle('collapsed');
+      const arrow = card.querySelector('.sc-toggle-icon');
+      if (arrow) {
+        arrow.textContent = card.classList.contains('collapsed') ? '▶' : '▼';
       }
     }
-    // 按 source 分发各模块数据
-    if(d.voice) for(const ev of d.voice) addVoiceItem(ev);
-    if(d.tracking) for(const ev of d.tracking) addDetEvent(ev);
-    if(d.gaze) for(const ev of d.gaze) addGazeEvent(ev);
-    if(d.video) for(const ev of d.video){$('streamImg').src='data:image/jpeg;base64,'+ev.data.frame_data;}
-    if(d.progress) for(const ev of d.progress) updateProgress(ev);
-    return;
-  }
-  if(d.type==='voice')addVoiceItem(d);
-  else if(d.type==='tracking')addDetEvent(d);
-  else if(d.type==='gaze')addGazeEvent(d);
-  else if(d.type==='flow_start')addFlowStart(d);
-  else if(d.type==='flow_end')addFlowEnd(d);
-  else if(d.type==='segment_report')addSegCard(d);
-  else if(d.type==='segment_report_stream')addSegStream(d);
-  else if(d.type==='progress')updateProgress(d);
-  else if(d.type==='status')$('headerStatus').textContent=d.text;
-  else if(d.type==='report_progress'){
-    $('headerStatus').textContent='🤖 '+d.text;
-    if(!$('reportStreamCard')){
-      const card=document.createElement('div');
-      card.id='reportStreamCard';
-      card.className='seg-card';
-      card.style.borderLeftColor='#ffd700';
-      card.innerHTML='<div class="sc-head"><span>🤖 大模型总结报告</span></div><div class="sc-detail" style="white-space:pre-wrap"></div>';
-      $('segCards').appendChild(card);
+
+    function addSegCard(d) {
+      const dt = d.data || d;  // 兼容 batch（字段在 data 里）和单事件（字段在顶层）
+      const fid = dt.flow_id || dt.flowId;
+      if (!fid) return;  // 过滤无有效ID的冗余事件，防止空卡片残留
+
+      _completedFlows.add(fid); // 标记该流程评估已彻底结束
+
+      segScores.push(dt.score || 0);
+      if (dt.flow_type === 'supervision') supN++; else if (dt.flow_type === 'info_notice') noticeN++; else ticketN++;
+      updateSummary();
+      const isNotice = dt.flow_type === 'info_notice';
+      const isSup = dt.flow_type === 'supervision';
+      const sc = dt.score >= 8 ? '#00ff88' : dt.score >= 5 ? '#ffaa00' : '#ff4d4d';
+      const bc = isSup ? '#00d4ff' : (isNotice ? '#00ffcc' : '#ffaa00');
+      const icon = isSup ? '🛡️' : (isNotice ? '📢' : '🎫');
+      const label = isSup ? '监护制' : (isNotice ? '信息通报' : '自唱票');
+      
+      let card = $('card-' + fid);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = 'card-' + fid;
+        card.className = 'seg-card';
+        $('segCards').appendChild(card);
+      }
+      
+      card.style.borderLeftColor = bc;
+      // 恢复输出大模型给出的所有真实文本内容（包含思考过程）
+      card.innerHTML = `<div class="sc-head" onclick="toggleCard(this.parentNode)"><span>${icon} ${label} #${fid} [${dt.flow_continue_sec || '?'}s] <span class="sc-toggle-icon">▼</span></span><span class="sc-score" style="color:${sc}">${dt.score || 0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(dt.score || 0) * 10}%;background:${sc}"></div></div><div class="sc-detail" style="white-space:pre-wrap">${dt.report_text || ''}</div>`;
+      card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+      
+      // 强制将评价报告的外层滚动容器拉到底部，展示最新评估细节
+      const panel = $('segCards').parentNode;
+      if (panel) { panel.scrollTop = panel.scrollHeight; }
     }
-    const el=$('reportStreamCard');
-    if(el){
-      const detail=el.querySelector('.sc-detail');
-      if(detail) detail.textContent+=d.text||'';
+
+    let _streamBuffers = {};
+
+    function addSegStream(d) {
+      const dt = d.data || d;  // 兼容 batch（字段在 data 里）和单事件（字段在顶层）
+      const fid = dt.flow_id || dt.flowId;
+      if (!fid) return;  // 忽略没有合法 ID 的流式事件，防止创建残留的空卡片
+
+      if (_completedFlows.has(fid)) return; // 关键：如果该流程已评估完，则彻底忽略任何延迟到达的流式包，防止“推理中”卡片被重新创建
+
+      if (!_streamBuffers[fid]) {
+        _streamBuffers[fid] = '';
+      }
+      _streamBuffers[fid] += dt.chunk || '';
+      
+      let card = $('card-' + fid);
+      if (!card) {
+        card = document.createElement('div');
+        card.id = 'card-' + fid;
+        card.className = 'seg-card';
+        card.style.borderLeftColor = '#6b7a90';
+        $('segCards').appendChild(card);
+      }
+
+      // 去除流程编号展示，直接显示“大模型评估推理中…”，直到评估彻底完成后再就地转化为带有流程编号的最终评分报告
+      card.innerHTML = `<div class="sc-head" onclick="toggleCard(this.parentNode)"><span>🤖 大模型评估推理中… <span class="sc-toggle-icon">▼</span></span></div><div class="sc-detail" style="white-space:pre-wrap">${_streamBuffers[fid]}</div>`;
+      
+      // 【性能优化】移除 card.scrollIntoView 动画，规避打字时高频 layout reflow 导致的音频卡顿与界面卡顿
+      
+      // 在大模型流式推理打字过程中，持续强制将滚动面板移到最底部，让最新生成的文本始终可见（性能开销极低）
+      const panel = $('segCards').parentNode;
+      if (panel) { panel.scrollTop = panel.scrollHeight; }
     }
-  }
-  else if(d.type==='report')showQwenReport(d.text);
-  else if(d.type==='video_start'){
-    // 视频帧通过 SSE 接收，不需要独立的视频流
-    $('overlay1').style.display='none';
-    $('overlay2').style.display='none';
-    audio.src='/audio?t='+Date.now();audio.load();audio.currentTime=0;audio.play().catch(()=>{});
-  }
-  else if(d.type==='video_frame'){
-    if(d.frame_data){
-      $('overlay1').style.display='none';
-      $('streamImg').src='data:image/jpeg;base64,'+d.frame_data;
-    }
-  }
-  else if(d.type==='done'){
-    $('statusDot').className='';$('startBtn').disabled=false;$('startBtn').textContent='🔄 重新测试';
-    $('headerStatus').textContent='✅ 完成';$('progressGroup').style.display='none';audio.pause();
-  }
-  }catch(ex){console.error(d.type,ex)}
-}
-
-function updateProgress(d){
-  const moduleMap={voice:"prVoice",tracker:"prMot",gaze:"prGaze"};
-  $('progressGroup').style.display='';
-  const iconMap={voice:'🎤',tracker:'🎯',gaze:'👁️'};
-  const dt=d.data||{};
-  const label=dt.label||d.label||'';
-  const rid=moduleMap[label];
-  if(!rid){$('headerStatus').textContent=dt.detail||(dt.pct !== undefined ? dt.pct.toFixed(1) : '0.0')+'%';return}
-  const icon=iconMap[label]||'📊';
-  const pct=Math.max(0,Math.min(100,dt.pct||0)),bl=20,f=Math.round(pct/100*bl);
-  const bar=pct>=100?'█'.repeat(bl):'█'.repeat(f)+'░'.repeat(bl-f);
-  const cls=pct>=100?'tqdm-done':'tqdm-bar';
-  $(rid).innerHTML=`${icon} |<span class=${cls}>${bar}</span>| ${pct.toFixed(1)}%`;
-}
-
-function addVoiceItem(d){
-  const el=document.createElement('div');el.className='text-item';
-  const txt=d.data?d.data.text:'';
-  let textLine=txt?`<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlightText(txt)}</div>`:'';
-  el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span>${textLine}`;
-  $('textScroll').appendChild(el);el.scrollIntoView({behavior:'smooth'});
-}
-
-function addDetEvent(d){
-  const body=$('detBody');
-  const el=document.createElement('div');el.className='det-event';
-  const dt=d.data||{};
-  const st=dt.state||'';
-  const tagName=d.tag||'';
-
-  // 人数更新
-  if(tagName==='PEOPLE_COUNT_UPDATE'){
-    $('peopleCountVal').textContent=dt.count||'--';
-    if(dt.state_alert){
-      $('peopleStatusAlert').textContent='⚠️ '+dt.state_alert;
-      $('peopleStatusAlert').style.color='#ff4d4d';
-    }else{
-      $('peopleStatusAlert').textContent='✅ 当前人数正常';
-      $('peopleStatusAlert').style.color='#00ff88';
-    }
-    return;
-  }
-
-  if(st==='监护中'){
-    el.style.borderLeftColor='#00d4ff';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">🛡️ 监护中</span> ${dt.operator||''} <span class="flow-tag flow-supervision flow-active">进行中</span>`;
-    body.appendChild(el);
-    const tag=$('flowTag');tag.className='flow-tag flow-supervision flow-active';tag.textContent='🛡️ 监护制进行中';tag.style.display='';
-    const dd=$('distDashboard');dd.style.display='';updateDistDash(dt.distance_px,'#00ff88');
-  }else if(st==='接近中'){
-    el.style.borderLeftColor='#ffaa00';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⏳ 接近中</span> ${dt.operator||''}`;
-    body.appendChild(el);
-    const dd=$('distDashboard');dd.style.display='';updateDistDash(dt.distance_px,'#ffaa00');
-  }else if(st==='未监护'){
-    el.style.borderLeftColor='#ffaa00';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> ⚠️ 未监护 ${dt.operator||''}`;
-    body.insertBefore(el,body.firstChild);
-    while(body.childElementCount>30)body.removeChild(body.lastChild);
-    updateDistDash(dt.distance_px,'#ff4d4d');
-  }else if(st==='不在监护制'){
-    el.style.borderLeftColor='#ff4d4d';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">⚠️ 不在监护制</span>`;
-    body.appendChild(el);
-    const tag=$('flowTag');tag.style.display='none';
-    $('distDashboard').style.display='none';
-  }
-  el.scrollIntoView({behavior:'smooth'});
-}
-
-function updateDistDash(px,color){
-  if(px===undefined||px===null)return;
-  $('distVal').textContent=px;
-  const st=$('distStatus');st.textContent=px+' px';st.style.background=color;st.style.color='#0a0e1a';
-  const ratio=Math.max(0,Math.min(1,px/560));
-  $('distBar').style.width=(ratio*100).toFixed(0)+'%';
-  $('distBar').style.background=color;
-}
-
-function addGazeEvent(d){
-  if(d.tag==='GAZE_ALERT'){
-    const body=$('detBody');
-    const el=document.createElement('div');el.className='det-event';
-    el.style.borderLeftColor='#ff4d4d';
-    el.innerHTML=`<span class="ts">[${fmt(d.localSec)}]</span> <span class="ev-label">👁️ 无人注视盘台</span> <span style="color:#ff4d4d;font-weight:700">⚠️ 告警</span>`;
-    body.insertBefore(el,body.firstChild);
-    while(body.childElementCount>30)body.removeChild(body.lastChild);
-    el.scrollIntoView({behavior:'smooth'});
-  }
-}
-
-function addFlowStart(d){
-  const body=$('detBody');
-  const el=document.createElement('div');el.className='det-event';
-  if(d.flow_type==='supervision'){
-    el.style.borderLeftColor='#00d4ff';
-    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🛡️ 监护制流程 #${d.flowId} <span class="flow-tag flow-supervision flow-active">进行中</span>`;
-  }else if(d.flow_type==='info_notice'){
-    el.style.borderLeftColor='#00ffcc';
-    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 📢 信息通报流程 #${d.flowId} <span class="flow-tag flow-info-notice flow-active">进行中</span>`;
-  }else{
-    el.style.borderLeftColor='#ffaa00';
-    el.innerHTML=`<span class="ts">[${fmt(d.flow_start_sec)}]</span> 🎫 自唱票 #${d.flowId} <span class="flow-tag flow-self-ticket flow-active">进行中</span>${d.parent_flow_id?' (监护制#'+d.parent_flow_id+')':''}`;
-  }
-  body.appendChild(el);
-}
-
-function addFlowEnd(d){
-  const body=$('detBody');
-  const el=document.createElement('div');el.className='det-event';
-  let icon=d.flow_type==='supervision'?'🛡️':(d.flow_type==='info_notice'?'📢':'🎫');
-  let color=d.flow_type==='supervision'?'#00d4ff':(d.flow_type==='info_notice'?'#00ffcc':'#ffaa00');
-  let label=d.flow_type==='supervision'?'监护制':(d.flow_type==='info_notice'?'信息通报':'自唱票');
-  el.style.borderLeftColor=color;
-  el.innerHTML=`<span class="ts">[${fmt(d.flow_end_sec)}]</span> ${icon} ${label} #${d.flowId} <span style="color:#00ff88">结束</span> (${d.flow_continue_sec||'?'}s)`;
-  body.appendChild(el);
-  $('flowTag').style.display='none';
-  const activeTags=body.querySelectorAll('.flow-active');
-  activeTags.forEach(t=>t.remove());
-}
-
-function addSegCard(d){
-  const fid=d.flowId||'?';
-  const streamEl=$('stream-'+fid);
-  if(streamEl){
-    segScores.push(d.score||0);
-    if(d.flow_type==='supervision')supN++;else if(d.flow_type==='info_notice')noticeN++;else ticketN++;
-    updateSummary();
-    let isNotice=d.flow_type==='info_notice';
-    let isSup=d.flow_type==='supervision';
-    let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
-    let bc=isSup?'#00d4ff':(isNotice?'#00ffcc':'#ffaa00');
-    let icon=isSup?'🛡️':(isNotice?'📢':'🎫');
-    let label=isSup?'监护制':(isNotice?'信息通报':'自唱票');
-    streamEl.style.borderLeftColor=bc;
-    streamEl.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
-    delete _streamBuffers[fid];
-    return;
-  }
-  segScores.push(d.score||0);
-  if(d.flow_type==='supervision')supN++;else if(d.flow_type==='info_notice')noticeN++;else ticketN++;
-  updateSummary();
-  let isNotice=d.flow_type==='info_notice';
-  let isSup=d.flow_type==='supervision';
-  let sc=d.score>=8?'#00ff88':d.score>=5?'#ffaa00':'#ff4d4d';
-  let bc=isSup?'#00d4ff':(isNotice?'#00ffcc':'#ffaa00');
-  let icon=isSup?'🛡️':(isNotice?'📢':'🎫');
-  let label=isSup?'监护制':(isNotice?'信息通报':'自唱票');
-  const card=document.createElement('div');card.className='seg-card';card.style.borderLeftColor=bc;
-  card.innerHTML=`<div class="sc-head"><span>${icon} ${label} #${fid} [${d.flow_continue_sec||'?'}s]</span><span class="sc-score" style="color:${sc}">${d.score||0}/10</span></div><div class="sc-bar"><div class="sc-bar-fill" style="width:${(d.score||0)*10}%;background:${sc}"></div></div><div class="sc-detail">${(d.report_text||'').substring(0,150)}</div>`;
-  $('segCards').appendChild(card);card.scrollIntoView({behavior:'smooth'});
-}
-
-let _streamBuffers = {};
-
-function addSegStream(d) {
-  const fid = d.flowId;
-  if (!_streamBuffers[fid]) {
-    _streamBuffers[fid] = '';
-    const card = document.createElement('div');
-    card.id = 'stream-' + fid;
-    card.className = 'seg-card';
-    card.style.borderLeftColor = '#6b7a90';
-    card.innerHTML = `<div class="sc-head"><span>🤖 流程 #${fid} 推理中…</span></div><div class="sc-detail" style="white-space:pre-wrap"></div>`;
-    $('segCards').appendChild(card);
-    card.scrollIntoView({ behavior: 'smooth' });
-  }
-  _streamBuffers[fid] += d.chunk || '';
-  const el = $('stream-' + fid);
-  if (el) {
-    const detail = el.querySelector('.sc-detail');
-    if (detail) detail.textContent = _streamBuffers[fid];
-  }
-}
-
-function showQwenReport(text){
-  const container = $('segCards');
-  const streamCard = $('reportStreamCard');
-  if (streamCard) streamCard.remove();
-  $('progressGroup').style.display = 'none';
-  const card = document.createElement('div');
-  card.className = 'seg-card';
-  card.style.borderLeftColor = '#ffd700';
-  let html = '<div class="sc-head"><span>🤖 大模型总结报告</span></div>';
-  for (const line of text.split('\n')) {
-    if (!line.trim()) continue;
-    let m = line.match(/总分[：:]\s*(\d+).*评级[：:]\s*([ABCD])/);
-    if (m) {
-      let c = m[2] === 'A' ? '#00ff88' : m[2] === 'B' ? '#00d4ff' : m[2] === 'C' ? '#ffaa00' : '#ff4d4d';
-      html += `<div class="qr-score-line" style="color:${c}">${line.trim()}</div>`;
-      $('msTotal').textContent = m[1];
-      $('msTotal').style.color = c;
-      $('headerStatus').textContent = '✅ 报告生成完毕';
-      continue;
-    }
-    if (/^(#{1,3}\s|[一二三四五六七八九十]、)/.test(line.trim())) {
-      html += `<div class="qr-title">${line.replace(/^#+\s*/, '').trim()}</div>`;
-      continue;
-    }
-    html += `<div class="qr-item">${line.replace(/✅/g, '<span style="color:#00ff88">✅</span>').replace(/❌/g, '<span style="color:#ff4d4d">❌</span>').replace(/⚠️/g, '<span style="color:#ffaa00">⚠️</span>')}</div>`;
-  }
-  card.innerHTML = html;
-  container.appendChild(card);
-  card.scrollIntoView({ behavior: 'smooth' });
-}
-</script>
+  </script>
 </body>
+
 </html>

@@ -1,8 +1,7 @@
 """
 语音转文字模块
 
-使用 Qwen3-ASR 进行语音转录，带后处理纠错和幻觉移除。
-技术方案来自备份版本 A_DemoSrc1/VOICE/voice.py
+使用 Qwen3-ASR 进行语音转录，带后处理纠错和幻觉过滤。
 """
 import os
 import re
@@ -16,100 +15,26 @@ import numpy as np
 logger = logging.getLogger("module.voice.transcriber")
 
 
-
-# ======================== 后处理纠错规则 ========================
+# 后处理纠错规则
 CORRECTIONS = [
-    # ---- 完整句子级纠错 ----
-    ("操作页数。实验。确认。实验。没问题", "操作页数，好，四页，好，确认。四页没问题"),
-
-    # ---- 基础状态 ----
-    ("拍摄一下基础照片", "开始一下基础状态"),
-    ("拍摄一下基础状态", "开始一下基础状态"),
-    ("拍摄一下清楚状态", "开始一下基础状态"),
-    ("拍摄下基础状态", "开始一下基础状态"),
-    ("拍摄下基础照片", "开始一下基础状态"),
-    ("排除下基础状态", "开始一下基础状态"),
-    ("拍这下记录照片", "开始一下基础状态"),
-    ("拍摄下清楚状态", "开始一下基础状态"),
-    ("拍摄一下清录照片", "开始一下基础状态"),
-    ("派出一下记录状态", "开始一下基础状态"),
-    ("配置一下基础状态", "开始一下基础状态"),
-    ("拍置下清录照片", "开始一下基础状态"),
-    ("拍摄下进入状态", "开始一下基础状态"),
-
-    # ---- RPA34FU ----
-    ("RPR 34FU 34RP", "RPA34FU"), ("RPR34FU 34RP", "RPA34FU"),
-    ("RPR34FU34RP", "RPA34FU"), ("RPA34FU34RP", "RPA34FU"),
-    ("RP234F634RP", "RPA34FU"), ("RPR34FU，34RP", "RPA34FU"),
-    ("RPA34FU，34RP", "RPA34FU"), ("RPA34FU。34RP", "RPA34FU"),
-    ("RPA34FU。。", "RPA34FU，好，"), ("。34RP", ""),
-
-    # ---- 设备编号 ----
-    ("EES-013AB", "1ES013V"), ("EES-013AV", "1ES013V"),
-    ("EES-011AB", "1ES011V"), ("EES013AV", "1ES013V"),
-    ("0ES013AV", "1ES013V"), ("1ES01VB", "1ES011V"),
-    ("1ES027I", "1ES027VB"), ("1ES021", "1ES02T"),
-    ("1ES001PO", "1ES001PU"), ("1ES015", "1ES010"),
-    ("1ES0PL", "1ES010"),
-    ("EES-00", "1ES00"), ("EEX00", "1ES00"),
-    ("ES00PO", "1ES005"), ("ES004", "1ES005"),
-    ("ES002", "1ES005"), ("ES00P5", "1ES005"),
-    ("1ES001VB。确认", "浮片对齐，好，确认"),
-
-    # ---- KICK ----
-    ("Keyboard上", "KICK中"), ("Keyboard中", "KICK中"), ("Keyboard", "KICK"),
-    ("Key股中", "KICK中"), ("Key图中", "KICK中"), ("KEY图中", "KICK中"),
-    ("KEY口中", "KICK中"), ("KEG中", "KICK中"), ("Key中", "KICK中"),
-    ("KEY中", "KICK中"), ("K方", "KICK"),
-
-    # ---- LCO306.6 ----
-    ("lco3.6.6", "LCO306.6"), ("lc3.6.6", "LCO306.6"),
-    ("LCO3.6.6", "LCO306.6"), ("FCO3.6.6", "LCO306.6"),
-    ("FU3.6.6", "LCO306.6"), ("FCO306.6", "LCO306.6"),
-
-    # ---- SVideo ----
-    ("SV掉", "SVideo"), ("SV的欧", "SVideo"), ("S Video", "SVideo"), ("SV调", "SVideo"),
-    ("SV掉了", "SVideo"), ("SV调了", "SVideo"), ("SV掉的", "SVideo"),
-    ("SV叼", "SVideo"), ("SV 叼", "SVideo"),
-
-    # ---- 浮片对齐 ----
-    ("不断运行", "浮片对齐"), ("不对行", "浮片对齐"), ("不对应行", "浮片对齐"),
-    ("不变形", "浮片对齐"), ("不对应性", "浮片对齐"), ("不对劲", "浮片对齐"),
-    ("不动运行", "浮片对齐"), ("不对齐", "浮片对齐"), ("不定行", "浮片对齐"),
-    ("不对。确认", "浮片对齐，好，确认"), ("富片对齐", "浮片对齐"),
-    ("福片对齐", "浮片对齐"), ("扶片对齐", "浮片对齐"), ("对应行", "浮片对齐"),
-
-    # ---- 操作页数 ----
-    ("超弹变速", "操作页数"), ("超弹元素", "操作页数"), ("超弹叶数", "操作页数"),
-    ("超强变速", "操作页数"), ("操作也数", "操作页数"), ("超点元素", "操作页数"),
-    ("车标页数", "操作页数"),
-
-    # ---- 控件 ----
-    ("空间正确", "控件正确"), ("把空间推出了", "控件退出"), ("空间推出", "控件退出"), ("空间", "控件"),
-
-    # ---- 请求监护 ----
+    # 请求监护
+    ("请调监控", "请求监护"), ("请调监护", "请求监护"),
+    ("请台监护", "请求监护"), ("请台军务", "请求监护"),
     ("请结束", "请求监护"), ("请求进入", "请求监护"), ("请求接入", "请求监护"),
-    ("请台军务", "请求监护"), ("请台监护", "请求监护"),
     ("台军务", "请求监护"),
 
-    # ---- 其他术语 ----
-    ("重按", "长按"), ("此按", "长按"), ("呈案", "长按"),
-    ("好。合适。好。合适", "好，核实，好，核实"),
+    # 核实/核对
     ("合适正确", "核实正确"), ("合适", "核实"),
-    ("业证", "验证"), ("试验", "实验"), ("执行T1RPA034", "进行T1RPA034"),
-    ("四页画面", "实验画面"), ("四页方面", "实验画面"),
-    ("4A方面", "实验画面"), ("4A画面", "实验画面"),
-    ("4A", "四页"), ("4E", "四页"), ("4a", "四页"),
-    ("注入条件", "出入条件"), ("处理条件", "出入条件"),
-    ("免贴", "没问题"), ("免提", "没问题"),
-    ("F6的", "2V的"), ("先下基础状态", "先是1V。基础状态"),
-    ("先是1F2", "先是1V"), ("先下1V", "先是1V"),
-    ("可以报警了", "报警"), ("入口。滑", "入口阀"), ("入口。法", "入口阀"),
-    ("正常出发", "正常触发"), ("画面在确认", "画面再确认一遍"),
-    ("可以进行", "可以执行"),
-    ("手放", "收到"), ("三黑", "三K"), ("SV六十", "SVideo"),
 
-    # ---- 幻觉移除 ----
+    # 执行
+    ("可以进行", "可以执行"),
+
+    # 常见术语
+    ("试验", "实验"), ("业证", "验证"),
+    ("注入条件", "出入条件"), ("处理条件", "出入条件"),
+    ("可以报警了", "报警"), ("正常出发", "正常触发"),
+
+    # 幻觉过滤
     ("请使用简体中文输出", ""), ("请不吝点赞", ""), ("订阅", ""),
     ("谢谢大家", ""), ("谢谢", ""),
 ]
@@ -123,25 +48,7 @@ def apply_corrections(text: str) -> str:
     return re.sub(r'[。，]{3,}', '。', corrected)
 
 
-def remove_hallucinations(words):
-    """移除连续重复的短词（ASR 幻觉）"""
-    if not words:
-        return words
-    cleaned, i = [], 0
-    while i < len(words):
-        w = words[i]
-        j = i + 1
-        while j < len(words) and words[j]["word"] == w["word"]:
-            j += 1
-        count = j - i
-        if count >= 3 and len(w["word"]) <= 2:
-            cleaned.append(words[i])
-            cleaned.append(words[i + 1])
-            i = j
-        else:
-            cleaned.append(w)
-            i += 1
-    return cleaned
+# 已移除无用的 ASR 幻觉去重函数
 
 
 
@@ -261,7 +168,7 @@ class SpeechTranscriber:
                 "max_new_tokens": 4096,
                 "max_inference_batch_size": 8,
             }
-            
+
             # 如果有 aligner 并且路径存在，则使用它
             if self.aligner_path and os.path.exists(self.aligner_path):
                 kwargs["forced_aligner"] = self.aligner_path
@@ -391,38 +298,26 @@ class SpeechTranscriber:
                     except ImportError:
                         pass
                     if txt:
-                        st = round(t + float(seg.get("start", 0.0)), 3)
-                        et = round(t + float(seg.get("end", 0.0)), 3)
-                        seg_item = {"word": txt, "start": st, "end": et}
                         if "words" in seg and seg["words"]:
-                            seg_item["words"] = [
-                                {
+                            for w in seg["words"]:
+                                seg_words.append({
                                     "start": round(t + float(w.get("start", 0.0)), 3),
                                     "end": round(t + float(w.get("end", 0.0)), 3),
                                     "word": w.get("word") or w.get("text") or "",
-                                }
-                                for w in seg["words"]
-                            ]
-                        seg_words.append(seg_item)
+                                })
+                        else:
+                            st = round(t + float(seg.get("start", 0.0)), 3)
+                            et = round(t + float(seg.get("end", 0.0)), 3)
+                            seg_words.append({
+                                "word": txt,
+                                "start": st,
+                                "end": et
+                            })
 
-                # midpoint去重: 只取当前窗口新增的后半段
+                # midpoint去重: 平铺模式下，只需直接保留字词起始时间大于 midpoint 的项
                 if overlap_sec > 0 and i > 1 and all_words:
                     mid = t + overlap_sec / 2
-                    # 只保留当前窗口 > mid 的内容
-                    new_words = []
-                    for w in seg_words:
-                        if w["start"] >= mid:
-                            new_words.append(w)
-                        elif "words" in w and w["words"]:
-                            kept = [wd for wd in w["words"] if wd["start"] >= mid]
-                            if kept:
-                                new_words.append({
-                                    "word": "".join(wd["word"] for wd in kept),
-                                    "start": kept[0]["start"],
-                                    "end": w["end"],
-                                    "words": kept,
-                                })
-                    seg_words = new_words
+                    seg_words = [w for w in seg_words if w["start"] >= mid]
 
                 all_words.extend(seg_words)
 
@@ -430,12 +325,8 @@ class SpeechTranscriber:
                     progress_callback(cur_end, end_time)
 
                 if seg_words and on_segment:
-                    corrected = []
-                    for w in seg_words:
-                        cw = dict(w)
-                        cw["word"] = apply_corrections(cw["word"])
-                        corrected.append(cw)
-                    on_segment(corrected, t, cur_end, end_time)
+                    # 单字无须应用多字纠错，直接将平铺词表传递给 downstream 回调即可
+                    on_segment(seg_words, t, cur_end, end_time)
 
             except Exception as e:
                 logger.warning("segment failed (%.1f-%.1fs): %s", t, cur_end, e)
@@ -461,9 +352,21 @@ class SpeechTranscriber:
         return min(end_sec, len(audio) / sr)
 
 
-# ======================== 文本归一化与关键词提取 (原 intent_classifier) ========================
+# ======================== 文本归一化与关键词提取 ========================
 
-NORM_DEVICE_PATTERN = re.compile(r"([1-9]?[A-Z]{2,3}\d{3}[A-Z]{2}|1EAS\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)")
+# 严格 9 字码模式：1位数字 + 3位字母 + 3位数字 + 2位字母 = 9 字符
+# 按用户要求：九字码一定是九位数,否则就是识别错了,不接受其他长度
+# 合法归一化后的设备码类型正则匹配（支持 1EAS013VB, T1RPA034, RPA34FU, LCO3.6.6, SM3）
+NORM_DEVICE_PATTERN = re.compile(
+    r"("
+    r"1EAS\d{3}[A-Z]{2}"
+    r"|T1RPA\d{3}"
+    r"|RPA\d{2}[A-Z]{2}"
+    r"|LCO[0-9\.]+"
+    r"|SM\d+"
+    r")",
+    re.IGNORECASE
+)
 
 CN_DIGITS = {
     "零": 0, "〇": 0, "洞": 0,
@@ -509,9 +412,14 @@ def _convert_cn_number(token):
     return "".join(chars)
 
 def normalize_spoken_text(text):
+    """把口语化的设备码文本归一化为纯英文+数字格式"""
     if not text:
         return ""
     text = unicodedata.normalize("NFKC", str(text)).upper()
+    
+    # 替换中文“点”为小数点“.”
+    text = text.replace("点", ".")
+    
     for word, letter in LETTER_WORDS.items():
         text = text.replace(word, letter)
     text = re.sub(
@@ -522,57 +430,141 @@ def normalize_spoken_text(text):
     # 常用音译前缀和数字归一化
     text = text.replace("11ES", "1EAS")
     text = text.replace("1ES", "1EAS")
-    text = text.replace("EES", "1EAS").replace("EAS", "1EAS").replace("EEX", "1EAS")
+    text = text.replace("EES", "1EAS").replace("EEX", "1EAS")
+    # 用负向后行断言，避免对已归一化的 "1EAS" 再次添加前缀变成 "11EAS"
+    text = re.sub(r"(?<![1-9])EAS", "1EAS", text)
     text = text.replace("ES", "1EAS")
+    
+    # RPR 纠错归一为 RPA
+    text = text.replace("RPR", "RPA")
+    
     # 只保留字母数字和小数点
     return re.sub(r"[^A-Z0-9\.]", "", text)
 
 
+# 中文数字字符（用于宽松匹配原文本中的设备码片段）
+_CN_DIGITS = "零〇洞一幺腰二两三四五六七八九"
 
-KEYWORD_PINYIN = {
-    "请求监护": ["qing", "qiu", "jian", "hu"],
-    "执行":     ["zhi", "xing"],
-    "核对":     ["he", "dui"],
-    "核实":     ["he", "shi"],
-    "信息通报": ["xin", "xi", "tong", "bao"],
-    "信息通告": ["xin", "xi", "tong", "gao"],
-    "通报完毕": ["tong", "bao", "wan", "bi"],
-    "通告完毕": ["tong", "gao", "wan", "bi"],
-    "收到":     ["shou", "dao"],
-}
+# 宽松设备码匹配模式：在原文本中识别各种可能的设备码片段（包括 EAS/ES/EES/EEX, TRPA/T1RPA/RPA/RPR, LCO, SM）
+LOOSE_DEVICE_PATTERN = re.compile(
+    rf"(?:"
+    rf"[1-9{_CN_DIGITS}]?EAS[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|[1-9{_CN_DIGITS}]?ES[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|EES[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|EEX[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|T?[1-9{_CN_DIGITS}]?RPA[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|T?[1-9{_CN_DIGITS}]?RPR[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf"|LCO[a-zA-Z0-9{_CN_DIGITS}\.点]+"
+    rf"|S\s*M\s*[a-zA-Z0-9{_CN_DIGITS}]+"
+    rf")",
+    re.IGNORECASE
+)
 
 
-def match_keyword_by_pinyin(text: str, keyword: str, threshold: float = 0.4) -> bool:
-    """用拼音相似度判断text是否包含keyword的语义"""
-    import pypinyin
-    text_py = " ".join(pypinyin.lazy_pinyin(text))
-    target_syllables = KEYWORD_PINYIN.get(keyword, [])
-    if not target_syllables:
+def normalize_devices_in_text(text: str) -> str:
+    """
+    把文本中的设备码片段归一化为纯英文+数字格式（保留其他中文）。
+    严格校验不同类型设备码的正确长度：
+      - 九字码 (1EAS) 必须为 9 字符
+      - T1RPA 必须为 8 字符
+      - RPA 必须为 7 字符
+      - LCO 必须为 8 字符
+      - SM 必须为 3 字符
+    """
+    if not text:
+        return ""
+    
+    # 预处理：去除所有的空格和制表符，以匹配 ASR 偶发的空格分割（如 "E E S" 或 "T 1 R P A"）
+    cleaned_text = re.sub(r"\s+", "", text)
+    
+    def _norm(m):
+        normalized = normalize_spoken_text(m.group(0))
+        # 根据前缀严格校验其各自正确的字符长度
+        is_valid = False
+        if normalized.startswith("1EAS"):
+            is_valid = (len(normalized) == 9)
+        elif normalized.startswith("T1RPA"):
+            is_valid = (len(normalized) == 8)
+        elif normalized.startswith("RPA"):
+            is_valid = (len(normalized) == 7)
+        elif normalized.startswith("LCO"):
+            is_valid = (len(normalized) == 8)
+        elif normalized.startswith("SM"):
+            is_valid = (len(normalized) == 3)
+            
+        if is_valid:
+            return normalized
+        return m.group(0)  # 长度或格式不符，不予归一化，保留原样
+        
+    return LOOSE_DEVICE_PATTERN.sub(_norm, cleaned_text)
+
+
+# 拼音模糊编辑距离（Levenshtein 距离）匹配算法
+def match_keyword_by_pinyin_levenshtein(text: str, keyword: str, max_distance: int = 1) -> bool:
+    """
+    利用拼音序列滑动窗口编辑距离，在 ASR 文本中寻找发音高度相似的关键词。
+    - max_distance: 允许的最大单字拼音不同数量，1 表示最多允许错一个字音
+    - 相比 Syllable Intersection 比例比对，能极大地避免字词交集造成的误判，并提供优秀的 ASR 音似容错
+    """
+    try:
+        import pypinyin
+    except ImportError:
         return False
-    hits = sum(1 for s in target_syllables if s in text_py)
-    return hits / len(target_syllables) >= threshold
+
+    keyword_pinyins = pypinyin.lazy_pinyin(keyword)
+    text_pinyins = pypinyin.lazy_pinyin(text)
+
+    n, m = len(text_pinyins), len(keyword_pinyins)
+    if n < m:
+        return False
+
+    # 滑动窗口比对拼音序列
+    for i in range(n - m + 1):
+        sub_pinyins = text_pinyins[i:i+m]
+        dist = sum(1 for p1, p2 in zip(sub_pinyins, keyword_pinyins) if p1 != p2)
+        if dist <= max_distance:
+            return True
+    return False
 
 
-def get_key_moment(text: str, device: str) -> str:
-    """拼音匹配 + 设备码提取"""
-    for keyword, label in [
-        ("请求监护", "请求监护"), ("执行", "执行"),
-        ("核对", "核对"), ("核实", "核对"),
-        ("信息通报", "信息通报"), ("信息通告", "信息通告"),
-        ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕"),
-        ("收到", "收到"),
-    ]:
-        if keyword == "收到":
-            if text.strip() == "收到" or match_keyword_by_pinyin(text, keyword):
-                return label
-        elif match_keyword_by_pinyin(text, keyword):
-            return label
-    if device:
-        return device
-    return ""
+def match_keyword_by_pinyin(text: str, keyword: str) -> bool:
+    """
+    综合文本精准匹配与拼音编辑距离匹配。
+    - 对于长度 <= 3 的短关键词（如“监护”、“核对”、“收到”），拼音必须严格 100% 匹配（max_distance = 0）
+    - 对于长度 >= 4 的长关键词（如“请求监护”、“信息通报”），允许 1 位字音偏差（max_distance = 1）以容忍 ASR 偶发的字词偏差
+    """
+    if keyword in text:
+        return True
+    
+    # 动态设定最大编辑距离
+    max_dist = 1 if len(keyword) >= 4 else 0
+    return match_keyword_by_pinyin_levenshtein(text, keyword, max_distance=max_dist)
+
+
+# 关键词识别：(关键词, 标签) 列表 - 标签是发送给规则模块的 key_moment 值
+# 变体词归一化到标准标签，避免重复保存（如"监护"→"请求监护"，"核实"→"核对"）
+KEYWORD_LABELS = [
+    ("请求监护", "请求监护"),
+    ("监护",     "请求监护"),
+    ("执行",     "执行"),
+    ("核对",     "核对"),
+    ("核实",     "核对"),
+    ("信息通报", "信息通报"),
+    ("信息通告", "信息通报"),
+    ("通报完毕", "通报完毕"),
+    ("通告完毕", "通报完毕"),
+    ("收到",     "收到"),
+]
+
 
 def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
-    """对字/词按停顿切分出段落，并提取关键事件"""
+    """
+    对字/词按停顿切分出段落，并提取关键事件。
+
+    - 每个句子推送一条事件（带完整 text）
+    - 检测到的关键词和 9 字符设备码作为 key_moment
+    - 没有关键词的句子也推送（key_moment 为空字符串）
+    """
     if not words:
         return []
 
@@ -594,45 +586,49 @@ def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) 
 
     events = []
     for sent_words in sentences:
-        text = "".join(w["word"] for w in sent_words)
-        if not text.strip():
+        raw_text = "".join(w["word"] for w in sent_words)
+        if not raw_text.strip():
             continue
 
+        text = apply_corrections(raw_text) # 关键纠错：让比对和最终通知文本均使用纠错后的规范汉字，以便能够正确匹配并上报“请求监护”等关键事件
         audio_ts = round(sent_words[0]["start"], 2)
 
-        # 设备码提取
+        # 设备码提取：用 finditer 拆分串联码，提取所有合法 9 字符设备码
         norm_text = normalize_spoken_text(text)
-        m = NORM_DEVICE_PATTERN.search(norm_text)
-        device = m.group(1) if m else ""
+        devices = [m.group(1) for m in NORM_DEVICE_PATTERN.finditer(norm_text)]
 
-        # 收集所有匹配的关键字(拼音匹配,不依赖精确文本)
-        found_keywords = set()
-        if device:
-            found_keywords.add(device)
-        for keyword, label in [
-            ("请求监护", "请求监护"), ("执行", "执行"),
-            ("核对", "核对"), ("核实", "核对"),
-            ("信息通报", "信息通报"), ("信息通告", "信息通告"),
-            ("通报完毕", "通报完毕"), ("通告完毕", "通告完毕"),
-            ("收到", "收到"),
-        ]:
+        # 收集所有匹配的关键字（严格拼音匹配，要求所有音节都出现）
+        found_keywords = []
+        for device in devices:
+            found_keywords.append(device)
+        for keyword, label in KEYWORD_LABELS:
             if keyword == "收到":
+                # "收到" 容易在长段落中误报，仅在完全一致或满足拼音相似度时才上报
                 if text.strip() == "收到" or match_keyword_by_pinyin(text, keyword):
-                    found_keywords.add(label)
+                    found_keywords.append(label)
             elif match_keyword_by_pinyin(text, keyword):
-                found_keywords.add(label)
+                found_keywords.append(label)
 
-        # 每句先推完整文本（仅第一个事件带 text）
-        first = True
+        # 去重（保持顺序）
+        seen = set()
+        unique_keywords = []
         for km in found_keywords:
-            ev = {"localSec": audio_ts, "key_moment": km}
-            if first:
-                ev["text"] = text
-                first = False
-            events.append(ev)
+            if km not in seen:
+                seen.add(km)
+                unique_keywords.append(km)
 
-        # 如果没有匹配任何关键字，也推文本
-        if not found_keywords:
+        # 每句推一条事件（带完整 text + key_moment 列表）
+        # 如果有关键词/设备码，第一个事件带 text，后续事件只带 key_moment
+        if unique_keywords:
+            first = True
+            for km in unique_keywords:
+                ev = {"localSec": audio_ts, "key_moment": km}
+                if first:
+                    ev["text"] = text
+                    first = False
+                events.append(ev)
+        else:
+            # 没有关键词也推送完整文本（用于推理流展示）
             events.append({"localSec": audio_ts, "text": text, "key_moment": ""})
 
     return events

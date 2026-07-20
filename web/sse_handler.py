@@ -50,28 +50,15 @@ class SSEHandler:
         logger.info(f"移除 SSE 客户端，当前 {len(self._clients)} 个")
 
     def push(self, event: Optional[Dict[str, Any]]) -> None:
-        """
-        推送事件到所有客户端
-        """
+        """推送事件到所有客户端"""
         with self._lock:
-            if event and event.get("type") not in ("clock_sync", "progress"):
-                logger.info(f"SSE推送: type={event.get('type')}, 客户端数={len(self._clients)}")
+            if event and event.get("source") not in ("clock_sync", "progress", "video"):
+                logger.debug(f"SSE推送: source={event.get('source')}, 客户端数={len(self._clients)}")
             for client_queue in self._clients:
                 try:
                     client_queue.put_nowait(event)
                 except queue.Full:
                     logger.warning("SSE 客户端队列已满")
-
-    def push_json(self, event_type: str, data: Dict[str, Any]) -> None:
-        """
-        推送 JSON 事件
-
-        Args:
-            event_type: 事件类型
-            data: 事件数据
-        """
-        event = {"type": event_type, **data}
-        self.push(event)
 
     def get_client_count(self) -> int:
         """

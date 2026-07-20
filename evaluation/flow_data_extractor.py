@@ -9,7 +9,7 @@ import json
 import time
 import logging
 import redis
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Tuple
 
 logger = logging.getLogger("evaluation.data_extractor")
 
@@ -35,8 +35,8 @@ class FlowDataExtractor:
             host="localhost", port=6379, db=0, decode_responses=True
         )
         
-        # 动态解析 config.yaml 确定开启了哪些模块，避免对未开启的模块执行无意义等待
-        self._enabled_modules = {"voice", "tracker", "gaze"}
+        # 动态解析 config.yaml 确定启用的模块
+        self._enabled_modules = {"voice", "tracker", "gaze", "behavior"}
         config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
         if os.path.exists(config_path):
             try:
@@ -50,12 +50,14 @@ class FlowDataExtractor:
                 if modules_cfg.get("tracker", True):
                     self._enabled_modules.add("tracker")
                     self._enabled_modules.add("gaze")  # gaze 伴随 tracker 启用
+                if modules_cfg.get("behavior", True):
+                    self._enabled_modules.add("behavior")
                 logger.info(f"数据提取器初始化成功，当前启用的等待模块: {self._enabled_modules}")
             except Exception as e:
                 logger.warning(f"数据提取器加载配置文件失败，默认等待全部模块: {e}")
 
     def extract(self, start_sec: float, end_sec: float,
-                wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict], List[Dict]]:
+                wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict]]:
         """
         提取指定时间范围的事件
 
@@ -66,7 +68,7 @@ class FlowDataExtractor:
             timeout: 超时时间（秒），默认5分钟
 
         Returns:
-            (voice_events, tracker_events, gaze_events)
+            (voice_events, tracker_events, gaze_events, behavior_events)
         """
         if wait:
             logger.info(f"等待所有模块处理到 {end_sec}s...")
@@ -75,26 +77,25 @@ class FlowDataExtractor:
         voice_events = self._extract_voice_events(start_sec, end_sec)
         tracker_events = self._extract_tracker_events(start_sec, end_sec)
         gaze_events = self._extract_gaze_events(start_sec, end_sec)
+        behavior_events = self._extract_behavior_events(start_sec, end_sec)
 
-        logger.info(f"提取事件完成: voice={len(voice_events)}条, tracker={len(tracker_events)}条, gaze={len(gaze_events)}条, "
-                    f"时间范围={start_sec:.2f}s ~ {end_sec:.2f}s")
+        logger.info(
+            f"提取事件完成: voice={len(voice_events)}条, tracker={len(tracker_events)}条, "
+            f"gaze={len(gaze_events)}条, behavior={len(behavior_events)}条, "
+            f"时间范围={start_sec:.2f}s ~ {end_sec:.2f}s"
+        )
 
-        return voice_events, tracker_events, gaze_events
+        return voice_events, tracker_events, gaze_events, behavior_events
 
     def save_extracted_data(self, flow_data: dict) -> None:
-        """
-        将提取和拼接好的流程数据单独保存到一个 JSON 文件中，存放于 evaluation 文件夹下。
-
-        Args:
-            flow_data: 提取拼接好的流程数据字典
-        """
+        """保存到 evaluation/extracted_{flow_type}_{flow_id}.json"""
         try:
-            # 建立 evaluation 子文件夹
             eval_dir = os.path.join(self._result_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
 
             flow_id = flow_data.get("flow_id", "unknown_flow")
-            filename = f"extracted_flow_{flow_id}.json"
+            flow_type = flow_data.get("flow_type", "unknown")
+            filename = f"extracted_{flow_type}_{flow_id}.json"
             output_path = os.path.join(eval_dir, filename)
 
             with open(output_path, "w", encoding="utf-8") as f:
@@ -163,7 +164,6 @@ class FlowDataExtractor:
             模块处理到的时间（秒）
         """
         try:
-            # 从 Redis 读取进度
             progress = self._redis.hget("inference:progress", module_name)
             return float(progress) if progress else 0.0
         except Exception as e:
@@ -172,7 +172,7 @@ class FlowDataExtractor:
 
     def _extract_voice_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 Voice_key_moments.json 提取语音事件
+        从 voice_key_moments.json 提取语音事件
 
         Args:
             start_sec: 开始时间
@@ -181,7 +181,7 @@ class FlowDataExtractor:
         Returns:
             语音事件列表
         """
-        vkm_path = os.path.join(self._result_dir, "voice", "Voice_key_moments.json")
+        vkm_path = os.path.join(self._result_dir, "voice", "voice_key_moments.json")
 
         if not os.path.exists(vkm_path):
             logger.warning(f"语音事件文件不存在: {vkm_path}")
@@ -272,73 +272,37 @@ class FlowDataExtractor:
             logger.error(f"加载Gaze事件失败: {e}")
             return []
 
-    def get_voice_summary(self) -> Dict:
+    def _extract_behavior_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        获取语音事件摘要
+        从 behavior_key_moments.json 提取 Behavior 事件（举手、手指屏幕等）
+
+        Args:
+            start_sec: 开始时间
+            end_sec: 结束时间
 
         Returns:
-            语音事件统计
+            Behavior 事件列表
         """
-        vkm_path = os.path.join(self._result_dir, "voice", "Voice_key_moments.json")
+        bkm_path = os.path.join(self._result_dir, "behavior", "behavior_key_moments.json")
 
-        if not os.path.exists(vkm_path):
-            return {
-                "total_events": 0,
-                "supervision_requests": 0,
-                "supervision_verifications": 0,
-                "operation_commands": 0,
-            }
+        if not os.path.exists(bkm_path):
+            logger.warning(f"Behavior事件文件不存在: {bkm_path}")
+            return []
 
         try:
-            with open(vkm_path, encoding="utf-8") as f:
-                events = json.load(f)
+            with open(bkm_path, encoding="utf-8") as f:
+                all_events = json.load(f)
 
-            return {
-                "total_events": len(events),
-                "supervision_requests": sum(
-                    1 for e in events if any(w in e.get("key_moment", "") for w in ["监护", "请求", "申请"])
-                ),
-                "supervision_verifications": sum(
-                    1 for e in events if any(w in e.get("key_moment", "") for w in ["核对", "收到"])
-                ),
-                "operation_commands": sum(
-                    1 for e in events if any(w in e.get("key_moment", "") for w in ["执行"])
-                ),
-            }
+            # 按时间范围过滤
+            filtered_events = []
+            for ev in all_events:
+                ts = ev.get("localSec") or 0
+                if start_sec <= ts <= end_sec:
+                    filtered_events.append(ev)
+
+            return filtered_events
 
         except Exception as e:
-            logger.error(f"获取语音摘要失败: {e}")
-            return {
-                "total_events": 0,
-                "supervision_requests": 0,
-                "supervision_verifications": 0,
-                "operation_commands": 0,
-            }
+            logger.error(f"加载Behavior事件失败: {e}")
+            return []
 
-    def get_mot_summary(self) -> Dict:
-        """
-        获取 Tracker 事件摘要
-
-        Returns:
-            MOT 事件统计
-        """
-        mkm_path = os.path.join(self._result_dir, "tracker", "tracker_key_moments.json")
-
-        if not os.path.exists(mkm_path):
-            return {"total_events": 0, "key_frames": 0}
-
-        try:
-            with open(mkm_path, encoding="utf-8") as f:
-                events = json.load(f)
-
-            kf_dir = os.path.join(self._result_dir, "tracker", "key_frames")
-            kf_count = len(os.listdir(kf_dir)) if os.path.isdir(kf_dir) else 0
-
-            return {
-                "total_events": len(events),
-                "key_frames": kf_count,
-            }
-
-        except Exception as e:
-            logger.error(f"获取Tracker摘要失败: {e}")
-            return {"total_events": 0, "key_frames": 0}
