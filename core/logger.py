@@ -72,3 +72,24 @@ def add_root_file_handler(log_file: str, level: int = logging.INFO) -> None:
     file_handler.setLevel(level)
     file_handler.setFormatter(formatter)
     logging.getLogger().addHandler(file_handler)
+
+def redirect_file_logger(new_log_file_path: str) -> None:
+    """动态重定向当前进程的根日志文件 Handler，保证日志写入当前活跃 session 目录下"""
+    import os
+    root_logger = logging.getLogger()
+    # 查找并移除现有的 FileHandler
+    for handler in list(root_logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            root_logger.removeHandler(handler)
+            handler.close()
+            
+    # 创建并添加新 Session 的 FileHandler
+    if new_log_file_path:
+        os.makedirs(os.path.dirname(new_log_file_path), exist_ok=True)
+        handler = logging.FileHandler(new_log_file_path, encoding="utf-8")
+        formatter = logging.Formatter(
+            "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
+            datefmt="%H:%M:%S"
+        )
+        handler.setFormatter(formatter)
+        root_logger.addHandler(handler)

@@ -43,9 +43,7 @@ class SelfTicketRule(BaseRule):
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
 
-    def is_active(self) -> bool:
-        """是否有活跃流程"""
-        return self._active
+
 
     def get_current_flow(self) -> dict:
         """获取当前活跃流程"""
@@ -61,16 +59,9 @@ class SelfTicketRule(BaseRule):
             "confirm_closed": self._confirm_closed,
         }
 
-    def finalize(self) -> dict:
-        """视频结束时关闭流程"""
-        if not self._active:
-            return None
-        return self._close_flow(source="finalize")
 
-    def _next_flow_id(self) -> int:
-        """获取下一个流程 ID"""
-        self._flow_counter += 1
-        return self._flow_counter
+
+
 
     def _start_flow(self, ts: float, device_code: str) -> None:
         """启动自唱票流程"""

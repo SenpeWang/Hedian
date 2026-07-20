@@ -68,10 +68,8 @@ class EventBus:
             max_workers: 最大并发分发线程数
             consumer_name: 消费者名称（每个进程应该唯一）
         """
-        self._redis = redis.Redis(
-            host=redis_host, port=redis_port, db=redis_db,
-            decode_responses=True, socket_connect_timeout=5,
-        )
+        from core.redis_conn import get_redis_client
+        self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
         self._consumer_name = consumer_name or f"consumer_{int(time.time() * 1000)}"
         # 每进程独立消费组实现跨进程广播
         self._consumer_group = f"{self._consumer_name}_group"

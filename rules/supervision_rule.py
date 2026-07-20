@@ -88,9 +88,7 @@ class SupervisionRule(BaseRule):
         event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_mot_request)
         event_bus.subscribe(EventTopic.TRACKER_PROXIMITY, self._on_mot_status)
 
-    def is_active(self) -> bool:
-        """是否有活跃流程"""
-        return self._active
+
 
     def get_current_flow(self) -> dict:
         """获取当前活跃流程"""
@@ -105,16 +103,9 @@ class SupervisionRule(BaseRule):
             "content_checklist": dict(self._checklist),
         }
 
-    def finalize(self) -> dict:
-        """视频结束时关闭流程"""
-        if not self._active:
-            return None
-        return self._close_flow(source="finalize")
 
-    def _next_flow_id(self) -> int:
-        """获取下一个流程 ID"""
-        self._flow_counter += 1
-        return self._flow_counter
+
+
 
     def _start_flow(self, ts: float, source: str, target_role: str = None) -> None:
         """启动监护流程"""

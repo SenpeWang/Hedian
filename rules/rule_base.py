@@ -29,20 +29,26 @@ class BaseRule(ABC):
         """声明本制度关心哪些事件"""
         pass
 
-    @abstractmethod
     def is_active(self) -> bool:
         """当前是否有活跃流程"""
-        pass
+        return getattr(self, "_active", False)
 
     @abstractmethod
     def get_current_flow(self) -> Optional[dict]:
         """获取当前活跃流程"""
         pass
 
-    @abstractmethod
     def finalize(self) -> Optional[dict]:
         """视频结束时关闭流程"""
-        pass
+        if not self.is_active():
+            return None
+        # 动态分派给子类的 _close_flow
+        return self._close_flow(ts=0, source="finalize")
+
+    def _next_flow_id(self) -> int:
+        """获取下一个流程 ID"""
+        self._flow_counter = getattr(self, "_flow_counter", 0) + 1
+        return self._flow_counter
 
     def save_results(self, result_dir: str) -> None:
         """保存规则事件到JSON(子类可覆盖)"""
