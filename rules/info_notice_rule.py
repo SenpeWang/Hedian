@@ -60,9 +60,7 @@ class InfoNoticeRule(BaseRule):
         event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised)
         event_bus.subscribe(EventTopic.GAZE_ATTENTION, self._on_gaze_status)
 
-    def is_active(self) -> bool:
-        """是否有活跃流程"""
-        return self._active
+
 
     def get_current_flow(self) -> dict:
         """获取当前活跃流程"""
@@ -75,16 +73,9 @@ class InfoNoticeRule(BaseRule):
             "content_checklist": self._checklist.copy(),
         }
 
-    def finalize(self) -> dict:
-        """视频结束时关闭流程"""
-        if not self._active:
-            return None
-        return self._close_flow(source="finalize")
 
-    def _next_flow_id(self) -> int:
-        """获取下一个流程 ID"""
-        self._flow_counter += 1
-        return self._flow_counter
+
+
 
     def _start_flow(self, ts: float, source: str) -> None:
         """启动信息通报流程"""

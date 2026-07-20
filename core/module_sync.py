@@ -37,10 +37,8 @@ class ModuleSync:
         self.duration = duration
         self.frame_interval = 1.0 / fps if fps > 0 else 1.0 / 30.0
 
-        self._redis = redis.Redis(
-            host=redis_host, port=redis_port, db=redis_db,
-            decode_responses=True, socket_connect_timeout=5,
-        )
+        from core.redis_conn import get_redis_client
+        self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
         self._redis.ping()
         logger.info("ModuleSync (模块同步器) Redis 连接成功")
 
