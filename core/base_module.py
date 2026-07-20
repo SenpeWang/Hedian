@@ -208,12 +208,8 @@ class BaseModule(ABC):
     def align_with_slowest_module(self, my_progress_sec: float) -> None:
         """通用对齐限速：本模块不能比最慢模块快超过 ALIGN_MAX_LEAD_SEC 秒"""
         try:
-            r = redis.Redis(
-                host=_ALIGN_REDIS_HOST,
-                port=_ALIGN_REDIS_PORT,
-                db=_ALIGN_REDIS_DB,
-                decode_responses=True,
-            )
+            from core.redis_conn import get_redis_client
+            r = get_redis_client(host=_ALIGN_REDIS_HOST, port=_ALIGN_REDIS_PORT, db=_ALIGN_REDIS_DB)
             wait_start_ts = time.time()
             while True:
                 progress_map = r.hgetall(_ALIGN_PROGRESS_KEY)

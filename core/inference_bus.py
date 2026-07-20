@@ -22,10 +22,8 @@ class InferenceBus:
         **kwargs
     ):
         self.fps = fps
-        self._redis = redis.Redis(
-            host=redis_host, port=redis_port, db=redis_db,
-            decode_responses=True, socket_connect_timeout=5,
-        )
+        from core.redis_conn import get_redis_client
+        self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
         self._redis.ping()
         logger.info("InferenceBus (推理总线) Redis 连接成功")
 

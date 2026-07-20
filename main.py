@@ -144,6 +144,11 @@ def _run_module_process(
         for sub in ("voice", "tracker", "gaze", "behavior", "qwen", "evaluation"):
             os.makedirs(os.path.join(active_result_dir, sub), exist_ok=True)
             
+        # 动态将当前子进程的日志重定向到当前活跃 Session 文件夹下的日志文件
+        new_log_file = os.path.join(active_result_dir, f"run_gpu{config_dict.get('gpu', '0')}.log")
+        from core.logger import redirect_file_logger
+        redirect_file_logger(new_log_file)
+            
         event_bus = EventBus(
             redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
             consumer_name=f"{module_name}_process",
@@ -278,6 +283,11 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         active_result_dir = str(paths.get_result_dir(active_run_id))
         flow_result_dir = active_result_dir
         config_dict["run_id"] = active_run_id
+        
+        # 动态将当前 Web 进程的日志重定向到当前活跃 Session 文件夹下的日志文件
+        new_log_file = os.path.join(active_result_dir, f"run_gpu{config_dict.get('gpu', '0')}.log")
+        from core.logger import redirect_file_logger
+        redirect_file_logger(new_log_file)
         
         flow_recorder.set_result_dir(active_result_dir)
         for rname, rreg in registry._rules.items():
