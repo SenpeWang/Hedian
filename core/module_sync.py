@@ -231,28 +231,28 @@ class ModuleSync:
 
                     # 停滞超过30秒 → 检查前端是否已经追赶上 global_sec
                     if stall_count >= int(STALL_TIMEOUT / self.frame_interval) and not cycle_done:
-                        # 关键保护：如果前端播放进度尚未追赶上全局时钟，说明还有大量帧/事件等待推送
-                        # 此时绝不能发送 done，否则剩余内容全部丢失
-                        if self._pushed_global_sec < global_sec - 1.0:
-                            # 前端还没追赶上，继续推送事件，不触发 done
-                            self._push_events_up_to(global_sec)
+                        # 关键保护：前端播放进度尚未追赶上全局时钟时绝不发送 done，否则剩余内容全部丢失。
+                        # 注意：此处不做任何加速追赶（紧循环会跳过下方 sleep，导致最后一段内容
+                        # 以数倍速闪播）——直接落到下方正常帧率推送，按 1 倍速平滑播完剩余内容，
+                        # 待前端真正追上后由本分支发送 done。
+                        if self._pushed_global_sec >= global_sec - 1.0:
+                            logger.info(f"global_sec 停滞 {STALL_TIMEOUT}s 且前端已追赶完毕，本轮推理完成，刷新剩余事件并推送 done")
+                            self._flush_remaining_events()
+                            self.push_sentinel()
+                            cycle_done = True
+                            # 重置状态，准备等待下一次 /start 触发的新推理
+                            last_global_sec = -1.0
+                            stall_count = 0
+                            # 重置推送限速状态，避免下一轮被旧值卡住
+                            self._pushed_global_sec = 0.0
+                            # 清理 Redis 进度，避免下一次推理被旧进度污染
+                            try:
+                                self._redis.delete(self._KEY_PROGRESS, self._KEY_SNAPSHOT, self._KEY_CLOCK)
+                            except Exception:
+                                pass
+                            logger.info("ModuleSync 已重置，等待下一次推理触发")
                             continue
-                        logger.info(f"global_sec 停滞 {STALL_TIMEOUT}s 且前端已追赶完毕，本轮推理完成，刷新剩余事件并推送 done")
-                        self._flush_remaining_events()
-                        self.push_sentinel()
-                        cycle_done = True
-                        # 重置状态，准备等待下一次 /start 触发的新推理
-                        last_global_sec = -1.0
-                        stall_count = 0
-                        # 重置推送限速状态，避免下一轮被旧值卡住
-                        self._pushed_global_sec = 0.0
-                        # 清理 Redis 进度，避免下一次推理被旧进度污染
-                        try:
-                            self._redis.delete(self._KEY_PROGRESS, self._KEY_SNAPSHOT, self._KEY_CLOCK)
-                        except Exception:
-                            pass
-                        logger.info("ModuleSync 已重置，等待下一次推理触发")
-                        continue
+                        # 未追上：不发 done，落到下方正常帧率推送，按 1 倍速继续追赶
 
                     if not cycle_done:
                         self._push_events_up_to(global_sec)
