@@ -632,6 +632,7 @@
   <script>
     const $ = id => document.getElementById(id);
     let dataSource = null, segScores = [], supN = 0, ticketN = 0, noticeN = 0, _completedFlows = new Set();
+    let _voiceText = {}, _voiceKeys = {};
     const audio = $('audioPlayer');
     function fmt(s) { let m = Math.floor(s / 60), ss = Math.floor(s % 60); return `${String(m).padStart(2, '0')}:${String(ss).padStart(2, '0')}` }
 
@@ -642,6 +643,7 @@
       segScores = []; supN = 0; ticketN = 0; noticeN = 0;
       _completedFlows.clear();
       _streamBuffers = {};
+      _voiceText = {}; _voiceKeys = {};
       $('textScroll').innerHTML = ''; $('segCards').innerHTML = '';
       $('peopleCountVal').textContent = '--';
       $('peopleStatusAlert').textContent = '就绪';
@@ -801,40 +803,60 @@
       $(rid).innerHTML = `${icon} |<span class=${cls}>${bar}</span>| ${pct.toFixed(1)}%`;
     }
 
-    function highlightText(t) {
-      if (!t) return '';
-      // 1. 核心关键字标红
-      const redWords = [
-        "请求监护", "请监护", "申请监护", "监护",
-        "可以执行", "REST执行", "REST 执行", "执行",
-        "核对", "核实",
-        "信息通报", "信息通告",
-        "通报完毕", "通告完毕",
-        "收到", "确认", "没问题"
-      ];
-      redWords.forEach(w => {
-        const reg = new RegExp(w, 'g');
-        t = t.replace(reg, `<span class="kw-red">${w}</span>`);
-      });
+    function escapeHtml(s) {
+      return s.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+    }
 
-      // 2. 设备九字码标红
-      t = t.replace(/(1ES\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)/gi, '<span class="kw-red">$1</span>');
-      return t;
+    // 按后端下发的语音 key_moment 高亮：单次扫描、互不重叠，杜绝嵌套 span
+    function renderWithHighlights(text, highlights) {
+      if (!text) return '';
+      if (!highlights || !highlights.length) return escapeHtml(text);
+      let ranges = [];
+      highlights.forEach(h => {
+        if (!h) return;
+        let idx = text.indexOf(h);
+        while (idx !== -1) { ranges.push([idx, idx + h.length]); idx = text.indexOf(h, idx + 1); }
+      });
+      if (!ranges.length) return escapeHtml(text);
+      ranges.sort((a, b) => a[0] - b[0] || (b[1] - b[0]) - (a[1] - a[0]));
+      let out = '', last = 0;
+      for (const r of ranges) {
+        if (r[0] < last) continue;
+        out += escapeHtml(text.slice(last, r[0])) + `<span class="kw-red">${escapeHtml(text.slice(r[0], r[1]))}</span>`;
+        last = r[1];
+      }
+      out += escapeHtml(text.slice(last));
+      return out;
+    }
+
+    function _renderVoice(sec) {
+      const el = $('voice-' + sec);
+      if (!el) return;
+      const txt = _voiceText[sec] || '';
+      const keys = _voiceKeys[sec] || [];
+      const textLine = txt ? `<div style="margin-top:1px;font-size:12px;line-height:1.4">${renderWithHighlights(txt, keys)}</div>` : '';
+      el.innerHTML = `<span class="ts">[${fmt(sec)}]</span>${textLine}`;
     }
 
     function addVoiceItem(d) {
       const dt = d.data || {};
       const tag = d.tag || 'text';
+      const sec = d.localSec;
       if (tag === 'key_moment') {
-        // 不再创建独立的行展示 key_moment，直接忽略
+        // 语音 key_moment 由后端识别，前端只在对应文本中高亮，不再自判关键词
+        const km = dt.key_moment;
+        if (!km) return;
+        if (!_voiceKeys[sec]) _voiceKeys[sec] = [];
+        if (!_voiceKeys[sec].includes(km)) _voiceKeys[sec].push(km);
+        _renderVoice(sec);
         return;
       }
-      const el = document.createElement('div'); el.className = 'text-item';
-      const txt = dt.text || '';
-      const highlighted = highlightText(txt);
-      const textLine = txt ? `<div style="margin-top:1px;font-size:12px;line-height:1.4">${highlighted}</div>` : '';
-      el.innerHTML = `<span class="ts">[${fmt(d.localSec)}]</span>${textLine}`;
-      $('textScroll').appendChild(el); el.scrollIntoView({ behavior: 'smooth' });
+      _voiceText[sec] = dt.text || '';
+      if (!_voiceKeys[sec]) _voiceKeys[sec] = [];
+      const el = document.createElement('div'); el.className = 'text-item'; el.id = 'voice-' + sec;
+      $('textScroll').appendChild(el);
+      _renderVoice(sec);
+      el.scrollIntoView({ behavior: 'smooth' });
     }
 
     function addDetData(d) {

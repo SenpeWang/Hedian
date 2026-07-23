@@ -89,9 +89,6 @@ def _run_module_process(
     *,
     env_setup=None,
 ):
-    # 限制业务子模块仅可见指定的推理 GPU
-    import os
-    os.environ["CUDA_VISIBLE_DEVICES"] = config_dict.get("gpu", "1")
     """业务模块进程的通用模板
 
     Args:
@@ -99,6 +96,9 @@ def _run_module_process(
         module_factory: 接收 (event_bus, config, paths, display_buffer) 返回模块实例的可调用对象
         env_setup: 可选的环境变量预处理回调（如清除 LD_LIBRARY_PATH）
     """
+    # 限制业务子模块仅可见指定的推理 GPU
+    import os
+    os.environ["CUDA_VISIBLE_DEVICES"] = config_dict.get("gpu", "1")
     import redis
     from pathlib import Path
     from core.event_bus import EventBus
@@ -145,7 +145,7 @@ def _run_module_process(
             os.makedirs(os.path.join(active_result_dir, sub), exist_ok=True)
             
         # 动态将当前子进程的日志重定向到当前活跃 Session 文件夹下的日志文件
-        new_log_file = os.path.join(active_result_dir, f"run_gpu{config_dict.get('gpu', '0')}.log")
+        new_log_file = os.path.join(active_result_dir, "run.log")
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
             
@@ -285,7 +285,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         config_dict["run_id"] = active_run_id
         
         # 动态将当前 Web 进程的日志重定向到当前活跃 Session 文件夹下的日志文件
-        new_log_file = os.path.join(active_result_dir, f"run_gpu{config_dict.get('gpu', '0')}.log")
+        new_log_file = os.path.join(active_result_dir, "run.log")
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
         
@@ -401,8 +401,8 @@ def main():
         os.makedirs(os.path.join(result_dir, sub), exist_ok=True)
     logger.info(f"结果目录: {result_dir}")
 
-    # 日志文件写入 result_dir 下的 run_gpu{N}.log
-    log_file = os.path.join(result_dir, f"run_gpu{args.gpu}.log")
+    # 日志文件写入 result_dir 下的 run.log
+    log_file = os.path.join(result_dir, "run.log")
     add_root_file_handler(log_file)
     logger.info(f"日志文件: {log_file}")
 
@@ -484,11 +484,25 @@ def main():
 
     logger.info(f"已启动 {len(processes)} 个进程: {[name for name, _ in processes]}")
 
-    # 只等 web 进程
-    web_p = processes[-1][1] if processes else None
-    if web_p:
-        web_p.join()
-        logger.info("Web 进程结束")
+    # 监控所有子进程：模块进程异常退出时记录告警（便于定位），web 进程退出则收尾
+    module_procs = [(name, p) for name, p in processes if name != "web"]
+    web_p = processes[-1][1] if processes and processes[-1][0] == "web" else None
+    crashed = set()
+    while True:
+        for name, p in module_procs:
+            if name in crashed:
+                continue
+            if not p.is_alive():
+                code = p.exitcode
+                if code not in (0, None):
+                    logger.error(f"模块进程 [{name}] 异常退出 (exitcode={code})，该路数据将停更；请检查对应日志")
+                else:
+                    logger.info(f"模块进程 [{name}] 已正常退出 (exitcode={code})")
+                crashed.add(name)
+        if web_p is None or not web_p.is_alive():
+            logger.info("Web 进程结束")
+            break
+        time.sleep(1.0)
 
     logger.info("═══ 流水线完成 ═══")
     logger.info(f"结果目录: {result_dir}")
