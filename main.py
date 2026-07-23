@@ -369,6 +369,25 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                 except Exception as e:
                     logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
             app.sse_handler.push(event)
+            # 一次性运行：done 送达后（此时评估已全部完成、结果已落盘）终止所有模块子进程并退出 Web。
+            # 模块子进程即 GPU 占用进程，等价于训练结束后 kill GPU 进程，确保 GPU 显存随之释放；
+            # main 的监控循环检测到 web 退出后会自然收尾退出。
+            if event is None:
+                import threading
+
+                def _terminate_pipeline():
+                    time.sleep(2.0)  # 确保 SSE 已把 done 送达前端
+                    logger.info("推理结果已全部展示完毕，终止所有模块子进程并退出 Web（释放 GPU）")
+                    try:
+                        import subprocess
+                        # [p] 方括号防止 pkill 匹配到自身命令行
+                        subprocess.run(["pkill", "-f", "main.py --g[p]u"], timeout=10)
+                    except Exception as e:
+                        logger.error(f"终止模块子进程失败: {e}")
+                    time.sleep(0.5)
+                    os._exit(0)
+
+                threading.Thread(target=_terminate_pipeline, daemon=True).start()
         display_buffer.set_push_callback(push_wrapper)
         display_buffer.start()
 
