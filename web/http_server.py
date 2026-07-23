@@ -55,9 +55,13 @@ def create_app(
     @app.route("/start", methods=["POST"])
     def start():
         """启动流水线：清理 Redis 缓存后设置带时间戳的代际信号，动态更新 run_id"""
-        import redis
         import time as _time
-        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        from core.redis_conn import get_redis_client
+        r = get_redis_client(
+            host=config.get("_redis_host", "localhost"),
+            port=config.get("_redis_port", 6379),
+            db=config.get("_redis_db", 0),
+        )
         # 清除上一次的缓存数据
         for key in r.scan_iter("inference:*"):
             r.delete(key)
@@ -71,7 +75,6 @@ def create_app(
         sig_time = _time.time()
         # 设置代际信号
         r.set("pipeline:start_signal", str(sig_time), ex=3600)
-        r.close()
         
         # 动态生成本轮推理的 run_id，彻底隔绝物理目录干扰
         from datetime import datetime
@@ -131,10 +134,13 @@ def create_app(
     @app.route("/status")
     def status():
         """获取状态"""
-        import redis
-        r = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
+        from core.redis_conn import get_redis_client
+        r = get_redis_client(
+            host=config.get("_redis_host", "localhost"),
+            port=config.get("_redis_port", 6379),
+            db=config.get("_redis_db", 0),
+        )
         redis_status = r.get("pipeline:status")
-        r.close()
 
         status_val = pipeline_state["status"]
         # Redis 显示 done 则重置为空闲
