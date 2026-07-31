@@ -11,7 +11,8 @@ torch>=2.0.0
 transformers>=4.30.0
 
 # Web 服务
-flask>=3.0.0
+fastapi>=0.139.0
+uvicorn>=0.51.0
 
 # 音频处理
 librosa>=0.10.0

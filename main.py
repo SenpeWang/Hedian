@@ -38,7 +38,7 @@ sys.path.insert(0, BASE_DIR)
 
 # 导入核心模块
 from core.config_manager import ConfigManager
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 from core.logger import setup_logger, add_root_file_handler
 
 # Redis 配置
@@ -103,7 +103,7 @@ def _run_module_process(
     from pathlib import Path
     from core.event_bus import EventBus
     from core.inference_bus import InferenceBus
-    from core.path_manager import PathConfig
+    from core.path_manager import PathManager
 
     if env_setup:
         env_setup()
@@ -115,7 +115,7 @@ def _run_module_process(
     logger = setup_logger(f"process.{module_name}")
     logger.info(f"{module_name} 进程启动")
 
-    paths = PathConfig(
+    paths = PathManager(
         base_dir=Path(paths_dict["base_dir"]),
         data_root=Path(paths_dict["data_root"]),
         model_root=Path(paths_dict["model_root"]),
@@ -204,7 +204,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
     from pathlib import Path
     from core.event_bus import EventBus
     from core.module_sync import ModuleSync
-    from core.path_manager import PathConfig
+    from core.path_manager import PathManager
     from web.http_server import create_app
 
     # 子进程需重新挂载 root 文件 handler
@@ -216,7 +216,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
     logger.info("Web 进程启动")
     config_dict["run_id"] = run_id
 
-    paths = PathConfig(
+    paths = PathManager(
         base_dir=Path(paths_dict["base_dir"]),
         data_root=Path(paths_dict["data_root"]),
         model_root=Path(paths_dict["model_root"]),
@@ -238,10 +238,11 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
 
     display_buffer = ModuleSync(
         fps=config_dict.get("fps", 30),
-        expected_modules={"voice", "tracker", "gaze", "behavior"},
+        expected_modules={"voice", "tracker", "gaze", "behavior"},  # 包含 gaze 独立进度汇报
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         duration=video_duration,
     )
+    display_buffer.set_audio_dir(str(paths.result_root), paths)
 
     def make_pipeline_runner():
         def runner():
@@ -283,6 +284,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         active_result_dir = str(paths.get_result_dir(active_run_id))
         flow_result_dir = active_result_dir
         config_dict["run_id"] = active_run_id
+        # 音频已通过 /api/audio/stream 加载，无需旧切片
         
         # 动态将当前 Web 进程的日志重定向到当前活跃 Session 文件夹下的日志文件
         new_log_file = os.path.join(active_result_dir, "run.log")
@@ -323,7 +325,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
             if display_buffer and local_sec > 0:
                 while display_buffer._pushed_global_sec < local_sec:
                     # 如果系统状态已经变为 idle（说明流程结束或用户停止测试），立刻放行，防止死锁
-                    if app.pipeline_state.get("status") == "idle":
+                    if app.state.pipeline_state.get("status") == "idle":
                         break
                     time.sleep(0.1)
                     
@@ -337,7 +339,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                     }
                 ]
             }
-            app.sse_handler.push(batch)
+            app.state.sse_handler.push(batch)
         else:
             if display_buffer:
                 display_buffer.push_display(event_type, data)
@@ -355,7 +357,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         def push_wrapper(event):
             # 推理流结束信号：ModuleSync 推送 None 表示流水线完成
             if event is None or (isinstance(event, dict) and event.get("source") == "done"):
-                app.pipeline_state["status"] = "idle"
+                app.state.pipeline_state["status"] = "idle"
                 logger.info("检测到流水线运行结束信号，已将 Web 状态置为 idle")
                 # 1. 收尾所有制度：finalize 关闭活跃流程(触发 FLOW_ENDED) + 保存制度事件
                 if flow_result_dir:
@@ -371,7 +373,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                     display_buffer.flush_remaining()
                 except Exception as e:
                     logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
-            app.sse_handler.push(event)
+            app.state.sse_handler.push(event)
             # 一次性运行：done 送达后（此时评估已全部完成、结果已落盘）终止所有模块子进程并退出 Web。
             # 模块子进程即 GPU 占用进程，等价于训练结束后 kill GPU 进程，确保 GPU 显存随之释放；
             # main 的监控循环检测到 web 退出后会自然收尾退出。
@@ -394,8 +396,9 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         display_buffer.set_push_callback(push_wrapper)
         display_buffer.start()
 
-    logger.info("启动 Flask 服务器")
-    app.run(host="0.0.0.0", port=5002, debug=False, threaded=True)
+    logger.info("启动 FastAPI 服务器")
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5002, log_level="warning")
 
     display_buffer.stop()
     event_bus.stop()
@@ -405,7 +408,7 @@ def main():
     """协调器：启动各模块进程"""
     config_path = args.config or os.path.join(BASE_DIR, "config.yaml")
     config = ConfigManager(config_path)
-    paths = PathConfig.from_config(config.to_dict(), BASE_DIR)
+    paths = PathManager.from_config(config.to_dict(), BASE_DIR)
 
     logger.info(f"FPS={config.fps}, GPU={config.gpu}")
     logger.info(f"数据目录: {paths.data_root}")

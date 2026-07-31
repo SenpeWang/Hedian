@@ -10,7 +10,7 @@ import logging
 import os
 from typing import List, Dict
 
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 logger = logging.getLogger("module.voice.storage")
 
@@ -20,7 +20,7 @@ from core.base_storage import BaseStorage
 class VoiceResultStorage(BaseStorage):
     """语音结果存储器，负责解耦数据存储动作"""
 
-    def __init__(self, paths: PathConfig):
+    def __init__(self, paths: PathManager):
         super().__init__(paths, "voice")
 
     def save_results(self, run_id: str, events: List[Dict]) -> None:

@@ -8,7 +8,7 @@ import logging
 import os
 from typing import List, Dict
 
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 logger = logging.getLogger("module.behavior.storage")
 
@@ -22,7 +22,7 @@ class BehaviorStorage(BaseStorage):
     负责保存行为关键事件（behavior_key_moments.json）。
     """
 
-    def __init__(self, paths: PathConfig):
+    def __init__(self, paths: PathManager):
         """
         初始化存储器
 

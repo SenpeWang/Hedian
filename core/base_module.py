@@ -13,7 +13,7 @@ import redis
 from core.event_bus import EventBus, EventTopic
 from core.inference_bus import InferenceBus
 from core.module_sync import ModuleSync
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 
 # 全局对齐参数：任何模块推理进度不能比最慢的模块快超过此秒数
@@ -45,7 +45,7 @@ class BaseModule(ABC):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathConfig,
+        paths: PathManager,
         display_buffer: Union[InferenceBus, ModuleSync],
     ):
         """

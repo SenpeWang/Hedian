@@ -31,3 +31,6 @@ models/
 
 # Documentation
 *.md
+
+# Frontend dependencies
+frontend/node_modules/

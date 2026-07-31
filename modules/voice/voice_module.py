@@ -9,7 +9,7 @@ import logging
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_bus import InferenceBus
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 from modules.voice.speech_transcriber import (
     SpeechTranscriber,
@@ -32,7 +32,7 @@ class VoiceModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathConfig,
+        paths: PathManager,
         display_buffer: InferenceBus,
     ):
         super().__init__(event_bus, config, paths, display_buffer)
