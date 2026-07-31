@@ -230,7 +230,8 @@ class TrackerModule(BaseModule):
 
 
                 # 可视化：在帧上画跟踪结果 + 距离 + 注视结果（每2帧一次）
-                if frame_count % 2 == 0:
+                # 逐帧全量推送到推理流
+                if True:
                     try:
                         # 直接在原 frame 上绘制（下游不再使用 frame）
                         vis_frame = draw_tracks(frame, tracks, self._roles_info)
@@ -238,18 +239,19 @@ class TrackerModule(BaseModule):
                             self._draw_distance_lines(vis_frame)
                         vis_frame = self._draw_gaze(vis_frame, frame_count, ts, tracks)
                         # 降分辨率到 720p + JPEG quality 35：大幅降低编码与传输开销
-                        vis_small = cv2.resize(vis_frame, (1280, 720))
-                        _, jpeg = cv2.imencode(".jpg", vis_small, [cv2.IMWRITE_JPEG_QUALITY, 35])
+                        vis_small = cv2.resize(vis_frame, (960, 540))
+                        ok, jpeg = cv2.imencode(".jpg", vis_small, [cv2.IMWRITE_JPEG_QUALITY, 35])
 
-                        # 推理流推送视频帧（globalSec=ts，前端按 batch 同步对齐）
-                        self.push_display("video", {
-                            "localSec": round(ts, 2),
-                            "tag": "frame",
-                            "data": {
-                                "frame_data": base64.b64encode(jpeg.tobytes()).decode('utf-8'),
-                                "frame_id": frame_count,
-                            },
-                        })
+                        if ok:
+                            # 推理流推送视频帧（globalSec=ts，前端按 batch 同步对齐）
+                            self.push_display("video", {
+                                "localSec": round(ts, 2),
+                                "tag": "frame",
+                                "data": {
+                                    "frame_data": base64.b64encode(jpeg.tobytes()).decode('utf-8'),
+                                    "frame_id": frame_count,
+                                },
+                            })
                     except Exception as e:
                         logger.warning(f"可视化帧失败: {e}")
 

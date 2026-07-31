@@ -2,11 +2,13 @@
 手指屏幕检测模块
 
 检测手指指向屏幕的行为。
+推理流：在帧上绘制检测框标注（手/屏幕/人体）。
+事件流：关键事件（手指屏幕）存入 _events。
 """
 import os
 import logging
 import math
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 import numpy as np
 import cv2
@@ -15,8 +17,13 @@ logger = logging.getLogger("module.behavior.finger_screen")
 
 # 类别常量
 CLASS_HAND = 0
-CLASS_FILE = 1
 CLASS_SCREEN = 2
+
+# 绘制颜色 (BGR)
+COLOR_HAND = (0, 200, 0)       # 绿色 - 手
+COLOR_SCREEN = (0, 200, 0)     # 绿色 - 屏幕
+COLOR_PERSON = (0, 200, 255)   # 黄色 - 人体
+COLOR_EVENT = (0, 0, 255)      # 红色 - 事件触发
 
 
 class PoseEMAFilter:
@@ -27,16 +34,6 @@ class PoseEMAFilter:
         self.history = {}
 
     def update(self, track_id: int, keypoints: np.ndarray) -> np.ndarray:
-        """
-        更新关键点
-
-        Args:
-            track_id: 跟踪 ID
-            keypoints: 关键点
-
-        Returns:
-            平滑后的关键点
-        """
         if track_id == -1 or track_id not in self.history:
             self.history[track_id] = keypoints.copy()
             return keypoints
@@ -57,39 +54,25 @@ class PoseEMAFilter:
         return smoothed_keypoints
 
 
-def get_area(k1: np.ndarray, k2: np.ndarray, k3: np.ndarray) -> float:
-    """计算三角形面积"""
-    if k1[2] < 0.5 or k2[2] < 0.5 or k3[2] < 0.5:
-        return 0
-    return 0.5 * abs(
-        k1[0] * (k2[1] - k3[1])
-        + k2[0] * (k3[1] - k1[1])
-        + k3[0] * (k1[1] - k2[1])
-    )
-
-
 class FingerScreenDetector:
     """
     手指屏幕检测器
 
-    检测手指指向屏幕的行为。
+    推理流：每帧绘制检测框（手/屏幕/人体）。
+    事件流：关键事件（手指屏幕）触发时生成。
     """
 
     def __init__(
         self,
         pose_model_path: str,
         finger_model_path: str,
+        detect_conf: float = 0.3,
+        pose_conf: float = 0.5,
+        hand_to_screen_dist: float = 400,
+        cooldown_sec: float = 1.5,
     ):
-        """
-        初始化手指屏幕检测器
-
-        Args:
-            pose_model_path: 姿态模型路径
-            finger_model_path: 手指检测模型路径
-        """
         from ultralytics import YOLO
 
-        # 加载模型
         if not os.path.exists(pose_model_path):
             raise FileNotFoundError(f"姿态模型不存在: {pose_model_path}")
         if not os.path.exists(finger_model_path):
@@ -98,10 +81,12 @@ class FingerScreenDetector:
         self._pose_model = YOLO(pose_model_path)
         self._finger_model = YOLO(finger_model_path)
 
-        # 初始化滤波器
-        self._pose_filter = PoseEMAFilter(alpha=0.5)
+        self._detect_conf = detect_conf
+        self._pose_conf = pose_conf
+        self._hand_to_screen_dist = hand_to_screen_dist
+        self._cooldown_sec = cooldown_sec
 
-        # 事件冷却
+        self._pose_filter = PoseEMAFilter(alpha=0.5)
         self._event_cooldown = {}
         self._cooldown_frames = 0
 
@@ -110,10 +95,10 @@ class FingerScreenDetector:
 
     def detect(self, frame: np.ndarray, frame_count: int, fps: float) -> List[Dict]:
         """
-        检测手指屏幕行为
+        检测手指屏幕行为，同时在帧上绘制推理流标注。
 
         Args:
-            frame: BGR 图像
+            frame: BGR 图像（会被原地绘制标注）
             frame_count: 帧号
             fps: 帧率
 
@@ -121,28 +106,20 @@ class FingerScreenDetector:
             事件列表
         """
         if self._cooldown_frames == 0:
-            self._cooldown_frames = int(fps * 1.5)
+            self._cooldown_frames = int(fps * self._cooldown_sec)
 
         events = []
 
         # 手指检测
         result_detect = self._finger_model.track(
-            frame,
-            persist=True,
-            conf=0.3,
-            tracker="bytetrack.yaml",
-            verbose=False,
+            frame, persist=True, conf=self._detect_conf,
+            tracker="bytetrack.yaml", half=True, verbose=False,
         )
 
         # 姿态检测
         results_pose = self._pose_model.track(
-            frame,
-            persist=True,
-            conf=0.5,
-            tracker="bytetrack.yaml",
-            iou=0.5,
-            classes=[0],
-            verbose=False,
+            frame, persist=True, conf=self._pose_conf,
+            tracker="bytetrack.yaml", iou=0.5, classes=[0], verbose=False,
         )
 
         # 解析检测结果
@@ -176,7 +153,6 @@ class FingerScreenDetector:
                 else [-1] * len(kpts)
             )
 
-            # EMA 平滑
             smoothed_kpts = []
             for i, raw_kp in enumerate(kpts):
                 p_id = int(pose_ids[i])
@@ -184,7 +160,6 @@ class FingerScreenDetector:
                 smoothed_kpts.append(smooth_kp)
             kpts = np.array(smoothed_kpts)
 
-            # 构建 id -> pose_box 映射
             for i, p in enumerate(kpts):
                 pid = int(pose_ids[i])
                 if pid != -1 and pose_boxes is not None:
@@ -192,11 +167,11 @@ class FingerScreenDetector:
                     id_to_pose_box[pid] = [int(pb[0]), int(pb[1]), int(pb[2]), int(pb[3])]
 
         # 检测手指屏幕行为
+        event_person_ids = set()
         for (hx, hy, hx1, hy1, hx2, hy2, h_id) in hands:
             own_id = -1
             min_wrist_dist = float("inf")
 
-            # 找最近的手腕
             if kpts is not None and pose_ids is not None:
                 for i, p in enumerate(kpts):
                     p_id = int(pose_ids[i])
@@ -213,9 +188,7 @@ class FingerScreenDetector:
                         if dist < min_wrist_dist:
                             min_wrist_dist, own_id = dist, p_id
 
-            # 找最近的屏幕
             target_screen_id = -1
-            target_sx, target_sy = -1, -1
             min_screen_dist = float("inf")
 
             for (sx, sy, sx1, sy1, sx2, sy2, s_id) in screens:
@@ -223,15 +196,12 @@ class FingerScreenDetector:
                 if dist < min_screen_dist:
                     min_screen_dist = dist
                     target_screen_id = s_id
-                    target_sx, target_sy = sx, sy
 
-            # 判断是否指向屏幕
             if (
                 own_id != -1
                 and target_screen_id != -1
-                and min_wrist_dist < 400
+                and min_wrist_dist < self._hand_to_screen_dist
             ):
-                # 冷却期检查
                 key = ("手指屏幕", own_id)
                 if frame_count - self._event_cooldown.get(key, -9999) > self._cooldown_frames:
                     person_box = id_to_pose_box.get(
@@ -247,7 +217,36 @@ class FingerScreenDetector:
                         "frame_id": frame_count,
                     }
                     events.append(event)
-
+                    event_person_ids.add(own_id)
                     self._event_cooldown[key] = frame_count
 
+        # === 推理流：绘制检测框标注 ===
+        self._draw_frame(frame, hands, screens, id_to_pose_box, event_person_ids)
+
         return events
+
+    def _draw_frame(self, frame, hands, screens, id_to_pose_box, event_person_ids):
+        """在帧上绘制推理流标注（检测框 + 标签）"""
+        # 绘制屏幕框（青色）
+        for (sx, sy, sx1, sy1, sx2, sy2, s_id) in screens:
+            cv2.rectangle(frame, (int(sx1), int(sy1)), (int(sx2), int(sy2)), COLOR_SCREEN, 2)
+            cv2.putText(frame, f"Screen#{s_id}", (int(sx1), int(sy1) - 5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, COLOR_SCREEN, 1)
+
+        # 绘制人体框（黄色，事件触发时红色加粗）
+        for pid, box in id_to_pose_box.items():
+            x1, y1, x2, y2 = box
+            if pid in event_person_ids:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_EVENT, 3)
+                cv2.putText(frame, "FINGER_SCREEN!", (x1, y1 - 8),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.6, COLOR_EVENT, 2)
+            else:
+                cv2.rectangle(frame, (x1, y1), (x2, y2), COLOR_PERSON, 1)
+                cv2.putText(frame, f"Person#{pid}", (x1, y1 - 5),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.45, COLOR_PERSON, 1)
+
+        # 绘制手部框（绿色）
+        for (hx, hy, hx1, hy1, hx2, hy2, h_id) in hands:
+            cv2.rectangle(frame, (int(hx1), int(hy1)), (int(hx2), int(hy2)), COLOR_HAND, 2)
+            cv2.putText(frame, f"Hand#{h_id}", (int(hx1), int(hy2) + 12),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.4, COLOR_HAND, 1)

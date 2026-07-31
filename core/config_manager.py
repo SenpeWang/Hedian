@@ -26,7 +26,11 @@ _DEFAULTS = {
         "data_root": "data",
         "model_root": "models",
         "result_root": "data/results",
-        "video": "data/videos/camFRONT.mpg",
+    },
+    "videos": {
+        "front": "data/videos/camFRONT.mpg",
+        "bup": "data/videos/camBUP.mpg",
+        "pop": "data/videos/camPOP.mpg",
     },
     "supervision": {
         "bind_hold_sec": 10.0,
@@ -54,6 +58,20 @@ _DEFAULTS = {
         "heatmap_th": 0.3,
         "head_min_size": 20,
         "head_max_size": 300,
+    },
+    "behavior": {
+        "finger_screen": {
+            "detect_conf": 0.3,
+            "pose_conf": 0.5,
+            "hand_to_screen_dist": 400,
+            "cooldown_sec": 1.5,
+        },
+        "finger_file": {
+            "detect_conf": 0.25,
+            "track_iou": 0.5,
+            "file_iou_threshold": 0.2,
+            "cooldown_sec": 1.5,
+        },
     },
     "modules": {
         "voice": True,
@@ -164,8 +182,8 @@ class ConfigManager:
 
     @property
     def video_path(self) -> str:
-        """视频路径"""
-        return str(BASE_DIR / self._data["paths"]["video"])
+        """主视频路径（front 视角）"""
+        return str(BASE_DIR / self._data["videos"]["front"])
 
     @property
     def supervision(self) -> dict:
@@ -186,6 +204,16 @@ class ConfigManager:
     def gaze(self) -> dict:
         """注视配置"""
         return self._data["gaze"]
+
+    @property
+    def behavior(self) -> dict:
+        """行为检测配置"""
+        return self._data["behavior"]
+
+    @property
+    def videos(self) -> dict:
+        """视频路径配置（front/bup/pop）"""
+        return self._data["videos"]
 
     @property
     def modules(self) -> dict:

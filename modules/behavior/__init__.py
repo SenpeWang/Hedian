@@ -4,6 +4,7 @@
 负责：
 - 举手检测（供tracker调用）
 - 手指屏幕检测
+- 手指文件检测
 
 使用方式：
     from modules.behavior import BehaviorModule
@@ -13,11 +14,13 @@
 from modules.behavior.behavior_module import BehaviorModule
 from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.finger_screen_detector import FingerScreenDetector
+from modules.behavior.finger_file_detector import FingerFileDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 
 __all__ = [
     "BehaviorModule",
     "HandRaiser",
     "FingerScreenDetector",
+    "FingerFileDetector",
     "BehaviorStorage",
 ]
