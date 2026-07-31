@@ -1,11 +1,13 @@
 """
 模块同步器 — 由 Web/主管理进程使用。从 Redis 读取各模块的进度和事件，进行时间对齐并推送。
 """
+import base64
 import json
 import os
 import logging
 import threading
 import time
+import wave
 from typing import Any, Callable, Dict, Optional, Set
 
 
@@ -77,6 +79,18 @@ class ModuleSync:
         # 已推送到的 global_sec，按帧率步长推进，避免突发推送
         self._pushed_global_sec: float = 0.0
 
+        # 音频切片（对齐嵌入 batch）
+        self._audio_file: Optional[wave.Wave_read] = None
+        self._audio_sr: int = 16000
+        self._audio_channels: int = 1
+        self._audio_sampwidth: int = 2
+        self._audio_total_frames: int = 0
+        self._last_audio_sec: float = 0.0
+        self._audio_meta_sent: bool = False
+        self._active_run_id: Optional[str] = None
+        self._result_root: str = ""
+        self._paths_obj = None
+
     def update_module_time(self, module_name: str, sec: float) -> None:
         """同步模式不执行此操作"""
         pass
@@ -93,6 +107,64 @@ class ModuleSync:
             self._module_last_value.pop(module_name, None)
         except Exception as e:
             logger.error(f"从同步器中移除模块失败: {e}")
+
+    def set_audio_dir(self, result_root: str, paths_obj=None) -> None:
+        self._result_root = result_root
+        self._paths_obj = paths_obj
+
+    def _try_open_audio(self, run_id: str) -> bool:
+        self._active_run_id = run_id
+        if self._audio_file is not None:
+            return True
+        if self._paths_obj is None:
+            return False
+        try:
+            audio_path = str(self._paths_obj.get_result_path(
+                run_id=run_id, module="voice", filename="audio.wav"))
+            if not os.path.exists(audio_path):
+                return False
+            wf = wave.open(audio_path, 'rb')
+            self._audio_sr = wf.getframerate()
+            self._audio_channels = wf.getnchannels()
+            self._audio_sampwidth = wf.getsampwidth()
+            self._audio_total_frames = wf.getnframes()
+            self._audio_file = wf
+            self._last_audio_sec = 0.0
+            self._audio_meta_sent = False
+            logger.info(f"音频文件已打开: sr={self._audio_sr}, ch={self._audio_channels}, "
+                        f"sw={self._audio_sampwidth}, dur={self._audio_total_frames/self._audio_sr:.1f}s")
+            return True
+        except Exception as e:
+            logger.debug(f"打开音频文件失败: {e}")
+            return False
+
+    def _read_audio_chunk(self, start_sec: float, end_sec: float) -> Optional[str]:
+        if self._audio_file is None:
+            return None
+        try:
+            start_frame = int(start_sec * self._audio_sr)
+            end_frame = min(int(end_sec * self._audio_sr), self._audio_total_frames)
+            if end_frame <= start_frame:
+                return None
+            self._audio_file.setpos(start_frame)
+            pcm_bytes = self._audio_file.readframes(end_frame - start_frame)
+            if not pcm_bytes:
+                return None
+            return base64.b64encode(pcm_bytes).decode('ascii')
+        except Exception as e:
+            logger.error(f"读取音频切片失败: {e}")
+            return None
+
+    def _close_audio(self) -> None:
+        if self._audio_file is not None:
+            try:
+                self._audio_file.close()
+            except Exception:
+                pass
+            self._audio_file = None
+            self._last_audio_sec = 0.0
+            self._audio_meta_sent = False
+            self._active_run_id = None
 
     def _compute_global_sec(self) -> float:
         """计算全局时钟：取所有未超时且预期的运行模块的最慢 local_sec 进度
@@ -148,15 +220,8 @@ class ModuleSync:
 
             # 排除进度为0的模块：启动阶段某个模块（如voice首段转录）尚未产出进度时，
             # 不应拖累全局时钟导致前端冻结在0秒
-            positive_progress = {k: v for k, v in relevant.items() if v > 0}
-            if positive_progress:
-                slowest_sec = min(positive_progress.values())
-                fastest_sec = max(positive_progress.values())
-                # 容忍窗口：允许 global_sec 比最慢模块超前最多 GLOBAL_ALIGN_TOLERANCE_SEC 秒
-                # 但不能超过最快模块的进度（否则没有事件可推）
-                # 这样慢模块短暂卡顿时，快模块在容忍窗口内的事件仍能推送给前端
-                return min(slowest_sec + GLOBAL_ALIGN_TOLERANCE_SEC, fastest_sec)
-            # 所有模块进度都为0时返回0，让早期事件正常推送
+            # 严格 100% 锁步对齐：取所有预期运行模块进度的绝对最小值 min()
+            # 决不允许全局时钟脱节超前推未来 Batch，保证 Voice 语音转录与 Batch 同步同时！
             return min(relevant.values())
         except Exception as e:
             logger.error(f"计算全局时钟失败: {e}")
@@ -247,7 +312,7 @@ class ModuleSync:
                             stall_count = 0
                             # 重置推送限速状态，避免下一轮被旧值卡住
                             self._pushed_global_sec = 0.0
-                            # 关闭音频文件，下轮重新打开
+                            self._close_audio()
                             # 清理 Redis 进度，避免下一次推理被旧进度污染
                             try:
                                 self._redis.delete(self._KEY_PROGRESS, self._KEY_SNAPSHOT, self._KEY_CLOCK)
@@ -317,7 +382,7 @@ class ModuleSync:
             if events_to_push:
                 batch = {"globalSec": target_sec}
                 source_counts = {}
-                video_sources = {"video", "behavior_screen_video", "behavior_file_video"}
+                video_sources = {"video_front", "video_bup", "video_pop"}
                 for ev in events_to_push:
                     source = ev.get("source", "unknown")
                     if source not in batch:
@@ -332,9 +397,36 @@ class ModuleSync:
                     if source in video_sources:
                         batch[source] = [item]
                         source_counts[source] = 1
+                        if source == "video_front": self._last_video_front = item
+                        elif source == "video_bup": self._last_video_bup = item
+                        elif source == "video_pop": self._last_video_pop = item
                     else:
                         batch[source].append(item)
                         source_counts[source] += 1
+
+                # 补全确保每一个 Batch 都 100% 包含三路视角画面（防前端视角缺失）
+                if "video_front" not in batch and self._last_video_front is not None:
+                    batch["video_front"] = [self._last_video_front]
+                if "video_bup" not in batch and self._last_video_bup is not None:
+                    batch["video_bup"] = [self._last_video_bup]
+                if "video_pop" not in batch and self._last_video_pop is not None:
+                    batch["video_pop"] = [self._last_video_pop]
+                # 音频切片嵌入 batch（与视频帧共享同一 globalSec 时间轴）
+                if self._audio_file is None and self._active_run_id:
+                    self._try_open_audio(self._active_run_id)
+                if self._audio_file is not None and target_sec > self._last_audio_sec:
+                    if not self._audio_meta_sent:
+                        batch["audio_meta"] = {
+                            "sampleRate": self._audio_sr,
+                            "channels": self._audio_channels,
+                            "sampleWidth": self._audio_sampwidth,
+                        }
+                        self._audio_meta_sent = True
+                    chunk_b64 = self._read_audio_chunk(self._last_audio_sec, target_sec)
+                    if chunk_b64:
+                        batch["audio_chunk"] = chunk_b64
+                        self._last_audio_sec = target_sec
+
                 self._do_push(batch)
 
         except Exception as e:

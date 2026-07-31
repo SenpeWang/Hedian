@@ -10,7 +10,7 @@ from typing import Dict, Optional
 
 
 @dataclass
-class PathConfig:
+class PathManager:
     """
     路径配置
 
@@ -22,16 +22,16 @@ class PathConfig:
     result_root: Path
 
     @classmethod
-    def from_config(cls, config: dict, base_dir: str = None) -> "PathConfig":
+    def from_config(cls, config: dict, base_dir: str = None) -> "PathManager":
         """
-        从配置字典创建 PathConfig
+        从配置字典创建 PathManager
 
         Args:
             config: 配置字典
             base_dir: 基础目录（默认使用当前文件所在目录的父目录）
 
         Returns:
-            PathConfig 实例
+            PathManager 实例
         """
         if base_dir is None:
             base_dir = str(Path(__file__).parent.parent)
@@ -117,3 +117,4 @@ class PathConfig:
 
         # 创建数据子目录
         (self.data_root / "videos").mkdir(parents=True, exist_ok=True)
+

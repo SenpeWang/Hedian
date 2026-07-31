@@ -8,7 +8,7 @@ import logging
 import os
 from typing import List, Dict
 
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 logger = logging.getLogger("module.tracker.storage")
 
@@ -25,7 +25,7 @@ class TrackerStorage(BaseStorage):
     - 关键帧（key_frames/）
     """
 
-    def __init__(self, paths: PathConfig):
+    def __init__(self, paths: PathManager):
         """
         初始化存储器
 

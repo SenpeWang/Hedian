@@ -16,7 +16,7 @@ from core.inference_bus import InferenceBus
 from core.module_sync import ModuleSync
 from core.base_module import BaseModule
 from core.logger import setup_logger, get_module_logger, add_root_file_handler
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 __all__ = [
     "EventBus",
@@ -28,5 +28,5 @@ __all__ = [
     "setup_logger",
     "get_module_logger",
     "add_root_file_handler",
-    "PathConfig",
+    "PathManager",
 ]

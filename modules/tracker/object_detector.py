@@ -76,6 +76,7 @@ class ObjectDetector:
             conf=self.conf_threshold,
             iou=self.nms_threshold,
             imgsz=self.img_size,
+            half=True,  # RTX 4090 FP16 Tensor Core 加速
             verbose=False,
             save=False,
         )
@@ -127,6 +128,7 @@ class ObjectDetector:
             conf=0.10,  # 低阈值，获取所有检测
             iou=self.nms_threshold,
             imgsz=self.img_size,
+            half=True,  # RTX 4090 FP16 Tensor Core 加速
             verbose=False,
             save=False,
         )
@@ -174,6 +176,7 @@ class ObjectDetector:
             frame,
             conf=self.pose_confidence,
             imgsz=self.img_size,
+            half=True,  # RTX 4090 FP16 Tensor Core 加速
             verbose=False,
             save=False,
         )

@@ -5,14 +5,14 @@ import os
 import json
 import logging
 from typing import List, Dict
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 logger = logging.getLogger("core.storage")
 
 class BaseStorage:
     """结果存储抽象基类，封装通用的原子性 JSON 保存逻辑"""
 
-    def __init__(self, paths: PathConfig, module_name: str):
+    def __init__(self, paths: PathManager, module_name: str):
         self._paths = paths
         self._module_name = module_name
 

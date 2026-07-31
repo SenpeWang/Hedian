@@ -12,7 +12,7 @@ import numpy as np
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_bus import InferenceBus
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
@@ -35,7 +35,7 @@ class TrackerModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathConfig,
+        paths: PathManager,
         display_buffer: InferenceBus,
     ):
         super().__init__(event_bus, config, paths, display_buffer)
@@ -244,7 +244,7 @@ class TrackerModule(BaseModule):
 
                         if ok:
                             # 推理流推送视频帧（globalSec=ts，前端按 batch 同步对齐）
-                            self.push_display("video", {
+                            self.push_display("video_front", {
                                 "localSec": round(ts, 2),
                                 "tag": "frame",
                                 "data": {

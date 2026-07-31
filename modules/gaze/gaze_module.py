@@ -60,7 +60,7 @@ class GazeModule:
             display_fn: 推送推理结果的函数 (event_type, data) -> None
             event_bus: 消息总线（用于关键事件通信）
             progress_fn: 更新进度的函数 (current, total) -> None
-            paths: PathConfig 实例，用于结果保存
+            paths: PathManager 实例，用于结果保存
         """
         config = config or {}
 

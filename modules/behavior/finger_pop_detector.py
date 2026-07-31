@@ -29,7 +29,7 @@ COLOR_HAND = (0, 200, 0)       # 绿色 - 手指
 COLOR_EVENT = (0, 0, 255)      # 红色 - 事件触发
 
 
-class FingerFileDetector:
+class FingerPopDetector:
     """
     手指文件检测器
 
@@ -84,7 +84,7 @@ class FingerFileDetector:
     @staticmethod
     def _contains_center(outer_bbox, inner_bbox):
         """判断 inner_bbox 中心是否在 outer_bbox 内"""
-        cx, cy = FingerFileDetector._center(inner_bbox)
+        cx, cy = FingerPopDetector._center(inner_bbox)
         x1, y1, x2, y2 = outer_bbox
         return x1 <= cx <= x2 and y1 <= cy <= y2
 

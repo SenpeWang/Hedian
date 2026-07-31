@@ -15,10 +15,10 @@ import cv2
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_bus import InferenceBus
-from core.path_manager import PathConfig
+from core.path_manager import PathManager
 
-from modules.behavior.finger_screen_detector import FingerScreenDetector
-from modules.behavior.finger_file_detector import FingerFileDetector
+from modules.behavior.finger_bup_detector import FingerBupDetector
+from modules.behavior.finger_pop_detector import FingerPopDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 
 logger = logging.getLogger("module.behavior")
@@ -29,8 +29,8 @@ class BehaviorModule(BaseModule):
     行为检测模块
 
     并行处理两个视角的行为检测：
-    - 手指屏幕（camBUP.mpg）：FingerScreenDetector
-    - 手指文件（camPOP.mpg）：FingerFileDetector
+    - 手指屏幕（camBUP.mpg）：FingerBupDetector
+    - 手指文件（camPOP.mpg）：FingerPopDetector
 
     同时接收 tracker 推送的举手事件（BEHAVIOR_HAND_RAISED），统一保存。
     """
@@ -39,12 +39,12 @@ class BehaviorModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathConfig,
+        paths: PathManager,
         display_buffer: InferenceBus,
     ):
         super().__init__(event_bus, config, paths, display_buffer)
-        self._screen_detector = None
-        self._file_detector = None
+        self._bup_detector = None
+        self._pop_detector = None
         self._result_storage = None
         self._events = []
         self._events_lock = threading.Lock()
@@ -61,7 +61,7 @@ class BehaviorModule(BaseModule):
             file_cfg = behavior_cfg.get("finger_file", {})
 
             # 初始化手指屏幕检测器
-            self._screen_detector = FingerScreenDetector(
+            self._bup_detector = FingerBupDetector(
                 pose_model_path=str(self.paths.get_model_path("behavior", "behavior_yolo11lpose.pt")),
                 finger_model_path=str(self.paths.get_model_path("behavior", "behavior_yolo.pt")),
                 detect_conf=screen_cfg.get("detect_conf", 0.3),
@@ -71,7 +71,7 @@ class BehaviorModule(BaseModule):
             )
 
             # 初始化手指文件检测器
-            self._file_detector = FingerFileDetector(
+            self._pop_detector = FingerPopDetector(
                 model_path=str(self.paths.get_model_path("behavior", "behavior_yolo.pt")),
                 detect_conf=file_cfg.get("detect_conf", 0.25),
                 track_iou=file_cfg.get("track_iou", 0.5),
@@ -119,9 +119,9 @@ class BehaviorModule(BaseModule):
 
         Args:
             video_path: 视频文件路径
-            detector: 检测器实例（FingerScreenDetector 或 FingerFileDetector）
+            detector: 检测器实例（FingerBupDetector 或 FingerPopDetector）
             tag: 推理事件标签（如 "behavior"）
-            video_source: 视频帧推送源（如 "behavior_screen_video"）
+            video_source: 视频帧推送源（如 "video_bup"）
         """
         name = detector.__class__.__name__
 
@@ -203,17 +203,17 @@ class BehaviorModule(BaseModule):
         """
         videos_cfg = self.config.get("videos", {})
         base = self.paths.base_dir
-        screen_video = str(base / videos_cfg.get("bup", "data/videos/camBUP.mpg"))
-        file_video = str(base / videos_cfg.get("pop", "data/videos/camPOP.mpg"))
+        bup_video = str(base / videos_cfg.get("bup", "data/videos/camBUP.mpg"))
+        pop_video = str(base / videos_cfg.get("pop", "data/videos/camPOP.mpg"))
 
         logger.info(f"并行处理两个视频:")
-        logger.info(f"  手指屏幕: {screen_video}")
-        logger.info(f"  手指文件: {file_video}")
+        logger.info(f"  手指屏幕: {bup_video}")
+        logger.info(f"  手指文件: {pop_video}")
 
         with ThreadPoolExecutor(max_workers=2) as executor:
             futures = [
-                executor.submit(self._process_single_video, screen_video, self._screen_detector, "behavior", "behavior_screen_video"),
-                executor.submit(self._process_single_video, file_video, self._file_detector, "behavior", "behavior_file_video"),
+                executor.submit(self._process_single_video, bup_video, self._bup_detector, "behavior", "video_bup"),
+                executor.submit(self._process_single_video, pop_video, self._pop_detector, "behavior", "video_pop"),
             ]
             for f in futures:
                 f.result()

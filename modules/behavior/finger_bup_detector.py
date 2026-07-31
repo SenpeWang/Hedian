@@ -54,7 +54,7 @@ class PoseEMAFilter:
         return smoothed_keypoints
 
 
-class FingerScreenDetector:
+class FingerBupDetector:
     """
     手指屏幕检测器
 
