@@ -289,6 +289,8 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
         
+        if display_buffer:
+            display_buffer.reset()
         flow_recorder.set_result_dir(active_result_dir)
         for rname, rreg in registry._rules.items():
             if rules_config.get(rname, False):
@@ -307,6 +309,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         registry=registry,
         paths=paths,
         pipeline_runner=make_pipeline_runner(),
+        display_buffer=display_buffer,
     )
 
     # 大模型评估结果和流式推理文本：具备高实时性，不应随视频播放进度被拖延（对齐）

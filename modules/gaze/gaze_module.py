@@ -118,11 +118,10 @@ class GazeModule:
             min_turn_displacement=config.get("min_turn_displacement", 100.0),
             min_samples=config.get("min_gaze_samples", 5),
         )
-        self._attn_window_interval = config.get("attention_window_interval", 3.0)
-        self._attn_label_duration = 2.0
         self._attn_window_start = 0.0
-        self._attn_buffer: List[GazePoint] = []
-        self._attn_label = None
+        self._info_notice_start_ts = 0.0
+        self._notice_attn_buffer: List[GazePoint] = []
+        self._run_id = getattr(paths, "current_run_id", "default") if paths else "default" 
 
         logger.info("凝视处理器初始化完成")
 
@@ -264,11 +263,14 @@ class GazeModule:
             self._alerting = False
 
     def _on_flow_started(self, msg: dict) -> None:
-        """流程开始事件回调：信息通报流程开始时，激活 ATTENTION_RESULT 推送"""
+        """流程开始事件回调：信息通报流程激活时，记录触发时间并开启 10S 关注度检测窗口"""
         data = msg.get("data", {})
+        ts = data.get("localSec", msg.get("ts", self._latest_ts))
         if data.get("flow_type") == "info_notice":
+            self._info_notice_start_ts = ts
             self._info_notice_active = True
-            logger.info("GazeModule: 信息通报流程激活")
+            self._notice_attn_buffer = []
+            logger.info(f"GazeModule: 收到信息通报触发，开启 10 秒关注度检测窗口 @{ts:.1f}s")
 
     def _on_flow_ended(self, msg: dict) -> None:
         """流程结束事件回调：信息通报流程结束时，关闭 ATTENTION_RESULT 推送"""
@@ -278,59 +280,45 @@ class GazeModule:
             logger.info("GazeModule: 信息通报流程结束")
 
     def _update_attention(self, ts: float):
-        """收集当前帧注视点到窗口缓冲区，窗口结束时评估
+        """信息通报流程触发后 10 秒关注度评估与 keymoment 保存"""
+        if not self._info_notice_active:
+            return
 
-        推送策略：推理流 ATTENTION_RESULT 仅在信息通报流程激活时推送；
-        事件流 GAZE_ATTENTION 始终发布，供 info_notice_rule 规则订阅判定。
-        """
-        # 从当前帧缓存结果中取所有注视点的均值作为代表点
-        if self._cached_results:
-            gx_mean = sum(r["gaze_pt"][0] for r in self._cached_results) / len(self._cached_results)
-            gy_mean = sum(r["gaze_pt"][1] for r in self._cached_results) / len(self._cached_results)
-            self._attn_buffer.append(GazePoint(ts * 1000.0, gx_mean, gy_mean))
+        # 收集 10 秒窗口内的注视点样本
+        if ts <= self._info_notice_start_ts + 10.0:
+            if self._cached_results:
+                gx_mean = sum(r["gaze_pt"][0] for r in self._cached_results) / len(self._cached_results)
+                gy_mean = sum(r["gaze_pt"][1] for r in self._cached_results) / len(self._cached_results)
+                self._notice_attn_buffer.append(GazePoint(ts * 1000.0, gx_mean, gy_mean))
+        else:
+            # 10 秒窗口已满，执行判定
+            has_turned = False
+            if self._notice_attn_buffer:
+                result = self._attention_checker.evaluate(self._notice_attn_buffer)
+                has_turned = result.has_turned
 
-        # 检查窗口是否结束
-        if ts >= self._attn_window_start + self._attn_window_interval:
-            if self._attn_buffer:
-                result = self._attention_checker.evaluate(self._attn_buffer)
-                self._attn_label = (result.has_turned, ts + self._attn_label_duration)
-                # 推理流：仅在信息通报流程激活时推送
-                if self._display_fn and self._info_notice_active:
-                    self._display_fn("gaze", {
-                        "localSec": round(ts, 2),
-                        "tag": "ATTENTION_RESULT",
-                        "data": {
-                            "has_turned": result.has_turned,
-                            "displacement": round(result.total_displacement, 1),
-                        },
-                    })
-                # 未转动则记录至关键时刻
-                if not result.has_turned and self._info_notice_active:
-                    self._events.append({
-                        "localSec": round(self._attn_window_start, 2),
-                        "key_moment": "没有给予关注",
-                    })
-                # 事件流：始终发布
-                if self._event_bus:
-                    from core.event_bus import EventTopic
-                    self._event_bus.publish(EventTopic.GAZE_ATTENTION, {
-                        "localSec": round(ts, 2),
-                        "has_turned": result.has_turned,
-                        "displacement": round(result.total_displacement, 1),
-                        "sample_count": result.sample_count,
-                        "reason": result.reason,
-                        "window": f"{self._attn_window_start:.1f}s~{ts:.1f}s",
-                    }, ts=ts)
-                logger.info(
-                    "注视转动窗口 %.1f-%.1fs: %s (位移 %.1f px, %d 样本) info_notice_active=%s",
-                    self._attn_window_start, ts,
-                    "已关注" if result.has_turned else "未关注",
-                    result.total_displacement, result.sample_count,
-                    self._info_notice_active,
-                )
-            # 开启下一个窗口
-            self._attn_window_start = ts
-            self._attn_buffer = []
+            key_moment_str = "已给予关注" if has_turned else "没有给予关注"
+            record = {
+                "localSec": round(self._info_notice_start_ts, 2),
+                "key_moment": key_moment_str,
+            }
+            self._events.append(record)
+
+            # 自动持久化写入 gaze_key_moments.json
+            if self._storage:
+                self._storage.save_key_moments(self._run_id, self.get_events())
+
+            # 广播事件供后端规则使用
+            if self._event_bus:
+                from core.event_bus import EventTopic
+                self._event_bus.publish(EventTopic.GAZE_ATTENTION, {
+                    "localSec": round(ts, 2),
+                    "has_turned": has_turned,
+                }, ts=ts)
+
+            logger.info(f"GazeModule: 信息通报 10S 关注度评估完成 @{ts:.1f}s 结果='{key_moment_str}'")
+            self._info_notice_active = False
+            self._notice_attn_buffer = []
 
     def _draw_rois(self, vis: np.ndarray):
         """画ROI区域（半透明黄色）"""
@@ -369,24 +357,7 @@ class GazeModule:
             cv2.circle(vis, (gx, gy), 4, color, -1)
             cv2.circle(vis, (gx, gy), 6, color, 2)
 
-        # 绘制关注度判定标签（窗口评估后显示 2 秒）
-        if self._attn_label is not None:
-            has_turned, expire_ts = self._attn_label
-            if ts <= expire_ts:
-                label = "Attended" if has_turned else "Not Attended"
-                label_color = (0, 200, 0) if has_turned else (0, 0, 220)
-                h_vis = vis.shape[0]
-                text_size = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.8, 2)[0]
-                tx = (vis.shape[1] - text_size[0]) // 2
-                ty = h_vis - 20
-                overlay = vis.copy()
-                cv2.rectangle(overlay, (tx - 10, ty - text_size[1] - 10),
-                              (tx + text_size[0] + 10, ty + 10), label_color, -1)
-                cv2.addWeighted(overlay, 0.7, vis, 0.3, 0, vis)
-                cv2.putText(vis, label, (tx, ty),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 255), 2)
-            else:
-                self._attn_label = None
+        pass # 前端/画面渲染 Attended 标签已完全移除
 
     def get_events(self) -> list:
         """获取凝视关键时刻事件"""
@@ -402,4 +373,6 @@ class GazeModule:
 
     def save_results(self, run_id: str) -> None:
         """保存凝视关键事件到 gaze/gaze_key_moments.json（委托给 GazeStorage）"""
-        self._storage.save_key_moments(run_id, self.get_events())
+        self._run_id = run_id
+        if self._storage:
+            self._storage.save_key_moments(run_id, self.get_events())

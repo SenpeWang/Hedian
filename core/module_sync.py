@@ -2,10 +2,12 @@
 模块同步器 — 由 Web/主管理进程使用。从 Redis 读取各模块的进度和事件，进行时间对齐并推送。
 """
 import json
+import os
 import logging
 import threading
 import time
 from typing import Any, Callable, Dict, Optional, Set
+
 
 import redis
 
@@ -245,6 +247,7 @@ class ModuleSync:
                             stall_count = 0
                             # 重置推送限速状态，避免下一轮被旧值卡住
                             self._pushed_global_sec = 0.0
+                            # 关闭音频文件，下轮重新打开
                             # 清理 Redis 进度，避免下一次推理被旧进度污染
                             try:
                                 self._redis.delete(self._KEY_PROGRESS, self._KEY_SNAPSHOT, self._KEY_CLOCK)
@@ -265,28 +268,21 @@ class ModuleSync:
                 time.sleep(sleep_time)
 
     def _push_events_up_to(self, global_sec: float) -> None:
-        """按帧率步长对齐推送：每次只推进 frame_interval 秒，取该窗口内的事件
-
-        工业界流式同步做法：按固定时间步长分片，每个 batch 最多 1 帧视频，
-        天然平滑，无需额外限速逻辑。global_sec 跳变时自动按帧率节奏追赶。
-        """
-        # 按帧率步长推进；global_sec 回退（新轮次）时 min() 自动重置基准
-        target_sec = min(global_sec, self._pushed_global_sec + self.frame_interval)
+        """按帧率步长对齐推送：每次只推进 frame_interval 秒，取该窗口内的事件"""
+        target_sec = max(self._pushed_global_sec, min(global_sec, self._pushed_global_sec + self.frame_interval))
         self._pushed_global_sec = target_sec
 
         events_to_push = []
         ids_to_delete = []
 
         try:
-            # 增量读取：从上次位置之后开始（闭区间，跳过第一个已读过的）
             if self._last_stream_id == "0-0":
                 entries = self._redis.xrange(self._KEY_EVENT_STREAM, min="-", max="+", count=200)
             else:
                 entries = self._redis.xrange(self._KEY_EVENT_STREAM, min=self._last_stream_id, max="+", count=200)
                 if entries and entries[0][0] == self._last_stream_id:
-                    entries = entries[1:]  # 跳过上次读过的
+                    entries = entries[1:]
 
-            # 合并上次暂存的事件（local_sec > 旧 target_sec 的）
             all_events = list(self._pending_events)
             self._pending_events = []
 
@@ -299,7 +295,6 @@ class ModuleSync:
                     logger.error(f"解析事件失败: {e}")
                     ids_to_delete.append(entry_id)
 
-            # 更新增量读取位置
             if entries:
                 self._last_stream_id = entries[-1][0]
 
@@ -311,10 +306,8 @@ class ModuleSync:
                     if entry_id:
                         ids_to_delete.append(entry_id)
                 else:
-                    # 未到时间的暂存到本地（entry_id=None 表示来自暂存）
                     self._pending_events.append((local_sec, ev, None))
 
-            # 批量删除已处理事件
             if ids_to_delete:
                 pipe = self._redis.pipeline()
                 for entry_id in ids_to_delete:
@@ -324,22 +317,25 @@ class ModuleSync:
             if events_to_push:
                 batch = {"globalSec": target_sec}
                 source_counts = {}
+                video_sources = {"video", "behavior_screen_video", "behavior_file_video"}
                 for ev in events_to_push:
                     source = ev.get("source", "unknown")
                     if source not in batch:
                         batch[source] = []
                         source_counts[source] = 0
-                    batch[source].append({
+                    item = {
                         "localSec": ev.get("localSec"),
                         "tag": ev.get("tag"),
                         "data": ev.get("data"),
-                    })
-                    source_counts[source] += 1
+                    }
+                    # 关键优化：单批次内同种视频流只保留最新最后一帧，彻底消除前端 JS 瞬间覆盖造成的视觉跳帧
+                    if source in video_sources:
+                        batch[source] = [item]
+                        source_counts[source] = 1
+                    else:
+                        batch[source].append(item)
+                        source_counts[source] += 1
                 self._do_push(batch)
-                logger.debug(
-                    f"批推送 global_sec={target_sec:.2f}/{global_sec:.2f}: "
-                    + ", ".join(f"{s}={c}" for s, c in source_counts.items())
-                )
 
         except Exception as e:
             logger.error(f"对齐并推送事件失败: {e}")
@@ -421,6 +417,20 @@ class ModuleSync:
         except Exception as e:
             logger.error(f"获取同步器状态失败: {e}")
             return {}
+
+    def reset(self) -> None:
+        """重置所有对齐基准与限速状态，确保新一轮推理严格从 0.0 秒开始推送"""
+        self._pushed_global_sec = 0.0
+        self._last_stream_id = "0-0"
+        self._pending_events = []
+        self._module_last_update.clear()
+        self._module_last_value.clear()
+        try:
+            self._redis.delete(self._KEY_PROGRESS, self._KEY_SNAPSHOT,
+                              self._KEY_EVENT_STREAM, self._KEY_CLOCK)
+        except Exception as e:
+            logger.error(f"重置 Redis 缓存失败: {e}")
+        logger.info("ModuleSync 对齐基准时间与状态已重置为 0.0 秒")
 
     def clear(self) -> None:
         """清空数据"""

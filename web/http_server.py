@@ -22,6 +22,7 @@ def create_app(
     registry,
     paths,
     pipeline_runner: Callable = None,
+    display_buffer=None,
 ) -> Flask:
     """
     创建 Flask 应用
@@ -81,6 +82,10 @@ def create_app(
         new_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
         config["run_id"] = new_run_id
         
+        # 重置 ModuleSync 对齐时钟基准为 0.0s
+        if display_buffer:
+            display_buffer.reset()
+
         # 广播新推理代际启动事件，驱动规则记录与评价器就地重置路径
         event_bus.publish("pipeline.start", {"run_id": new_run_id}, ts=sig_time)
         
@@ -168,6 +173,7 @@ def create_app(
     # 保存引用供外部使用
     app.sse_handler = sse_handler
     app.pipeline_state = pipeline_state
+    app.display_buffer = display_buffer
 
     return app
 

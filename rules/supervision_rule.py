@@ -76,6 +76,8 @@ class SupervisionRule(BaseRule):
 
         # 操纵人员的最新距离状态
         self._operator_states = {}
+        self._ever_bound = False
+        self._ever_bound = False
 
     def name(self) -> str:
         """制度名称"""
@@ -122,6 +124,7 @@ class SupervisionRule(BaseRule):
         self._flow_start_source = source
         self._target_role = None  # 启动时不进行默认绑定，通过后续距离动态判断
         self._operator_states = {}
+        self._ever_bound = False
         self._checklist = {
             "code_repeat": False,
             "execution": False,
@@ -144,6 +147,19 @@ class SupervisionRule(BaseRule):
         if not self._active:
             return None
 
+        is_supervised = getattr(self, "_ever_bound", False) or (self._sm_state == "BOUND")
+
+        # 若流程结束时从未到位监护，下发“未监护” key_moment
+        if not is_supervised:
+            no_bind_km = {
+                "localSec": round(ts, 2),
+                "key_moment": "监护员未到位（未监护）",
+                "source": "tracker",
+            }
+            if self._event_bus:
+                self._event_bus.publish(EventTopic.RULE_KEY_MOMENT, no_bind_km, ts=ts)
+            logger.info(f"监护流程结束 @{ts:.1f}s: 监护员未到位（未监护）")
+
         flow = {
             "flow_id": self._flow_id,
             "flow_type": "supervision",
@@ -153,6 +169,8 @@ class SupervisionRule(BaseRule):
             "start_source": self._flow_start_source,
             "end_source": source,
             "target_role": self._target_role,
+            "is_supervised": is_supervised,
+            "supervision_status": "已监护" if is_supervised else "未监护",
             "content_checklist": dict(self._checklist),
         }
 
@@ -245,6 +263,7 @@ class SupervisionRule(BaseRule):
 
                     # 状态转移：REQUESTING → BOUND
                     self._sm_state = "BOUND"
+                    self._ever_bound = True
                     self._far_start_ts = -1.0
                     loop_name = _loop_name_from_operator(self._target_role)
                     logger.info(f"状态转移: REQUESTING → BOUND @{ts:.1f}s, 监护对象={self._target_role}({loop_name})")
