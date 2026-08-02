@@ -3,10 +3,8 @@
 
 所有路径通过此模块管理，避免硬编码。
 """
-import os
 from pathlib import Path
-from dataclasses import dataclass, field
-from typing import Dict, Optional
+from dataclasses import dataclass
 
 
 @dataclass
@@ -39,11 +37,12 @@ class PathManager:
         base = Path(base_dir)
         paths_config = config.get("paths", {})
 
+        # 路径以相对形式存储（相对项目根，main.py 启动时已 os.chdir 到 base_dir）
         return cls(
             base_dir=base,
-            data_root=base / paths_config.get("data_root", "data"),
-            model_root=base / paths_config.get("model_root", "models"),
-            result_root=base / paths_config.get("result_root", "data/results"),
+            data_root=Path(paths_config.get("data_root", "data")),
+            model_root=Path(paths_config.get("model_root", "models")),
+            result_root=Path(paths_config.get("result_root", "data/results")),
         )
 
     def get_model_path(self, category: str, filename: str) -> Path:

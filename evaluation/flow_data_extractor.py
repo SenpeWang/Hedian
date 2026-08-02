@@ -11,6 +11,8 @@ import logging
 import redis
 from typing import Dict, List, Tuple
 
+from core.inference_stream import KEY_PROGRESS, KEY_SOURCE_DONE
+
 logger = logging.getLogger("evaluation.data_extractor")
 
 
@@ -110,7 +112,14 @@ class FlowDataExtractor:
         """
         等待所有模块都处理到目标时间
 
-        从 Redis 读取 inference:progress，检查每个模块的进度。
+        从 Redis 读取 inference:progress（per-source 粒度，与 InferenceSync
+        _compute_global_sec 一致），取所有未结束 source 的最小进度，当最小值
+        >= target_sec 时返回。
+
+        注意：进度字段名是 source 名（voice/tracking/gaze/video_front/
+        video_bup/video_pop 等），而非模块名。早期实现用 hget 按模块名
+        读取 tracker/behavior，这两个字段永远不存在 → 恒为 0 → 每次都空等
+        到 timeout，导致流程结束后评估被延迟数分钟。
 
         Args:
             target_sec: 目标时间（秒）
@@ -119,13 +128,15 @@ class FlowDataExtractor:
         start_time = time.time()
 
         while True:
-            # 从 Redis 获取所有模块进度
             progress = self._get_all_module_progress()
 
-            # 检查是否所有模块都过了目标时间
-            all_passed = all(p >= target_sec for p in progress.values())
+            # 无任何 source 进度：模块可能尚未启动或已全部退出，直接提取避免空等
+            if not progress:
+                logger.warning("inference:progress 无可用 source 进度，跳过等待直接提取")
+                return
 
-            if all_passed:
+            # 所有未结束 source 都已超过目标时间即可返回
+            if min(progress.values()) >= target_sec:
                 logger.info(f"所有模块都已处理到 {target_sec}s，进度: {progress}")
                 return
 
@@ -141,34 +152,30 @@ class FlowDataExtractor:
 
     def _get_all_module_progress(self) -> Dict[str, float]:
         """
-        从 Redis 获取所有模块的实时进度
+        从 Redis 获取所有未结束 source 的实时进度
+
+        读取 inference:progress 全部字段（per-source），剔除已写入
+        inference:source_done 的结束 source。
 
         Returns:
-            {module_name: progress_sec}
-        """
-        progress = {}
-        for module_name in self._enabled_modules:
-            progress[module_name] = self._get_module_progress(module_name)
-        return progress
-
-    def _get_module_progress(self, module_name: str) -> float:
-        """
-        从 Redis 获取单个模块的实时进度
-
-        读取 inference:progress Hash 中的模块进度。
-
-        Args:
-            module_name: 模块名称
-
-        Returns:
-            模块处理到的时间（秒）
+            {source_name: progress_sec}
         """
         try:
-            progress = self._redis.hget("inference:progress", module_name)
-            return float(progress) if progress else 0.0
+            all_progress = self._redis.hgetall(KEY_PROGRESS)
+            done = self._redis.hgetall(KEY_SOURCE_DONE)
         except Exception as e:
-            logger.error(f"获取 {module_name} 进度失败: {e}")
-            return 0.0
+            logger.error(f"读取模块进度失败: {e}")
+            return {}
+
+        progress: Dict[str, float] = {}
+        for source, val in all_progress.items():
+            if source in done:
+                continue
+            try:
+                progress[source] = float(val)
+            except (TypeError, ValueError):
+                continue
+        return progress
 
     def _extract_voice_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """

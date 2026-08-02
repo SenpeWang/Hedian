@@ -6,7 +6,7 @@
 
 使用方式：
     from modules.gaze.gaze_module import GazeModule
-    module = GazeModule(head_model_path, gaze_model_path, roi_json_path, config, display_fn)
+    module = GazeModule(head_model_path, gaze_model_path, roi_json_path, config, inference_fn)
     vis_frame = processor.process_frame(frame, ts, frame_count)
 """
 from modules.gaze.gaze_module import GazeModule

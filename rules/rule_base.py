@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Callable, Dict, List, Optional
 
-from core.event_bus import EventBus
+from core.event_bus import EventStream
 
 logger = logging.getLogger("rules.base")
 
@@ -25,7 +25,7 @@ class BaseRule(ABC):
         pass
 
     @abstractmethod
-    def subscribe_events(self, event_bus: EventBus) -> None:
+    def subscribe_events(self, event_bus: EventStream) -> None:
         """声明本制度关心哪些事件"""
         pass
 
@@ -49,6 +49,11 @@ class BaseRule(ABC):
         """获取下一个流程 ID"""
         self._flow_counter = getattr(self, "_flow_counter", 0) + 1
         return self._flow_counter
+
+    def reset(self) -> None:
+        """新一轮推理前重置制度状态；子类可覆盖以清理更多内部状态"""
+        self.finalize()
+        self._flow_counter = 0
 
     def save_results(self, result_dir: str) -> None:
         """保存规则事件到JSON(子类可覆盖)"""
@@ -113,7 +118,7 @@ class RuleRegistry:
         """
         return list(self._rules.values())
 
-    def subscribe_all(self, event_bus: EventBus) -> None:
+    def subscribe_all(self, event_bus: EventStream) -> None:
         """
         让所有已注册制度订阅 event_bus 事件
 

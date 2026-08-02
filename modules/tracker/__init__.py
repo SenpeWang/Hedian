@@ -8,7 +8,7 @@
 
 使用方式：
     from modules.tracker import TrackerModule
-    module = TrackerModule(event_bus, config, paths, display_buffer)
+    module = TrackerModule(event_bus, config, paths, inference_stream)
     module.start(video_path, run_id)
 """
 from modules.tracker.tracker_module import TrackerModule

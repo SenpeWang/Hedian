@@ -17,10 +17,12 @@ import cv2
 
 logger = logging.getLogger("module.behavior.finger_file")
 
-# 类别常量
-CLASS_PERSON = 0
+# 类别常量（匹配 behavior_yolo.pt 模型: 0:hand, 1:file, 2:screen, 3:person, 4:pointing_hand）
+CLASS_HAND = 0
 CLASS_FILE = 1
-CLASS_POINTING_HAND = 2
+CLASS_SCREEN = 2
+CLASS_PERSON = 3
+CLASS_POINTING_HAND = 4
 
 # 绘制颜色 (BGR)
 COLOR_PERSON = (0, 200, 255)   # 黄色 - 人
@@ -103,24 +105,22 @@ class FingerPopDetector:
 
     def detect(self, frame: np.ndarray, frame_count: int, fps: float) -> List[Dict]:
         """
-        检测手指文件行为，同时在帧上绘制推理流标注。
-
-        Args:
-            frame: BGR 图像（会被原地绘制标注）
-            frame_count: 帧号
-            fps: 帧率
-
-        Returns:
-            事件列表
+        检测手指文件行为（每 3 帧检测一次，大幅降低 GPU 计算开销），同时在帧上绘制推理流标注。
         """
         if self._cooldown_frames == 0:
             self._cooldown_frames = int(fps * self._cooldown_sec)
+
+        # 优化：每 5 帧执行 1 次大模型推理，非 5 帧节拍重用缓存快照绘制
+        if frame_count % 5 != 0 and hasattr(self, "_last_pop_cache"):
+            if self._last_pop_cache:
+                self._draw_cached_frame(frame, self._last_pop_cache)
+            return []
 
         events = []
 
         results = self._model.track(
             frame, persist=True, conf=self._detect_conf,
-            iou=self._track_iou, tracker="bytetrack.yaml", half=True, verbose=False,
+            iou=self._track_iou, tracker="bytetrack.yaml", verbose=False,
         )
 
         if not (results and results[0].boxes is not None):
@@ -136,7 +136,7 @@ class FingerPopDetector:
 
         persons = [d for d in detections if d["cls"] == CLASS_PERSON]
         files = [d for d in detections if d["cls"] == CLASS_FILE]
-        pointing_hands = [d for d in detections if d["cls"] == CLASS_POINTING_HAND]
+        pointing_hands = [d for d in detections if d["cls"] in (CLASS_HAND, CLASS_POINTING_HAND)]
 
         # 记录事件触发的手指-文件对（用于绘制连线）
         event_hand_file_pairs = []
@@ -154,24 +154,30 @@ class FingerPopDetector:
             if best_file is not None and best_iou > self._file_iou_threshold:
                 owner_id = self._nearest_person_id(hand["bbox"], persons)
 
-                key = ("指向文件", owner_id)
+                key = ("手指指向文件", owner_id)
                 if frame_count - self._event_cooldown.get(key, -9999) > self._cooldown_frames:
                     self._event_cooldown[key] = frame_count
                     events.append({
                         "event": "FINGER_FILE",
-                        "state": "指向文件",
+                        "state": "手指指向文件",
                         "person_id": owner_id,
                         "file_iou": round(best_iou, 3),
                         "frame_id": frame_count,
                     })
                     event_hand_file_pairs.append((hand, best_file))
                     event_person_ids.add(owner_id)
+                    logger.info(f"[FingerPop] FINGER_FILE 触发 frame={frame_count} person={owner_id} iou={best_iou:.3f}")
 
-        # === 推理流：绘制检测框标注 ===
+        # === 推理流：绘制检测框标注并缓存快照 ===
+        self._last_pop_cache = (persons, files, pointing_hands, event_hand_file_pairs, event_person_ids)
         self._draw_frame(frame, persons, files, pointing_hands,
                          event_hand_file_pairs, event_person_ids)
 
         return events
+
+    def _draw_cached_frame(self, frame, cache):
+        persons, files, pointing_hands, event_hand_file_pairs, event_person_ids = cache
+        self._draw_frame(frame, persons, files, pointing_hands, event_hand_file_pairs, event_person_ids)
 
     def _draw_frame(self, frame, persons, files, pointing_hands,
                     event_hand_file_pairs, event_person_ids):

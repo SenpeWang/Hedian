@@ -12,7 +12,7 @@
 """
 import logging
 
-from core.event_bus import EventBus, EventTopic
+from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.info_notice")
@@ -53,7 +53,7 @@ class InfoNoticeRule(BaseRule):
         """制度名称"""
         return "info_notice"
 
-    def subscribe_events(self, event_bus: EventBus) -> None:
+    def subscribe_events(self, event_bus: EventStream) -> None:
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
@@ -183,6 +183,19 @@ class InfoNoticeRule(BaseRule):
 
 
 
+
+    def reset(self) -> None:
+        """重置信息通报状态，防止新一轮推理混入旧的举手/关注状态"""
+        super().reset()
+        self._checklist = {
+            "raise_hand_and_shout": False,
+            "others_stopped_and_listened": False,
+            "others_attended": False,
+            "shout_finished": False,
+            "received_acknowledged": False,
+        }
+        self._last_hand_raise_ts = -999.0
+        self._last_voice_shout_ts = -999.0
 
 def register():
     """模块注册入口"""

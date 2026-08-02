@@ -1,9 +1,9 @@
 """
-手指屏幕检测模块
+指向屏幕检测模块
 
 检测手指指向屏幕的行为。
 推理流：在帧上绘制检测框标注（手/屏幕/人体）。
-事件流：关键事件（手指屏幕）存入 _events。
+事件流：关键事件（指向屏幕）存入 _events。
 """
 import os
 import logging
@@ -56,10 +56,10 @@ class PoseEMAFilter:
 
 class FingerBupDetector:
     """
-    手指屏幕检测器
+    指向屏幕检测器
 
     推理流：每帧绘制检测框（手/屏幕/人体）。
-    事件流：关键事件（手指屏幕）触发时生成。
+    事件流：关键事件（指向屏幕）触发时生成。
     """
 
     def __init__(
@@ -95,25 +95,23 @@ class FingerBupDetector:
 
     def detect(self, frame: np.ndarray, frame_count: int, fps: float) -> List[Dict]:
         """
-        检测手指屏幕行为，同时在帧上绘制推理流标注。
-
-        Args:
-            frame: BGR 图像（会被原地绘制标注）
-            frame_count: 帧号
-            fps: 帧率
-
-        Returns:
-            事件列表
+        检测指向屏幕行为（每 3 帧检测一次，大幅降低 GPU 计算开销），同时在帧上绘制推理流标注。
         """
         if self._cooldown_frames == 0:
             self._cooldown_frames = int(fps * self._cooldown_sec)
+
+        # 优化：每 5 帧执行 1 次大模型推理，非 5 帧节拍重用缓存快照绘制
+        if frame_count % 5 != 0 and hasattr(self, "_last_bup_cache"):
+            if self._last_bup_cache:
+                self._draw_cached_frame(frame, self._last_bup_cache)
+            return []
 
         events = []
 
         # 手指检测
         result_detect = self._finger_model.track(
             frame, persist=True, conf=self._detect_conf,
-            tracker="bytetrack.yaml", half=True, verbose=False,
+            tracker="bytetrack.yaml", verbose=False,
         )
 
         # 姿态检测
@@ -166,7 +164,7 @@ class FingerBupDetector:
                     pb = pose_boxes[i]
                     id_to_pose_box[pid] = [int(pb[0]), int(pb[1]), int(pb[2]), int(pb[3])]
 
-        # 检测手指屏幕行为
+        # 检测指向屏幕行为
         event_person_ids = set()
         for (hx, hy, hx1, hy1, hx2, hy2, h_id) in hands:
             own_id = -1
@@ -202,7 +200,7 @@ class FingerBupDetector:
                 and target_screen_id != -1
                 and min_wrist_dist < self._hand_to_screen_dist
             ):
-                key = ("手指屏幕", own_id)
+                key = ("指向屏幕", own_id)
                 if frame_count - self._event_cooldown.get(key, -9999) > self._cooldown_frames:
                     person_box = id_to_pose_box.get(
                         own_id, [int(hx1), int(hy1), int(hx2), int(hy2)]
@@ -210,7 +208,7 @@ class FingerBupDetector:
 
                     event = {
                         "event": "FINGER_SCREEN",
-                        "state": "手指屏幕",
+                        "state": "手指指向屏幕",
                         "person_id": own_id,
                         "screen_id": target_screen_id,
                         "person_box": person_box,

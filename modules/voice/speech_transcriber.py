@@ -7,7 +7,6 @@ import os
 import re
 import logging
 import unicodedata
-from pathlib import Path
 from typing import List, Dict, Optional
 
 import numpy as np
@@ -131,12 +130,12 @@ class SpeechTranscriber:
 
     def __init__(
         self,
-        model_path: str = None,
-        aligner_path: str = None,
+        model_path: Optional[str] = None,
+        aligner_path: Optional[str] = None,
         asr_engine: str = "qwen3",
         sample_rate: int = 16000,
         device: str = "cpu",
-        torch_dtype: str = None,
+        torch_dtype: Optional[str] = None,
     ):
         self.model_path = model_path
         self.aligner_path = aligner_path
@@ -622,13 +621,13 @@ def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) 
         if unique_keywords:
             first = True
             for km in unique_keywords:
-                ev = {"localSec": audio_ts, "key_moment": km}
+                ev = {"localSec": audio_ts, "key_moment": km, "keys": unique_keywords}
                 if first:
                     ev["text"] = text
                     first = False
                 events.append(ev)
         else:
             # 没有关键词也推送完整文本（用于推理流展示）
-            events.append({"localSec": audio_ts, "text": text, "key_moment": ""})
+            events.append({"localSec": audio_ts, "text": text, "key_moment": "", "keys": []})
 
     return events

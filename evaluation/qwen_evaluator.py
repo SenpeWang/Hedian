@@ -2,16 +2,28 @@
 大模型评估模块
 """
 import os
-import json
 import logging
 import multiprocessing as mp
-from typing import Dict
+import queue
+from typing import Dict, Optional
 
 logger = logging.getLogger("evaluation.qwen")
 
 # 设置离线模式
 os.environ["HF_HUB_OFFLINE"] = "1"
 os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
+# 三类流程评估 prompt 共用的「思考块」输出指令（红线要求）
+_THINK_BLOCK_PROMPT = """
+## 重要输出指令（红线要求）
+请务必在给出上述任何报告结构之前，先在 `<think>...</think>` 标签内输出你对该流程的详细分析、步步推导和思考推理过程。
+格式必须为：
+<think>
+[这里是你的推理和思考过程，一步步分析每一项评分的扣分/给分依据，字数在 100-300 字左右]
+</think>
+
+[接下来是上述要求的报告内容]
+"""
 
 
 def _qwen_worker(model_path: str, prompt: str, queue):
@@ -54,7 +66,8 @@ def _qwen_worker(model_path: str, prompt: str, queue):
             logging.getLogger("evaluation.qwen").info(
                 f"Qwen3 模型加载完成，物理 GPU 0 显存占用: {allocated:.2f} GB"
             )
-        except Exception:
+        except RuntimeError:
+            # 显存查询为纯信息性日志，CUDA 不可用或设备无效时静默跳过
             pass
 
         messages = [{"role": "user", "content": prompt}]
@@ -66,7 +79,7 @@ def _qwen_worker(model_path: str, prompt: str, queue):
         ).to(model.device)
 
         streamer = TextIteratorStreamer(
-            tokenizer, skip_prompt=True, skip_special_tokens=True,
+            tokenizer, skip_prompt=True, skip_special_tokens=False,
         )
 
         generation_kwargs = {
@@ -95,7 +108,7 @@ def _qwen_worker(model_path: str, prompt: str, queue):
 class QwenEvaluator:
     """Qwen 大模型评估器（子进程模式，物理 GPU 0，评估完自动释放显存）"""
 
-    def __init__(self, model_path: str = None):
+    def __init__(self, model_path: Optional[str] = None):
         self._model_path = model_path
 
     def evaluate(self, flow_data: Dict, stream_callback=None, total_flows: int = 0) -> Dict:
@@ -110,33 +123,37 @@ class QwenEvaluator:
                 f"flow_id={flow_data.get('flow_id')} total_flows={total_flows}..."
             )
 
-            queue = mp.Queue()
+            msg_queue = mp.Queue()
             p = mp.Process(
                 target=_qwen_worker,
-                args=(self._model_path, prompt, queue),
+                args=(self._model_path, prompt, msg_queue),
             )
             p.start()
 
             report_text = ""
-            while p.is_alive() or not queue.empty():
+            while p.is_alive() or not msg_queue.empty():
                 try:
-                    msg_type, data = queue.get(timeout=0.2)
-                    if msg_type == "chunk":
-                        report_text += data
-                        if stream_callback:
+                    msg_type, data = msg_queue.get(timeout=0.2)
+                except queue.Empty:
+                    continue
+                if msg_type == "chunk":
+                    report_text += data
+                    if stream_callback:
+                        try:
                             stream_callback(data)
-                    elif msg_type == "done":
-                        break
-                    elif msg_type == "error":
-                        logger.error(f"子进程评估失败: {data}")
-                        return {
-                            "flow_type": flow_data.get("flow_type", "未知"),
-                            "score": 0,
-                            "report_text": f"评估失败: {data}",
-                            "prompt": prompt,
-                        }
-                except Exception:
-                    pass
+                        except Exception as e:
+                            # 回调失败（如前端断开）不影响评估流程，仅记录
+                            logger.warning(f"流式回调推送失败（不影响评估）: {e}")
+                elif msg_type == "done":
+                    break
+                elif msg_type == "error":
+                    logger.error(f"子进程评估失败: {data}")
+                    return {
+                        "flow_type": flow_data.get("flow_type", "未知"),
+                        "score": 0,
+                        "report_text": f"评估失败: {data}",
+                        "prompt": prompt,
+                    }
 
             p.join(timeout=5)
             if p.is_alive():
@@ -175,7 +192,8 @@ class QwenEvaluator:
                     logger.error(f"清理评估子进程出错: {ex}")
                 try:
                     p.close()
-                except Exception:
+                except (OSError, ValueError):
+                    # ValueError: 进程仍运行；OSError: 管道/句柄问题，均为清理兜底，可忽略
                     pass
 
     def _build_prompt(self, flow_data: Dict, total_flows: int = 0) -> str:
@@ -224,7 +242,7 @@ class QwenEvaluator:
         parts.append("5. 值长回应：值长（US）回答\"收到\"（作为评估依据，不阻塞流程关闭）")
         parts.append("")
         parts.append("## 流程信息")
-        parts.append(f"- 流程类型: 信息通报")
+        parts.append("- 流程类型: 信息通报")
         if flow_data.get('_flow_id_desc'):
             parts.append(f"- {flow_data.get('_flow_id_desc')}")
         parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
@@ -280,16 +298,7 @@ class QwenEvaluator:
         parts.append("请严格按以上格式输出，不要输出其他内容。")
 
         prompt = "\n".join(parts)
-        prompt += """
-## 重要输出指令（红线要求）
-请务必在给出上述任何报告结构之前，先在 `<think>...</think>` 标签内输出你对该流程的详细分析、步步推导和思考推理过程。
-格式必须为：
-<think>
-[这里是你的推理和思考过程，一步步分析每一项评分的扣分/给分依据，字数在 100-300 字左右]
-</think>
-
-[接下来是上述要求的报告内容]
-"""
+        prompt += _THINK_BLOCK_PROMPT
         return prompt
 
     def _build_supervision_prompt(self, flow_data: Dict) -> str:
@@ -301,22 +310,23 @@ class QwenEvaluator:
         # ============ 第一部分：完整的评估规程 prompt ============
         prompt = f"""你是核电站主控室监护制规程合规检测评审专家。请根据附带的关键事件（keymoment），评估该流程与监护制规程要求的合规性。
 
-## 监护制规程要求（步骤顺序）
+## 监护制规程要求（动作与语音步骤顺序）
 1. 流程启动：操作人喊出"请求监护" + 流程内有举手动作（红线规则：单独举手不启动流程，必须语音 + 举手）
 2. 监护人到位：监护人移动至操作人身旁（跟踪事件"监护员已到位监护X回路"）
-3. 指令复述：操作人读出9字码 → 监护人复述9字码
-4. 执行命令：监护人下达"可以执行"命令（包含"执行"二字即可接受）
-5. 核对确认：双方检查设备状态，喊出"核对"
-6. 监护结束：监护人离开操作人（跟踪事件"监护员已离开监护X回路"）
+3. 手指指向文件：若有纸质程序计划，操作人左手指向程序待执行指令（有程序分支的关键判断特征）
+4. 手指指向屏幕与复述：操作人/监护人手指指向操作控件，操作人读出9字码，监护人核对并复述9字码
+5. 执行命令：监护人下达"可以执行"命令（包含"执行"二字即可接受）
+6. 核对确认：双方检查设备状态，喊出"核对"
+7. 监护结束：监护人离开操作人（跟踪事件"监护员已离开监护X回路"）
 
-## 评估维度（每项2分，满分10分）
+## 评估维度（共6项评估要点，满分10分）
 | 维度 | 评估要点 | 评分标准 |
 |------|---------|---------|
 | 1. 流程启动 | 是否有"请求监护" + 流程内举手 | 2分=语音+举手；1分=仅语音；0分=无启动信号 |
 | 2. 监护人到位 | 跟踪事件是否记录到位 | 2分=有到位记录；0分=无 |
-| 3. 指令复述 | 操作人读9字码 + 监护人复述9字码 | 2分=双方都复述；1分=单方复述；0分=无复述 |
-| 4. 执行命令 | 是否有含"执行"关键字的命令 | 2分=有执行命令；0分=无 |
-| 5. 核对确认 | 是否有"核对" | 2分=有"核对"；0分=无 |
+| 3. 指令复述与设备码 | 操作人读9字码 + 监护人复述9字码 | 2分=双方都复述；1分=单方复述；0分=无复述 |
+| 4. 动作规范(指向屏幕/文件) | 是否有手指指向屏幕(操作控件)或指向文件(程序指令)动作 | 2分=双动作/指向规范；1分=有单项指向；0分=无指向动作 |
+| 5. 执行与核对 | 是否有含"执行"命令及"核对"确认 | 2分=执行与核对齐全；1分=有单项；0分=均无 |
 
 ## 顺序一致性检查
 请检查 keymoment 的时间顺序是否符合监护制要求：
@@ -334,9 +344,9 @@ class QwenEvaluator:
 #### 维度评分
 - 流程启动: X分/2分 - [依据与说明]
 - 监护人到位: X分/2分 - [依据与说明]
-- 指令复述: X分/2分 - [依据与说明]
-- 执行命令: X分/2分 - [依据与说明]
-- 核对确认: X分/2分 - [依据与说明]
+- 指令复述与设备码: X分/2分 - [依据与说明]
+- 动作规范(指向屏幕/文件): X分/2分 - [依据与说明]
+- 执行与核对: X分/2分 - [依据与说明]
 
 #### 顺序一致性: [符合/部分错乱/严重错乱]
 - [若有错乱，列出具体错乱步骤]
@@ -375,16 +385,7 @@ class QwenEvaluator:
         if not behavior_events:
             prompt += "- 无\n"
 
-        prompt += """
-## 重要输出指令（红线要求）
-请务必在给出上述任何报告结构之前，先在 `<think>...</think>` 标签内输出你对该流程的详细分析、步步推导和思考推理过程。
-格式必须为：
-<think>
-[这里是你的推理和思考过程，一步步分析每一项评分的扣分/给分依据，字数在 100-300 字左右]
-</think>
-
-[接下来是上述要求的报告内容]
-"""
+        prompt += _THINK_BLOCK_PROMPT
         return prompt
 
     def _build_self_ticket_prompt(self, flow_data: Dict) -> str:
@@ -405,7 +406,7 @@ class QwenEvaluator:
         parts.append("5. 流程结束：操作完成")
         parts.append("")
         parts.append("## 流程信息")
-        parts.append(f"- 流程类型: 自唱票")
+        parts.append("- 流程类型: 自唱票")
         if flow_data.get('_flow_id_desc'):
             parts.append(f"- {flow_data.get('_flow_id_desc')}")
         parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
@@ -430,8 +431,8 @@ class QwenEvaluator:
         parts.append("|------|---------|---------|")
         parts.append("| 1. 流程启动 | 操作人是否点开操作控件 | 2分=有点开动作；0分=无 |")
         parts.append("| 2. 九字码读出 | 操作人是否读出9字码 | 2分=读出9字码；0分=无 |")
-        parts.append("| 3. 九字码确认 | 操作人是否确认9字码一致 | 2分=有确认动作；1分=部分确认；0分=无确认 |")
-        parts.append("| 4. 设备操作 | 操作人是否执行设备操作 | 2分=有操作；0分=无 |")
+        parts.append("| 3. 动作规范(指向屏幕/文件) | 是否有手指指向屏幕(控件)或指向文件(程序指令) | 2分=指向规范/双指向；1分=有单项指向；0分=无指向 |")
+        parts.append("| 4. 九字码确认与设备操作 | 操作人是否确认9字码并执行设备操作 | 2分=确认与操作完整；1分=单项完整；0分=均无 |")
         parts.append("| 5. 整体规范 | 流程完整度与时间合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |")
         parts.append("")
         parts.append("## 输出格式")
@@ -442,8 +443,8 @@ class QwenEvaluator:
         parts.append("#### 维度评分")
         parts.append("- 流程启动: X分/2分 - [依据与说明]")
         parts.append("- 九字码读出: X分/2分 - [依据与说明]")
-        parts.append("- 九字码确认: X分/2分 - [依据与说明]")
-        parts.append("- 设备操作: X分/2分 - [依据与说明]")
+        parts.append("- 动作规范(指向屏幕/文件): X分/2分 - [依据与说明]")
+        parts.append("- 九字码确认与设备操作: X分/2分 - [依据与说明]")
         parts.append("- 整体规范: X分/2分 - [依据与说明]")
         parts.append("")
         parts.append("#### 总分: X分/10分")
@@ -454,16 +455,7 @@ class QwenEvaluator:
         parts.append("请严格按以上格式输出，不要输出其他内容。")
 
         prompt = "\n".join(parts)
-        prompt += """
-## 重要输出指令（红线要求）
-请务必在给出上述任何报告结构之前，先在 `<think>...</think>` 标签内输出你对该流程的详细分析、步步推导和思考推理过程。
-格式必须为：
-<think>
-[这里是你的推理和思考过程，一步步分析每一项评分的扣分/给分依据，字数在 100-300 字左右]
-</think>
-
-[接下来是上述要求的报告内容]
-"""
+        prompt += _THINK_BLOCK_PROMPT
         return prompt
 
     def _extract_score(self, report_text: str) -> int:

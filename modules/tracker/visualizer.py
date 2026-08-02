@@ -2,7 +2,6 @@
 MOT 可视化模块
 """
 import cv2
-import numpy as np
 
 ROLE_COLORS = {
     "LEADER": (0, 0, 255),

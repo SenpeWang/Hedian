@@ -1,49 +1,49 @@
 <script setup lang="ts">
-import { useSSE } from './composables/useSSE'
+import { useWS } from './composables/useWS'
 import HeaderBar from './components/HeaderBar.vue'
 import VideoPanel from './components/VideoPanel.vue'
 import VoicePanel from './components/VoicePanel.vue'
 import NotifyPanel from './components/NotifyPanel.vue'
 import ReportPanel from './components/ReportPanel.vue'
 
-const sse = useSSE()
+const ws = useWS()
 
 function handleStart() {
-  sse.startPipeline()
+  ws.startPipeline()
 }
 </script>
 
 <template>
   <audio ref="audioRef" id="mainAudio" preload="auto" style="display:none"></audio>
   <HeaderBar
-    :status="sse.status.value"
-    :status-text="sse.statusText.value"
-    :progress="sse.progress"
+    :status="ws.status.value"
+    :status-text="ws.statusText.value"
+    :progress="ws.progress"
     @start="handleStart"
   />
 
   <div class="main">
     <div class="video-col tracker">
-      <VideoPanel title="🎥 目标跟踪 (front)" :frame-src="sse.frameFront.value" :has-frame="sse.hasFrameFront.value" />
+      <VideoPanel title="🎥 目标跟踪 (front)" :frame-src="ws.frameFront.value" :has-frame="ws.hasFrameFront.value" />
     </div>
     <div class="video-col">
-      <VideoPanel title="🔍 屏幕检测 (bup)" :frame-src="sse.frameBup.value" :has-frame="sse.hasFrameBup.value" />
+      <VideoPanel title="🔍 屏幕检测 (bup)" :frame-src="ws.frameBup.value" :has-frame="ws.hasFrameBup.value" />
     </div>
     <div class="video-col">
-      <VideoPanel title="🔍 文件检测 (pop)" :frame-src="sse.framePop.value" :has-frame="sse.hasFramePop.value" />
+      <VideoPanel title="🔍 文件检测 (pop)" :frame-src="ws.framePop.value" :has-frame="ws.hasFramePop.value" />
     </div>
   </div>
 
   <div class="bottom">
-    <VoicePanel :entries="sse.voiceEntries.value" :fmt="sse.fmt" />
-    <NotifyPanel :people="sse.people" :gaze="sse.gaze" :flow-events="sse.flowEvents.value" :fmt="sse.fmt" />
+    <VoicePanel :entries="ws.voiceEntries.value" :fmt="ws.fmt" />
+    <NotifyPanel :people="ws.people" :gaze="ws.gaze" :flow-events="ws.flowEvents.value" :fmt="ws.fmt" />
     <ReportPanel
-      :seg-cards="sse.segCards.value"
-      :sup-n="sse.supN.value"
-      :ticket-n="sse.ticketN.value"
-      :notice-n="sse.noticeN.value"
-      :total="sse.totalCount()"
-      :avg="sse.avgScore()"
+      :seg-cards="ws.segCards.value"
+      :sup-n="ws.supN.value"
+      :ticket-n="ws.ticketN.value"
+      :notice-n="ws.noticeN.value"
+      :total="ws.totalCount()"
+      :avg="ws.avgScore()"
     />
   </div>
 </template>

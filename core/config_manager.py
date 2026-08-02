@@ -7,7 +7,7 @@
 import os
 import logging
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any, Optional
 
 import yaml
 
@@ -167,23 +167,23 @@ class ConfigManager:
 
     @property
     def data_root(self) -> str:
-        """数据根目录"""
-        return str(BASE_DIR / self._data["paths"]["data_root"])
+        """数据根目录（相对项目根）"""
+        return self._data["paths"]["data_root"]
 
     @property
     def model_root(self) -> str:
-        """模型根目录"""
-        return str(BASE_DIR / self._data["paths"]["model_root"])
+        """模型根目录（相对项目根）"""
+        return self._data["paths"]["model_root"]
 
     @property
     def result_root(self) -> str:
-        """结果根目录"""
-        return str(BASE_DIR / self._data["paths"]["result_root"])
+        """结果根目录（相对项目根）"""
+        return self._data["paths"]["result_root"]
 
     @property
     def video_path(self) -> str:
-        """主视频路径（front 视角）"""
-        return str(BASE_DIR / self._data["videos"]["front"])
+        """主视频路径（front 视角，相对项目根）"""
+        return self._data["videos"]["front"]
 
     @property
     def supervision(self) -> dict:

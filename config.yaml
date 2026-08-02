@@ -31,8 +31,8 @@ voice:
   sample_rate: 16000
   sentence_gap_sec: 0.6
   asr_engine: "qwen3"
-  model_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0.6B"
-  aligner_path: "/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0.6B"
+  model_path: "models/voice/qwen/Qwen3-ASR-0.6B"
+  aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
   torch_dtype: "bfloat16"
 
 gaze:
@@ -51,7 +51,7 @@ behavior:
   finger_file:
     detect_conf: 0.25
     track_iou: 0.5
-    file_iou_threshold: 0.2
+    file_iou_threshold: 0.1
     cooldown_sec: 1.5
 
 modules:

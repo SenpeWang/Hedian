@@ -3,9 +3,7 @@ Tracker 结果存储模块（独立文件）
 
 负责保存 Tracker 模块的处理结果。
 """
-import json
 import logging
-import os
 from typing import List, Dict
 
 from core.path_manager import PathManager

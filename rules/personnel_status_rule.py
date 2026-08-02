@@ -10,7 +10,7 @@
 import logging
 from typing import Dict, Optional, List
 
-from core.event_bus import EventBus, EventTopic
+from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.personnel_status")
@@ -39,7 +39,7 @@ class PersonnelStatusRule(BaseRule):
         """制度名称"""
         return "personnel_status"
 
-    def subscribe_events(self, event_bus: EventBus) -> None:
+    def subscribe_events(self, event_bus: EventStream) -> None:
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.GAZE_ALERT, self._on_gaze_alert)
@@ -138,6 +138,14 @@ class PersonnelStatusRule(BaseRule):
                 else:
                     logger.info(f"人员状态监控: 无人值守时长仅 {duration:.1f}秒，未达10S阈值，不作记录")
                 self._no_people_start_ts = None
+
+    def reset(self) -> None:
+        """重置人员状态监控，防止新一轮推理混入旧的违规记录"""
+        self.finalize()
+        self._violations = []
+        self._current_people_count = -1
+        self._no_people_start_ts = None
+        self._last_ts = 0.0
 
     def get_violations(self) -> list:
         """获取所有记录的违规"""

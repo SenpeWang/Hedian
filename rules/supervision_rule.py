@@ -17,7 +17,7 @@ import json
 import os
 import logging
 
-from core.event_bus import EventBus, EventTopic
+from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.supervision")
@@ -83,11 +83,13 @@ class SupervisionRule(BaseRule):
         """制度名称"""
         return "supervision"
 
-    def subscribe_events(self, event_bus: EventBus) -> None:
+    def subscribe_events(self, event_bus: EventStream) -> None:
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
         event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_mot_request)
+        event_bus.subscribe(EventTopic.BEHAVIOR_FINGER_SCREEN, self._on_finger_screen)
+        event_bus.subscribe(EventTopic.BEHAVIOR_FINGER_FILE, self._on_finger_file)
         event_bus.subscribe(EventTopic.TRACKER_PROXIMITY, self._on_mot_status)
 
 
@@ -129,6 +131,8 @@ class SupervisionRule(BaseRule):
             "code_repeat": False,
             "execution": False,
             "verification": False,
+            "finger_screen": False,
+            "finger_file": False,
         }
 
         if self._event_bus:
@@ -215,6 +219,18 @@ class SupervisionRule(BaseRule):
                 self._checklist["execution"] = True
             elif key_moment == "核对":
                 self._checklist["verification"] = True
+    def _on_finger_screen(self, msg: dict) -> None:
+        """处理手指指向屏幕事件"""
+        if self._active:
+            self._checklist["finger_screen"] = True
+            logger.info("监护制: 记录手指指向屏幕操作")
+
+    def _on_finger_file(self, msg: dict) -> None:
+        """处理手指指向文件事件（有程序分支关键特征）"""
+        if self._active:
+            self._checklist["finger_file"] = True
+            logger.info("监护制: 记录手指指向文件操作(有程序分支关键特征)")
+
     def _on_mot_request(self, msg: dict) -> None:
         """处理 MOT 监护请求（举手）"""
         data = msg.get("data", {})
@@ -303,6 +319,21 @@ class SupervisionRule(BaseRule):
                     self._close_flow(ts, source="distance")
             else:
                 self._far_start_ts = -1.0
+
+    def reset(self) -> None:
+        """重置监护制状态，防止新一轮推理混入旧的人员/流程状态"""
+        super().reset()
+        self._checklist = {
+            "code_repeat": False,
+            "execution": False,
+            "verification": False,
+            "finger_screen": False,
+            "finger_file": False,
+        }
+        self._operator_states = {}
+        self._last_hand_raise_ts = -999.0
+        self._last_hand_raise_role = None
+        self._ever_bound = False
 
     def save_results(self, result_dir: str) -> None:
         """规则层不保存 key_moment 文件（由 tracker 通过事件流接收并保存）"""

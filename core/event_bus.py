@@ -5,7 +5,7 @@
   {"type": str, "data": dict, "ts": float}
 
 用法:
-  event_bus = EventBus()
+  event_bus = EventStream()
   event_bus.start()
   event_bus.subscribe("voice.intent", my_callback)
   event_bus.publish("voice.intent", {"text": "..."}, ts=1.5)
@@ -26,21 +26,23 @@ logger = logging.getLogger("core.event_bus")
 class EventTopic:
     """消息类型常量（同时也是 Redis Stream key）"""
 
-    # Voice -> EventBus
+    # Voice -> EventStream
     VOICE_KEY_MOMENT = "voice.key_moment"
 
-    # Tracker -> EventBus
+    # Tracker -> EventStream
     TRACKER_PROXIMITY = "tracker.proximity"
     TRACKER_HEADCOUNT = "tracker.headcount"
 
-    # Behavior -> EventBus
+    # Behavior -> EventStream
     BEHAVIOR_HAND_RAISED = "behavior.hand_raised"
+    BEHAVIOR_FINGER_SCREEN = "behavior.finger_screen"
+    BEHAVIOR_FINGER_FILE = "behavior.finger_file" 
 
-    # Gaze -> EventBus
+    # Gaze -> EventStream
     GAZE_ATTENTION = "gaze.attention"
     GAZE_ALERT = "gaze.alert"
 
-    # Rules -> EventBus
+    # Rules -> EventStream
     FLOW_STARTED = "flow.started"
     FLOW_ENDED = "flow.ended"
     RULE_KEY_MOMENT = "rule.key_moment"
@@ -49,7 +51,7 @@ class EventTopic:
     SAVE_KEY_MOMENTS = "save.key_moments"
 
 
-class EventBus:
+class EventStream:
     """基于 Redis Stream 的发布/订阅消息总线"""
 
     # Stream key 前缀
@@ -122,7 +124,7 @@ class EventBus:
             self._redis.xadd(stream_key, {"payload": payload}, maxlen=10000)
             self._message_count += 1
             logger.debug(f"发布消息: {msg_type}")
-        except Exception as e:
+        except (redis.RedisError, TypeError, ValueError) as e:
             logger.error(f"发布消息失败: {msg_type}, {e}")
 
     def subscribe(self, msg_type: str, callback: Callable) -> None:
@@ -249,8 +251,8 @@ class EventBus:
                     for stream_key in stream_keys:
                         try:
                             self._ensure_consumer_group(stream_key)
-                        except Exception:
-                            pass
+                        except redis.RedisError as e:
+                            logger.warning(f"重建消费者组失败: {stream_key}, {e}")
                     # 短暂休眠避免日志刷屏
                     time.sleep(0.5)
                 else:

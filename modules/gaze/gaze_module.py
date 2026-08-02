@@ -6,7 +6,9 @@
 import cv2
 import numpy as np
 import logging
-from typing import Optional, Dict, Any, Callable, List
+import threading
+from concurrent.futures import ThreadPoolExecutor
+from typing import Callable, List
 
 from modules.gaze.head_detector import HeadDetector
 from modules.gaze.gaze_estimator import GazeEstimator
@@ -44,7 +46,7 @@ class GazeModule:
         gaze_model_path: str,
         roi_json_path: str,
         config: dict = None,
-        display_fn: Callable = None,
+        inference_fn: Callable = None,
         event_bus=None,
         progress_fn: Callable = None,
         paths=None,
@@ -57,7 +59,7 @@ class GazeModule:
             gaze_model_path: 注视推断模型路径
             roi_json_path: ROI配置文件路径
             config: 凝视配置
-            display_fn: 推送推理结果的函数 (event_type, data) -> None
+            inference_fn: 推送推理结果的函数 (event_type, data) -> None
             event_bus: 消息总线（用于关键事件通信）
             progress_fn: 更新进度的函数 (current, total) -> None
             paths: PathManager 实例，用于结果保存
@@ -96,7 +98,7 @@ class GazeModule:
             heatmap_threshold=config.get("heatmap_th", 0.3),
         )
 
-        self._display_fn = display_fn
+        self._inference_fn = inference_fn
 
         # 缓存
         self._cached_results = []
@@ -121,12 +123,26 @@ class GazeModule:
         self._attn_window_start = 0.0
         self._info_notice_start_ts = 0.0
         self._notice_attn_buffer: List[GazePoint] = []
-        self._run_id = getattr(paths, "current_run_id", "default") if paths else "default" 
+        self._run_id = getattr(paths, "current_run_id", "default") if paths else "default"
 
-        logger.info("凝视处理器初始化完成")
+        # === 异步推理支持 ===
+        # Gazelle 推理在后台线程执行，不阻塞 tracker 主循环
+        self._gaze_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="gaze")
+        self._gaze_future = None          # 当前正在执行的异步任务
+        self._gaze_lock = threading.Lock()  # 保护 _cached_results 等共享状态
+        self._last_gaze_ts = 0.0          # 最近一次完成检测的 ts
+
+        logger.info("凝视处理器初始化完成（异步模式）")
 
     def process_frame(self, frame: np.ndarray, ts: float, frame_count: int) -> np.ndarray:
-        """处理一帧：检测、估计、可视化、推送"""
+        """
+        处理一帧：检测、估计、可视化、推送
+
+        Gazelle 推理改为异步：检测任务提交到后台线程，主循环不阻塞。
+        - 若到检测周期且上一任务已完成 → 提交新任务（副本帧）
+        - 若上一任务未完成 → 跳过本轮检测，用缓存绘制（不等待）
+        - 绘制始终用 _cached_results，保证主循环流畅
+        """
         self._latest_ts = ts
         vis = frame.copy()
         h, w = vis.shape[:2]
@@ -136,9 +152,15 @@ class GazeModule:
         # 画 head_zones
         self._draw_head_zones(vis)
 
-        # 每N帧做一次凝视检测
+        # 每N帧做一次凝视检测（异步）
         if frame_count % self._gaze_interval == 0:
-            self._run_gaze_detection(frame, w, h, ts)
+            self._try_submit_async_gaze(frame, w, h, ts)
+
+        # 收取上一轮异步结果（如果已完成）
+        self._try_collect_async_result()
+
+        # 告警检查（在主线程执行，读取缓存状态）
+        self._check_alert(ts)
 
         # 注视转动判定
         self._update_attention(ts)
@@ -147,20 +169,50 @@ class GazeModule:
         if self._progress_fn:
             self._progress_fn(ts, None)
 
-        # 画头部框+注视线+注视点
-        self._draw_gaze_results(vis, ts)
+        # 画头部框+注视线+注视点（用缓存，不阻塞）
+        with self._gaze_lock:
+            self._draw_gaze_results(vis, ts)
 
         return vis
 
+    def _try_submit_async_gaze(self, frame: np.ndarray, w: int, h: int, ts: float):
+        """尝试提交异步凝视检测任务。若上一任务未完成则跳过本轮。"""
+        # 上一任务还没完成 → 跳过，等下帧再提交
+        if self._gaze_future is not None and not self._gaze_future.done():
+            return
+
+        # 提交副本帧到后台线程，避免主线程继续修改
+        frame_copy = frame.copy()
+        self._gaze_future = self._gaze_executor.submit(
+            self._run_gaze_detection_safe, frame_copy, w, h, ts
+        )
+
+    def _try_collect_async_result(self):
+        """检查后台任务是否完成。完成则刷新缓存（_run_gaze_detection_safe 内部已处理）。"""
+        if self._gaze_future is not None and self._gaze_future.done():
+            # 取出异常（如果有），防止静默吞掉
+            exc = self._gaze_future.exception()
+            if exc is not None:
+                logger.warning(f"异步凝视检测失败: {exc}")
+            self._gaze_future = None
+
+    def _run_gaze_detection_safe(self, frame: np.ndarray, w: int, h: int, ts: float):
+        """_run_gaze_detection 的线程安全包装：加锁保护缓存写入"""
+        try:
+            self._run_gaze_detection(frame, w, h, ts)
+        except Exception as e:
+            logger.warning(f"凝视检测异常: {e}", exc_info=True)
+
     def _run_gaze_detection(self, frame: np.ndarray, w: int, h: int, ts: float):
-        """运行凝视检测"""
+        """运行凝视检测（在后台线程执行，通过 _gaze_lock 保护共享缓存）"""
         all_heads = self._head_detector.detect(frame)
         # 过滤：头部在 head_zones 内
         heads = self._roi_classifier.filter_heads_by_zone(all_heads)
 
-        self._cached_results = []
-        self._cached_has_heads = bool(heads)
-        self._cached_any_in_roi = False
+        # 先在局部变量中构建结果，再一次性加锁写入缓存，减少锁持有时间
+        new_results = []
+        new_has_heads = bool(heads)
+        new_any_in_roi = False
 
         if heads:
             # 凝视推断
@@ -176,46 +228,54 @@ class GazeModule:
                         continue
                     status, roi_label = self._roi_classifier.classify_gaze(inout_score, gaze_pt)
                     if status == "IN_ROI":
-                        self._cached_any_in_roi = True
-                    self._cached_results.append({
+                        new_any_in_roi = True
+                    new_results.append({
                         "box": (box.x1, box.y1, box.x2, box.y2),
                         "center": (box.cx, box.cy),
                         "gaze_pt": gaze_pt,
                         "status": status,
                     })
 
-        # 计算当前 away 时长（无人注视盘台的持续秒数，用于前端进度条展示）
-        away_dur = 0.0
-        if self._cached_has_heads and not self._cached_any_in_roi and self._away_start_ts is not None:
-            away_dur = ts - self._away_start_ts
+        # 加锁一次性更新共享缓存
+        with self._gaze_lock:
+            self._cached_results = new_results
+            self._cached_has_heads = new_has_heads
+            self._cached_any_in_roi = new_any_in_roi
+            self._last_gaze_ts = ts
 
-        # 推送凝视推理结果到推理流
-        if self._display_fn:
-            self._display_fn("gaze", {
+        # 推送凝视推理结果到推理流（只读刚写入的缓存，无需再加锁）
+        if self._inference_fn:
+            away_dur = 0.0
+            if new_has_heads and not new_any_in_roi and self._away_start_ts is not None:
+                away_dur = ts - self._away_start_ts
+            self._inference_fn("gaze", {
                 "localSec": round(ts, 2),
                 "tag": "gaze_status",
                 "data": {
-                    "has_heads": self._cached_has_heads,
-                    "any_in_roi": self._cached_any_in_roi,
-                    "heads_count": len(self._cached_results),
+                    "has_heads": new_has_heads,
+                    "any_in_roi": new_any_in_roi,
+                    "heads_count": len(new_results),
                     "away_duration": round(away_dur, 2),
                 },
             })
 
-        # 告警逻辑：无人注视超过60秒
-        self._check_alert(ts)
+        # 告警逻辑（_check_alert）移到主线程 process_frame 中执行，避免跨线程竞争 _away_start_ts / _alerting
 
     def _check_alert(self, ts: float):
-        """检查告警条件"""
-        if self._cached_has_heads and not self._cached_any_in_roi:
+        """检查告警条件（主线程调用，读取缓存需加锁）"""
+        with self._gaze_lock:
+            has_heads = self._cached_has_heads
+            any_in_roi = self._cached_any_in_roi
+
+        if has_heads and not any_in_roi:
             if self._away_start_ts is None:
                 self._away_start_ts = ts
             away_dur = ts - self._away_start_ts
             if away_dur >= self._away_threshold and not self._alerting:
                 self._alerting = True
                 # 推理流：data 只含纯展示字段
-                if self._display_fn:
-                    self._display_fn("gaze", {
+                if self._inference_fn:
+                    self._inference_fn("gaze", {
                         "localSec": round(ts, 2),
                         "tag": "GAZE_ALERT",
                         "data": {
@@ -226,11 +286,13 @@ class GazeModule:
                 # 事件流：完整字段供规则状态机使用
                 if self._event_bus:
                     from core.event_bus import EventTopic
+                    with self._gaze_lock:
+                        heads_count = len(self._cached_results)
                     self._event_bus.publish(EventTopic.GAZE_ALERT, {
                         "localSec": round(ts, 2),
                         "state": "无人注视盘台",
                         "away_duration": round(away_dur, 2),
-                        "heads_count": len(self._cached_results),
+                        "heads_count": heads_count,
                     }, ts=ts)
                 logger.warning(f"凝视告警: 无人注视盘台 {away_dur:.1f}秒 @{ts:.1f}s")
         else:
@@ -242,8 +304,8 @@ class GazeModule:
                     "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
                 })
                 # 推理流：通知前端告警结束
-                if self._display_fn:
-                    self._display_fn("gaze", {
+                if self._inference_fn:
+                    self._inference_fn("gaze", {
                         "localSec": round(ts, 2),
                         "tag": "GAZE_VIOLATION_END",
                         "data": {
@@ -286,9 +348,11 @@ class GazeModule:
 
         # 收集 10 秒窗口内的注视点样本
         if ts <= self._info_notice_start_ts + 10.0:
-            if self._cached_results:
-                gx_mean = sum(r["gaze_pt"][0] for r in self._cached_results) / len(self._cached_results)
-                gy_mean = sum(r["gaze_pt"][1] for r in self._cached_results) / len(self._cached_results)
+            with self._gaze_lock:
+                cached_snapshot = list(self._cached_results)
+            if cached_snapshot:
+                gx_mean = sum(r["gaze_pt"][0] for r in cached_snapshot) / len(cached_snapshot)
+                gy_mean = sum(r["gaze_pt"][1] for r in cached_snapshot) / len(cached_snapshot)
                 self._notice_attn_buffer.append(GazePoint(ts * 1000.0, gx_mean, gy_mean))
         else:
             # 10 秒窗口已满，执行判定
@@ -373,6 +437,22 @@ class GazeModule:
 
     def save_results(self, run_id: str) -> None:
         """保存凝视关键事件到 gaze/gaze_key_moments.json（委托给 GazeStorage）"""
+        # 等待最后一轮异步凝视检测完成
+        self._flush_async()
         self._run_id = run_id
         if self._storage:
             self._storage.save_key_moments(run_id, self.get_events())
+
+    def _flush_async(self):
+        """等待当前异步任务完成并清理"""
+        if self._gaze_future is not None:
+            try:
+                self._gaze_future.result(timeout=5.0)
+            except Exception as e:
+                logger.warning(f"等待异步凝视检测完成时异常: {e}")
+            self._gaze_future = None
+
+    def shutdown(self):
+        """关闭异步执行器（进程退出时调用）"""
+        self._flush_async()
+        self._gaze_executor.shutdown(wait=False)
