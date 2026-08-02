@@ -5,7 +5,7 @@
 并行处理手指屏幕（camBUP）和手指文件（camPOP）两个视频，
 统一保存所有行为事件到 behavior_key_moments.json。
 """
-import base64
+import time
 import logging
 import threading
 from concurrent.futures import ThreadPoolExecutor
@@ -13,8 +13,8 @@ from concurrent.futures import ThreadPoolExecutor
 import cv2
 
 from core.base_module import BaseModule
-from core.event_bus import EventBus, EventTopic
-from core.inference_bus import InferenceBus
+from core.event_bus import EventStream, EventTopic
+from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
 
 from modules.behavior.finger_bup_detector import FingerBupDetector
@@ -37,12 +37,12 @@ class BehaviorModule(BaseModule):
 
     def __init__(
         self,
-        event_bus: EventBus,
+        event_bus: EventStream,
         config: dict,
         paths: PathManager,
-        display_buffer: InferenceBus,
+        inference_stream: InferenceStream,
     ):
-        super().__init__(event_bus, config, paths, display_buffer)
+        super().__init__(event_bus, config, paths, inference_stream)
         self._bup_detector = None
         self._pop_detector = None
         self._result_storage = None
@@ -62,7 +62,7 @@ class BehaviorModule(BaseModule):
 
             # 初始化手指屏幕检测器
             self._bup_detector = FingerBupDetector(
-                pose_model_path=str(self.paths.get_model_path("behavior", "behavior_yolo11lpose.pt")),
+                pose_model_path=str(self.paths.get_model_path("behavior", "behavior_yolo26s-pose.pt")),
                 finger_model_path=str(self.paths.get_model_path("behavior", "behavior_yolo.pt")),
                 detect_conf=screen_cfg.get("detect_conf", 0.3),
                 pose_conf=screen_cfg.get("pose_conf", 0.5),
@@ -85,6 +85,9 @@ class BehaviorModule(BaseModule):
             # 订阅举手事件（由 tracker 嵌入检测后通过事件流推送）
             self.event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised)
 
+            # 预声明 behavior source 归属（举手事件可能全程不触发，仍需在退出时上报结束信号，防卡 done）
+            self._inference_sources.add("behavior")
+
             logger.info("行为检测模块初始化完成（手指屏幕 + 手指文件 + 举手订阅）")
             return True
 
@@ -93,10 +96,11 @@ class BehaviorModule(BaseModule):
             return False
 
     def _on_hand_raised(self, msg: dict) -> None:
-        """订阅 BEHAVIOR_HAND_RAISED：接收 tracker 检测到的举手事件，统一保存"""
+        """订阅 BEHAVIOR_HAND_RAISED：仅接收 tracker 在 front 视角检测到的真正举手事件"""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
-        operator = data.get("operator", "UNKNOWN")
+        raw_op = data.get("operator") or msg.get("operator") or "ROAD1"
+        operator = raw_op if (raw_op and raw_op != "UNKNOWN") else "ROAD1"
         with self._events_lock:
             self._events.append({
                 "localSec": round(ts, 2),
@@ -145,8 +149,21 @@ class BehaviorModule(BaseModule):
                 ts = frame_count / fps
                 frame_count += 1
 
-                # 更新进度
-                self.update_progress(ts, total_frames / fps)
+                # 仅写本路视频自己的 source 进度（不调 update_progress 避免写全集导致两路串扰）
+                self.inference_stream.update_module_time(video_source, ts)
+                # 推送前端进度条（每秒最多一次，用 video_source 作 label 区分两路）
+                if total_frames > 0:
+                    now = time.time()
+                    if not hasattr(self, "_last_progress_push"):
+                        self._last_progress_push = 0
+                    if now - self._last_progress_push >= 1.0:
+                        self._last_progress_push = now
+                        pct = min(100, ts / (total_frames / fps) * 100)
+                        self.push_display("progress", {
+                            "localSec": round(ts, 2),
+                            "tag": "progress",
+                            "data": {"label": video_source, "pct": round(pct, 1)},
+                        })
 
                 # 检测（同时在帧上绘制推理流标注）
                 events = detector.detect(frame, frame_count, fps)
@@ -159,7 +176,7 @@ class BehaviorModule(BaseModule):
                         self.push_display(video_source, {
                             "localSec": round(ts, 2),
                             "tag": "video",
-                            "data": {"frame_data": base64.b64encode(buf).decode("ascii")},
+                            "data": {"frame_data": buf.tobytes().decode("latin1")},
                         })
 
                 # 事件流：关键事件既存储也推送
@@ -177,12 +194,20 @@ class BehaviorModule(BaseModule):
                         "tag": event.get("event", tag),
                         "data": {k: v for k, v in event.items() if k not in ("localSec",)},
                     })
-                    # 事件流：后端模块间通信与规则状态机联动
-                    self.push_event(EventTopic.BEHAVIOR_HAND_RAISED, {
+                    # 事件流：后端模块间通信与规则状态机联动 (零兼容重构: 精准按动作类型分发 Topic，彻底清理旧 BEHAVIOR_HAND_RAISED)
+                    evt_type = event.get("event", "")
+                    if evt_type == "FINGER_FILE":
+                        topic = EventTopic.BEHAVIOR_FINGER_FILE
+                    elif evt_type == "FINGER_SCREEN":
+                        topic = EventTopic.BEHAVIOR_FINGER_SCREEN
+                    else:
+                        topic = EventTopic.BEHAVIOR_HAND_RAISED
+
+                    self.push_event(topic, {
                         "localSec": event["localSec"],
                         "tag": event.get("event", tag),
                         "data": {k: v for k, v in event.items() if k not in ("localSec",)},
-                    })
+                    }, ts=event["localSec"])
 
                 # 进度日志
                 if frame_count % 300 == 0:
@@ -206,7 +231,7 @@ class BehaviorModule(BaseModule):
         bup_video = str(base / videos_cfg.get("bup", "data/videos/camBUP.mpg"))
         pop_video = str(base / videos_cfg.get("pop", "data/videos/camPOP.mpg"))
 
-        logger.info(f"并行处理两个视频:")
+        logger.info("并行处理两个视频:")
         logger.info(f"  手指屏幕: {bup_video}")
         logger.info(f"  手指文件: {pop_video}")
 
@@ -222,4 +247,7 @@ class BehaviorModule(BaseModule):
 
     def save_results(self, run_id: str) -> None:
         """保存行为检测结果（委托给 BehaviorStorage）"""
-        self._result_storage.save_key_moments(run_id, self._events)
+        with self._events_lock:
+            # 保证按时间戳 localSec 升序排列
+            sorted_events = sorted(self._events, key=lambda x: x.get("localSec", 0))
+        self._result_storage.save_key_moments(run_id, sorted_events)

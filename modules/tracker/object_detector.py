@@ -3,8 +3,7 @@
 """
 import os
 import logging
-from pathlib import Path
-from typing import List, Dict, Optional
+from typing import List, Dict
 
 import numpy as np
 
@@ -16,7 +15,6 @@ class ObjectDetector:
     目标检测器
 
     - detect(frame)           → YOLO person 框
-    - detect_with_pose(frame) → 同 detect，但同时跑 Pose（可选）
     - detect_pose(frame)      → 仅 Pose 检测，返回骨架列表
     - check_hand_raised(kps)  → 手腕Y < 肩膀Y → 举手
     """
@@ -100,18 +98,6 @@ class ObjectDetector:
                     })
 
         return detections
-
-    def detect_with_pose(self, frame: np.ndarray) -> List[Dict]:
-        """
-        目标检测（同 detect），不主动做 Pose
-
-        Args:
-            frame: BGR 图像
-
-        Returns:
-            检测结果列表
-        """
-        return self.detect(frame)
 
     def detect_two_thresholds(self, frame: np.ndarray) -> tuple:
         """

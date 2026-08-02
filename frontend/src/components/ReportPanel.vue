@@ -16,6 +16,19 @@ watch(() => props.segCards.length, async () => {
   await nextTick()
   if (cardsEl.value) cardsEl.value.scrollTop = cardsEl.value.scrollHeight
 })
+// 流式报告内容更新时保持滚动到底部
+watch(() => props.segCards.map(c => c.streamBuffer).join('\n'), async () => {
+  await nextTick()
+  if (cardsEl.value) cardsEl.value.scrollTop = cardsEl.value.scrollHeight
+})
+
+function parseReportContent(text: string) {
+  if (!text) return { think: '', report: '' }
+  const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/i)
+  let think = thinkMatch ? thinkMatch[1].trim() : ''
+  let report = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim()
+  return { think, report }
+}
 
 function scoreColor(score: number) {
   return score >= 8 ? '#00ff88' : score >= 5 ? '#ffaa00' : '#ff4d4d'
@@ -47,7 +60,7 @@ function toggle(card: SegCard) {
 <template>
   <div class="panel">
     <div class="panel-title">📋 评价报告</div>
-    <div class="panel-body">
+    <div class="panel-body" ref="cardsEl">
       <div class="summary-grid">
         <div><div class="val">{{ supN }}</div><div class="lbl">监护制流程</div></div>
         <div><div class="val">{{ ticketN }}</div><div class="lbl">自唱票流程</div></div>
@@ -55,7 +68,7 @@ function toggle(card: SegCard) {
         <div><div class="val">{{ avg }}</div><div class="lbl">平均分</div></div>
         <div><div class="val">{{ total }}</div><div class="lbl">总分</div></div>
       </div>
-      <div ref="cardsEl">
+      <div>
         <div v-for="card in segCards" :key="card.flowId"
              class="seg-card" :class="{ collapsed: card.collapsed }"
              :style="{ borderLeftColor: card.streaming ? '#6b7a90' : borderColor(card.flowType) }">
@@ -67,15 +80,43 @@ function toggle(card: SegCard) {
             </span>
             <span v-if="!card.streaming" class="sc-score" :style="{ color: scoreColor(card.score) }">{{ card.score }}/10</span>
           </div>
-          <template v-if="!card.streaming">
-            <div class="sc-bar"><div class="sc-bar-fill" :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"></div></div>
-            <div class="sc-detail">{{ card.reportText }}</div>
-          </template>
-          <template v-else>
-            <div class="sc-detail">{{ card.streamBuffer }}</div>
-          </template>
+
+          <div class="sc-bar" v-if="!card.streaming">
+            <div class="sc-bar-fill" :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"></div>
+          </div>
+          
+          <!-- 🧠 大模型思考推理过程展示框 (打字中与打字完成全时段常驻显示) -->
+          <div v-if="parseReportContent(card.streamBuffer || card.reportText).think" class="think-block">
+            <div class="think-title">🧠 思考推理过程</div>
+            <div class="think-body">{{ parseReportContent(card.streamBuffer || card.reportText).think }}</div>
+          </div>
+
+          <!-- 📋 正式评价报告正文 -->
+          <div class="sc-detail">{{ parseReportContent(card.streamBuffer || card.reportText).report }}</div>
         </div>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.think-block {
+  background: rgba(0, 212, 255, 0.06);
+  border: 1px solid rgba(0, 212, 255, 0.2);
+  border-radius: 4px;
+  padding: 5px 8px;
+  margin: 4px 0 6px 0;
+}
+.think-title {
+  font-size: 10px;
+  font-weight: 700;
+  color: #00d4ff;
+  margin-bottom: 2px;
+}
+.think-body {
+  font-size: 9px;
+  color: #a0b0c0;
+  line-height: 1.35;
+  white-space: pre-wrap;
+}
+</style>

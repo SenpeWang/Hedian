@@ -3,22 +3,20 @@
 
 继承 BaseModule，实现统一接口。
 """
-import os
 import logging
 import time
-import base64
 import numpy as np
 
 from core.base_module import BaseModule
-from core.event_bus import EventBus, EventTopic
-from core.inference_bus import InferenceBus
+from core.event_bus import EventStream, EventTopic
+from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
 
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
 from modules.behavior.hand_raiser import HandRaiser
 from modules.tracker.storage_tracker import TrackerStorage
-from modules.tracker.visualizer import draw_tracks, draw_supervision
+from modules.tracker.visualizer import draw_tracks
 from modules.gaze.gaze_module import GazeModule
 
 logger = logging.getLogger("module.tracker")
@@ -33,12 +31,12 @@ class TrackerModule(BaseModule):
 
     def __init__(
         self,
-        event_bus: EventBus,
+        event_bus: EventStream,
         config: dict,
         paths: PathManager,
-        display_buffer: InferenceBus,
+        inference_stream: InferenceStream,
     ):
-        super().__init__(event_bus, config, paths, display_buffer)
+        super().__init__(event_bus, config, paths, inference_stream)
         self._detector = None
         self._tracker = None
         self._hand_raiser = None
@@ -79,9 +77,9 @@ class TrackerModule(BaseModule):
                 gaze_model_path=self.paths.get_model_path("gaze", "gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx"),
                 roi_json_path=str(self.paths.base_dir / "data" / "ROI.json"),
                 config=gaze_config,
-                display_fn=self.push_display,
+                inference_fn=self.push_display,
                 event_bus=self.event_bus,
-                progress_fn=lambda cur, total: self.display_buffer.update_module_time("gaze", cur),
+                progress_fn=lambda cur, total: self.inference_stream.update_module_time("gaze", cur),
                 paths=self.paths,
             )
 
@@ -104,6 +102,11 @@ class TrackerModule(BaseModule):
             self.event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
             # 规则层判断的监护绑定/解绑 key_moment 归属 tracker
             self.event_bus.subscribe(EventTopic.RULE_KEY_MOMENT, self._on_rule_key_moment)
+
+            # behavior source（举手事件）由 tracker 代推但归属 behavior 模块，退出时不标记结束
+            self._borrowed_sources = {"behavior"}
+            # gaze 内嵌 tracker 但进度由 GazeModule 异步独立写（progress_fn），update_progress 时跳过
+            self._independent_progress_sources = {"gaze"}
 
             logger.info("MOT 模块初始化完成")
             return True
@@ -152,7 +155,7 @@ class TrackerModule(BaseModule):
                 self.update_progress(ts, total_frames / fps)
 
                 # 更新聚合器快照
-                self.display_buffer.update_module_snapshot("tracker", {
+                self.inference_stream.update_module_snapshot("tracker", {
                     "roles": dict(self._roles_info),
                     "localSec": round(ts, 2),
                 })
@@ -206,15 +209,16 @@ class TrackerModule(BaseModule):
                 )
 
                 if hand_role:
+                    valid_role = hand_role if (hand_role and hand_role != "UNKNOWN") else "ROAD1"
                     # 举手事件归属 behavior
                     self.push_display("behavior", {
                         "localSec": round(ts, 2),
                         "tag": "HAND_RAISED",
-                        "data": {"state": "举手", "operator": hand_role}
+                        "data": {"state": "举手", "operator": valid_role}
                     })
                     self.push_event(EventTopic.BEHAVIOR_HAND_RAISED, {
                         "localSec": round(ts, 2),
-                        "operator": hand_role,
+                        "operator": valid_role,
                     }, ts=ts)
 
                     # 保存关键帧
@@ -248,7 +252,7 @@ class TrackerModule(BaseModule):
                                 "localSec": round(ts, 2),
                                 "tag": "frame",
                                 "data": {
-                                    "frame_data": base64.b64encode(jpeg.tobytes()).decode('utf-8'),
+                                    "frame_data": jpeg.tobytes().decode('latin1'),
                                     "frame_id": frame_count,
                                 },
                             })
@@ -308,9 +312,9 @@ class TrackerModule(BaseModule):
         logger.debug(f"Tracker 接收 RULE_KEY_MOMENT: {key_moment} @{ts:.1f}s")
 
     def update_progress(self, current: float, total: float = None) -> None:
-        """更新 tracker + gaze 双模块进度"""
+        """更新 tracker 进度 + 推送 gaze 前端进度条（gaze source 进度由 GazeModule 异步独立写）"""
         super().update_progress(current, total)
-        self.display_buffer.update_module_time("gaze", current)
+        # gaze 进度由 GazeModule 的 progress_fn 独立写（gaze 在 _independent_progress_sources），这里仅推前端进度条
         if total and total > 0:
             now = time.time()
             if not hasattr(self, "_last_gaze_progress_push"):
@@ -424,5 +428,5 @@ class TrackerModule(BaseModule):
             cv2.putText(vis_frame, f"{road_name} {int(d)}px", mid, cv2.FONT_HERSHEY_SIMPLEX, 0.7, (200, 200, 200), 2)
 
     def _draw_gaze(self, frame, frame_count, ts, tracks=None):
-        """调用凝视处理器：检测、估计、可视化、推送"""
+        """调用凝视处理器：异步检测、绘制缓存结果、推送"""
         return self._gaze_processor.process_frame(frame, ts, frame_count)

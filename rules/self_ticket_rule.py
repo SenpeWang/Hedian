@@ -10,7 +10,7 @@
 """
 import logging
 
-from core.event_bus import EventBus, EventTopic
+from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.self_ticket")
@@ -38,7 +38,7 @@ class SelfTicketRule(BaseRule):
         """制度名称"""
         return "self_ticket"
 
-    def subscribe_events(self, event_bus: EventBus) -> None:
+    def subscribe_events(self, event_bus: EventStream) -> None:
         """订阅事件"""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
@@ -132,6 +132,14 @@ class SelfTicketRule(BaseRule):
             # self._start_flow(ts, device_code=key_moment)
             if self._active:
                 self._code_read = True
+
+    def reset(self) -> None:
+        """重置自唱票状态，防止新一轮推理混入旧的设备码/检查状态"""
+        super().reset()
+        self._device_code = ""
+        self._code_read = False
+        self._operation_executed = False
+        self._confirm_closed = False
 
 def register():
     """模块注册入口"""

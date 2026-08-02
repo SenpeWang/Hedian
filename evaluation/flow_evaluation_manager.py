@@ -15,9 +15,9 @@ import logging
 import threading
 import concurrent.futures
 import redis
-from typing import Dict, List, Callable
+from typing import Dict, Callable, Optional
 
-from core.event_bus import EventBus, EventTopic
+from core.event_bus import EventStream, EventTopic
 from evaluation.flow_data_extractor import FlowDataExtractor
 from evaluation.qwen_evaluator import QwenEvaluator
 
@@ -33,11 +33,13 @@ class FlowEvaluationManager:
 
     def __init__(
         self,
-        event_bus: EventBus,
+        event_bus: EventStream,
         result_dir: str,
         fps: float = 30.0,
-        model_path: str = None,
-        display_fn: Callable = None,
+        model_path: Optional[str] = None,
+        sync_fn: Optional[Callable] = None,
+        direct_fn: Optional[Callable] = None,
+        inference_fn: Optional[Callable] = None,
         ):
         """
         初始化评估编排器
@@ -47,17 +49,18 @@ class FlowEvaluationManager:
             result_dir: 结果目录
             fps: 帧率
             model_path: Qwen 模型路径
-            display_fn: 推送事件函数
+            inference_fn: 推送事件函数
         """
         self._event_bus = event_bus
         self._result_dir = result_dir
         self._fps = fps
-        self._display_fn = display_fn
+        self._inference_fn = inference_fn
+        self._sync_fn = sync_fn or inference_fn
+        self._direct_fn = direct_fn or inference_fn
 
-        # 默认模型路径（Qwen3-8B，部署在 GPU 0）
+        # 默认模型路径（Qwen3-8B，相对项目根；main.py 启动时已 chdir 到项目根）
         if model_path is None:
-            from pathlib import Path
-            model_path = str(Path(__file__).parent.parent / "models" / "evaluation" / "Qwen3-8B")
+            model_path = "models/evaluation/Qwen3-8B"
 
         # 数据提取器
         redis_client = redis.Redis(host="localhost", port=6379, db=0, decode_responses=True)
@@ -96,6 +99,18 @@ class FlowEvaluationManager:
             self._data_extractor._result_dir = result_dir
         logger.info(f"FlowEvaluationManager 结果目录动态更新为: {result_dir}")
 
+    def reset(self) -> None:
+        """重置评估编排器状态，防止新一轮推理混入旧流程与旧评估任务"""
+        with self._lock:
+            self._completed_flows = []
+            self._segment_reports = []
+        with self._eval_lock:
+            for key, future in list(self._eval_futures.items()):
+                if not future.done():
+                    future.cancel()
+            self._eval_futures = {}
+        logger.info("FlowEvaluationManager 已重置")
+
     def _on_flow_started(self, msg: dict) -> None:
         """处理流程开始事件：仅用于实时将流程启动信号推送到前端显示，不保存冗余状态"""
         data = msg.get("data", {})
@@ -103,8 +118,8 @@ class FlowEvaluationManager:
         flow_type = data.get("flow_type", "unknown")
         ts = data.get("flow_start_sec", msg.get("ts", 0))
 
-        if self._display_fn:
-            self._display_fn("flow_start", {
+        if self._sync_fn:
+            self._sync_fn("flow_start", {
                 "localSec": ts,
                 "tag": "flow_start",
                 "data": {
@@ -128,8 +143,8 @@ class FlowEvaluationManager:
         with self._lock:
             self._completed_flows.append(flow)
 
-        if self._display_fn:
-            self._display_fn("flow_end", {
+        if self._sync_fn:
+            self._sync_fn("flow_end", {
                 "localSec": flow.get("flow_end_sec", 0),
                 "tag": "flow_end",
                 "data": flow,
@@ -154,13 +169,15 @@ class FlowEvaluationManager:
         start_sec = flow.get("flow_start_sec", 0)
         end_sec = flow.get("flow_end_sec") or start_sec
 
-        self._data_extractor._wait_all_modules(end_sec, timeout=300)
+        # 等待所有模块处理到 end_sec 以保证 key_moments 完整：对齐约束规定模块间
+        # 最大滞后 60s，90s 超时足够；常见情况下各 source 已远超 end_sec，1s 内即返回。
+        self._data_extractor._wait_all_modules(end_sec, timeout=90)
 
         self._event_bus.publish(EventTopic.SAVE_KEY_MOMENTS, {"flow_id": flow.get("flow_id")}, ts=end_sec)
         time.sleep(2.0)
 
         voice_events, tracker_events, gaze_events, behavior_events = self._data_extractor.extract(
-            start_sec, end_sec, wait=False, timeout=300
+            start_sec, end_sec, wait=False, timeout=90
         )
 
         flow_data = {
@@ -253,8 +270,8 @@ class FlowEvaluationManager:
         eval_local_sec = flow_data.get("flow_end_sec", flow_data.get("flow_start_sec", 0))
 
         def stream_cb(text_chunk):
-            if self._display_fn:
-                self._display_fn("segment_report_stream", {
+            if self._direct_fn:
+                self._direct_fn("segment_report_stream", {
                     "localSec": eval_local_sec,
                     "tag": "segment_report_stream",
                     "data": {
@@ -322,8 +339,8 @@ class FlowEvaluationManager:
 
         self._save_segment_reports()
 
-        if self._display_fn:
-            self._display_fn("segment_report", {
+        if self._inference_fn:
+            self._inference_fn("segment_report", {
                 "localSec": flow_data.get(
                     "flow_end_sec",
                     flow_data.get("flow_start_sec", 0),

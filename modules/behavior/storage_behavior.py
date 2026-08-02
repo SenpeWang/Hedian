@@ -3,9 +3,7 @@ Behavior 结果存储模块（独立文件）
 
 负责保存 Behavior 模块的行为关键事件。
 """
-import json
 import logging
-import os
 from typing import List, Dict
 
 from core.path_manager import PathManager

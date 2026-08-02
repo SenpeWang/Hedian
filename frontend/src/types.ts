@@ -5,10 +5,17 @@ export interface BatchEvent {
   source?: string
 }
 
-export interface SSEBatch {
-  globalSec?: number
-  source?: string
-  [key: string]: any
+export interface WSBatch {
+  globalSec: number
+  video_front?: BatchEvent[]
+  video_bup?: BatchEvent[]
+  video_pop?: BatchEvent[]
+  voice?: BatchEvent[]
+  tracking?: BatchEvent[]
+  gaze?: BatchEvent[]
+  flow_start?: BatchEvent[]
+  flow_end?: BatchEvent[]
+  progress?: BatchEvent[]
 }
 
 export interface VoiceEntry {

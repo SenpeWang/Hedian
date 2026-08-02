@@ -5,14 +5,13 @@
 实现统一的初始化、处理、保存接口。
 """
 from abc import ABC, abstractmethod
-from typing import Optional, Dict, Any, Union
+from typing import Dict, Any, Optional, Union
 import logging
 import time
-import redis
 
-from core.event_bus import EventBus, EventTopic
-from core.inference_bus import InferenceBus
-from core.module_sync import ModuleSync
+from core.event_bus import EventStream, EventTopic
+from core.inference_stream import InferenceStream, KEY_PROGRESS, _fine_source
+from core.inference_sync import InferenceSync
 from core.path_manager import PathManager
 
 
@@ -23,7 +22,7 @@ ALIGN_WAIT_TIMEOUT_SEC = 30.0
 _ALIGN_REDIS_HOST = "localhost"
 _ALIGN_REDIS_PORT = 6379
 _ALIGN_REDIS_DB = 0
-_ALIGN_PROGRESS_KEY = "inference:progress"
+_ALIGN_PROGRESS_KEY = KEY_PROGRESS
 
 
 class BaseModule(ABC):
@@ -37,16 +36,16 @@ class BaseModule(ABC):
     - save_results(): 保存结果
 
     使用方式：
-        module = MyModule(event_bus, config, paths, display_buffer)
+        module = MyModule(event_bus, config, paths, inference_stream)
         module.start(video_path, run_id)
     """
 
     def __init__(
         self,
-        event_bus: EventBus,
+        event_bus: EventStream,
         config: dict,
         paths: PathManager,
-        display_buffer: Union[InferenceBus, ModuleSync],
+        inference_stream: Union[InferenceStream, InferenceSync],
     ):
         """
         初始化模块
@@ -55,16 +54,25 @@ class BaseModule(ABC):
             event_bus: 消息总线
             config: 配置字典
             paths: 路径配置
-            display_buffer: 推理总线（写模式）或模块同步器（读模式）
+            inference_stream: 推理流写入端（InferenceStream，模块进程）或同步器（InferenceSync，Web 进程）
         """
         self.event_bus = event_bus
         self.config = config
         self.paths = paths
-        self.display_buffer = display_buffer
+        self.inference_stream = inference_stream
         self.logger = logging.getLogger(f"module.{self.module_name}")
         self._running = False
         self._start_time = 0.0
         self._run_id = None
+        # 本模块产出的 source 集合（push_display 自动登记）：用于退出时上报结束信号
+        self._inference_sources: set = set()
+        # 仅代推、不归属本模块的 source：退出时不标记结束（其生命周期归所属模块）
+        self._borrowed_sources: set = set()
+        # 归属本模块但进度独立写入的 source：update_progress 时跳过（如 gaze 由内嵌组件异步独立写进度）
+        self._independent_progress_sources: set = set()
+        # 进度推送与对齐日志的节流时间戳（统一在 __init__ 初始化，避免方法内 hasattr 懒初始化）
+        self._last_progress_push = 0.0
+        self._last_align_log_ts = 0.0
 
         # 订阅评估器触发的即时保存事件
         self.event_bus.subscribe(
@@ -148,14 +156,11 @@ class BaseModule(ABC):
                 self.logger.error("初始化失败")
                 return
 
-            # 2. 注册到聚合器
-            self.display_buffer.update_module_time(self.module_name, 0.0)
-
-            # 3. 处理视频
+            # 2. 处理视频（过程中通过 push_display 自动登记 source，并 per-source 写进度）
             self.logger.info(f"处理视频: {video_path}")
             self.process_video(video_path)
 
-            # 4. 保存结果
+            # 3. 保存结果
             self.logger.info("保存结果...")
             self.save_results(run_id)
 
@@ -166,7 +171,13 @@ class BaseModule(ABC):
             self.logger.error(f"模块 {self.module_name} 错误: {e}", exc_info=True)
         finally:
             self._running = False
-            # 保留模块进度参与全局对齐；ModuleSync 会基于时间戳自动剔除长期未推进的模块
+            # 退出即上报所有归属 source 的结束信号（借用 source 排除，由所属模块负责）
+            try:
+                if hasattr(self.inference_stream, 'mark_owned_done'):
+                    owned = self._inference_sources - self._borrowed_sources
+                    self.inference_stream.mark_owned_done(owned)
+            except Exception as e:
+                self.logger.warning(f"模块 {self.module_name} 上报 source 结束信号失败: {e}")
 
     def stop(self) -> None:
         """停止模块"""
@@ -178,14 +189,15 @@ class BaseModule(ABC):
         """模块是否正在运行"""
         return self._running
 
-    def update_progress(self, current: float, total: float = None) -> None:
-        """更新处理进度，内置限速对齐"""
-        self.display_buffer.update_module_time(self.module_name, current)
+    def update_progress(self, current: float, total: Optional[float] = None) -> None:
+        """更新进度：per-source 写入（借用 source 与独立进度 source 跳过）"""
+        for source in self._inference_sources:
+            if source in self._borrowed_sources or source in self._independent_progress_sources:
+                continue
+            self.inference_stream.update_module_time(source, current)
         # 推送进度事件到前端（每秒最多一次）
         if total and total > 0:
             now = time.time()
-            if not hasattr(self, '_last_progress_push'):
-                self._last_progress_push = 0
             if now - self._last_progress_push >= 1.0:
                 self._last_progress_push = now
                 pct = min(100, current / total * 100)
@@ -198,8 +210,10 @@ class BaseModule(ABC):
                 self.align_with_slowest_module(current)
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
-        """推送数据到推理流"""
-        self.display_buffer.push_display(event_type, data)
+        """推送数据到推理流（非即时类型自动登记为归属 source）"""
+        if event_type not in ("progress", "video_start"):
+            self._inference_sources.add(event_type)
+        self.inference_stream.push_display(event_type, data)
 
     def push_event(self, msg_type: str, data: Dict[str, Any], ts: float = 0.0) -> None:
         """推送指令到跨进程消息流"""
@@ -213,10 +227,12 @@ class BaseModule(ABC):
             wait_start_ts = time.time()
             while True:
                 progress_map = r.hgetall(_ALIGN_PROGRESS_KEY)
-                # 收集除自身外其他模块的进度
+                # 收集除自身外其他模块的进度（per-source：排除本模块产出的所有 source）
+                # progress 字段为 "大类.细粒度"，按细粒度名与 my_sources 比对
+                my_sources = self._inference_sources | self._borrowed_sources | self._independent_progress_sources
                 other_progress_secs = []
                 for name, val in progress_map.items():
-                    if name == self.module_name:
+                    if _fine_source(name) in my_sources:
                         continue
                     try:
                         other_progress_secs.append(float(val))
@@ -245,8 +261,6 @@ class BaseModule(ABC):
                         f"领先{lead_sec:.1f}s > {ALIGN_MAX_LEAD_SEC}s，继续推理"
                     )
                     break
-                if not hasattr(self, '_last_align_log_ts'):
-                    self._last_align_log_ts = 0.0
                 if time.time() - self._last_align_log_ts > 5.0:
                     self._last_align_log_ts = time.time()
                     self.logger.info(

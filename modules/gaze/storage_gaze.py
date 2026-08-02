@@ -3,9 +3,7 @@ Gaze 结果存储模块（独立文件）
 
 负责保存 Gaze 模块的注视告警关键事件。
 """
-import json
 import logging
-import os
 from typing import List, Dict
 
 from core.path_manager import PathManager

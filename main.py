@@ -7,7 +7,7 @@
   modules/       → 业务模块（语音、Tracker、注视、行为）
   rules/         → 规则层（监护制、自唱票）
   evaluation/    → 评估层（规则评估、大模型评估）
-  web/           → 前端层（HTTP 服务器、SSE）
+  web/           → 前端层（HTTP 服务器、WebSocket）
 
 多进程架构:
   每个模块运行在独立进程中，通过 Redis 通信。
@@ -16,7 +16,6 @@ import sys
 import os
 
 import argparse
-import logging
 import multiprocessing
 import time
 import redis
@@ -35,6 +34,8 @@ args = parser.parse_args()
 # 路径设置
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
+# 切换工作目录到项目根，使所有配置路径以相对形式表达（models/...、data/...）且不依赖启动位置
+os.chdir(BASE_DIR)
 
 # 导入核心模块
 from core.config_manager import ConfigManager
@@ -72,13 +73,6 @@ def wait_for_start_signal(redis_host="localhost", redis_port=6379, redis_db=0, l
         time.sleep(0.5)
 
 
-def set_start_signal(redis_host="localhost", redis_port=6379, redis_db=0):
-    """设置启动信号（由 Web 进程调用），使用时间戳作为代际标识，与 /start 路由保持一致"""
-    import time as _time
-    r = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
-    r.set(START_SIGNAL_KEY, str(_time.time()), ex=3600)
-    logger.info("已设置启动信号")
-
 def _run_module_process(
     module_name: str,
     module_factory,
@@ -92,8 +86,8 @@ def _run_module_process(
     """业务模块进程的通用模板
 
     Args:
-        module_name: 模块名称，用于日志和 EventBus 消费者名
-        module_factory: 接收 (event_bus, config, paths, display_buffer) 返回模块实例的可调用对象
+        module_name: 模块名称，用于日志和 EventStream 消费者名
+        module_factory: 接收 (event_bus, config, paths, inference_stream) 返回模块实例的可调用对象
         env_setup: 可选的环境变量预处理回调（如清除 LD_LIBRARY_PATH）
     """
     # 限制业务子模块仅可见指定的推理 GPU
@@ -101,8 +95,8 @@ def _run_module_process(
     os.environ["CUDA_VISIBLE_DEVICES"] = config_dict.get("gpu", "1")
     import redis
     from pathlib import Path
-    from core.event_bus import EventBus
-    from core.inference_bus import InferenceBus
+    from core.event_bus import EventStream
+    from core.inference_stream import InferenceStream
     from core.path_manager import PathManager
 
     if env_setup:
@@ -149,21 +143,21 @@ def _run_module_process(
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
             
-        event_bus = EventBus(
+        event_bus = EventStream(
             redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
             consumer_name=f"{module_name}_process",
         )
-        display_buffer = InferenceBus(
+        inference_stream = InferenceStream(
             fps=config_dict.get("fps", 30),
             redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         )
         event_bus.start()
-        display_buffer.start()
+        inference_stream.start()
 
-        module = module_factory(event_bus, config_dict, paths, display_buffer)
+        module = module_factory(event_bus, config_dict, paths, inference_stream)
         module.start(video_path, active_run_id)
 
-        display_buffer.stop()
+        inference_stream.stop()
         event_bus.stop()
         logger.info(f"{module_name} 进程完成本轮推理 run_id={run_id}，等待下一次触发")
 
@@ -198,12 +192,12 @@ def run_behavior_process(config_dict, paths_dict, video_path, run_id):
     )
 
 
-def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
+def run_web_process(config_dict, paths_dict, run_id=None):
     """Web 服务进程"""
     import redis
     from pathlib import Path
-    from core.event_bus import EventBus
-    from core.module_sync import ModuleSync
+    from core.event_bus import EventStream
+    from core.inference_sync import InferenceSync
     from core.path_manager import PathManager
     from web.http_server import create_app
 
@@ -222,7 +216,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         model_root=Path(paths_dict["model_root"]),
         result_root=Path(paths_dict["result_root"]),
     )
-    event_bus = EventBus(redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
+    event_bus = EventStream(redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
                    consumer_name="web_process")
     import cv2
     video_duration = 0.0
@@ -236,19 +230,21 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
     except Exception as e:
         logger.error(f"读取视频时长失败: {e}", exc_info=True)
 
-    display_buffer = ModuleSync(
+    inference_sync = InferenceSync(
         fps=config_dict.get("fps", 30),
-        expected_modules={"voice", "tracker", "gaze", "behavior"},  # 包含 gaze 独立进度汇报
+        # per-source 粒度：每个 source 独立上报进度与结束信号，彻底解耦各模态产出长度不一致问题
+        expected_sources={
+            "voice",           # 语音转录
+            "video_front",     # 主视频（tracker）
+            "tracking",        # 目标跟踪（tracker）
+            "video_bup",       # BUP 视角视频（behavior）
+            "video_pop",       # POP 视角视频（behavior）
+            "behavior",        # 行为事件（behavior）
+            "gaze",            # 凝视估计（gaze，由 tracker 代报进度与结束信号）
+        },
         redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
         duration=video_duration,
     )
-    display_buffer.set_audio_dir(str(paths.result_root), paths)
-
-    def make_pipeline_runner():
-        def runner():
-            set_start_signal(REDIS_HOST, REDIS_PORT, REDIS_DB)
-        return runner
-
     # 结果目录提前确定，供规则和评估器使用
     flow_result_dir = str(paths.get_result_dir(run_id)) if run_id else str(paths.result_root)
     flow_evaluator = None # 提前声明，供动态订阅回调在运行时直接闭包捕捉
@@ -291,15 +287,29 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
         
-        if display_buffer:
-            display_buffer.reset()
+        # 清理推理流与模块间事件流 Redis key，防止上一轮旧数据混入新 run
+        try:
+            r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+            for key in r.scan_iter("module:*"):
+                r.delete(key)
+            for key in r.scan_iter("inference:*"):
+                r.delete(key)
+            r.close()
+            logger.info("已清理 module:* / inference:* Redis key，准备新一轮推理")
+        except Exception as e:
+            logger.error(f"清理 Redis key 失败: {e}")
+
+        if inference_sync:
+            inference_sync.reset()
         flow_recorder.set_result_dir(active_result_dir)
         for rname, rreg in registry._rules.items():
             if rules_config.get(rname, False):
+                rreg.reset()
                 if hasattr(rreg, "set_result_dir"):
                     rreg.set_result_dir(active_result_dir)
         
         if flow_evaluator:
+            flow_evaluator.reset()
             flow_evaluator.set_result_dir(active_result_dir)
             
     event_bus.subscribe("pipeline.start", on_pipeline_start)
@@ -308,54 +318,42 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
     app = create_app(
         config=config_dict,
         event_bus=event_bus,
-        registry=registry,
         paths=paths,
-        pipeline_runner=make_pipeline_runner(),
-        display_buffer=display_buffer,
+        inference_sync=inference_sync,
     )
 
     # 大模型评估结果和流式推理文本：具备高实时性，不应随视频播放进度被拖延（对齐）
-    # 定义直接推送函数，使评测卡片在生成过程中能够实时显示在前端
-    # 但必须等该流程在前端播放结束后（即全局时钟追赶上流程结束时间）才允许推送
-    def push_to_sse_directly(event_type: str, data: dict) -> None:
-        if event_type in ("segment_report", "segment_report_stream"):
-            local_sec = data.get("localSec", 0.0)
-            
-            # 如果 display_buffer 还在播放该流程之前的内容，则阻塞等待，直到前端视频进度追赶上流程的结束时间
-            if display_buffer and local_sec > 0:
-                while display_buffer._pushed_global_sec < local_sec:
-                    # 如果系统状态已经变为 idle（说明流程结束或用户停止测试），立刻放行，防止死锁
-                    if app.state.pipeline_state.get("status") == "idle":
-                        break
-                    time.sleep(0.1)
-                    
-            batch = {
-                "globalSec": 0.0,
-                event_type: [
-                    {
-                        "localSec": data.get("localSec"),
-                        "tag": data.get("tag"),
-                        "data": data.get("data")
-                    }
-                ]
-            }
-            app.state.sse_handler.push(batch)
-        else:
-            if display_buffer:
-                display_buffer.push_display(event_type, data)
+    # 直推函数：评估报告(stream/report) 绕过 batch 对齐，经 WebSocket 文本帧直推前端
+    # 走 push_text 而非 push：避免直推事件被塞进二进制 batch 协议（无视频帧、无 globalSec，
+    # 否则前端 globalSec 被拉回 0、meta 结构不匹配，导致评估结果无法识别）
+    def push_direct(event_type: str, data: dict) -> None:
+        """后端评估直推函数：完全绕过对齐中间件，零阻塞、零延迟直推 WebSocket 文本管道"""
+        app.state.ws_handler.push_text({
+            "source": event_type,
+            "localSec": data.get("localSec"),
+            "tag": data.get("tag"),
+            "data": data.get("data"),
+        })
+
+    def push_sync(event_type: str, data: dict):
+        """系统通知推送：经过对齐中间件打包入 Batch meta，与视频帧物理时间点同帧出屏"""
+        if inference_sync:
+            inference_sync.push_display(event_type, data)
 
     from evaluation.flow_evaluation_manager import FlowEvaluationManager
     flow_evaluator = FlowEvaluationManager(
         event_bus=event_bus,
         result_dir=flow_result_dir,
         fps=config_dict.get("fps", 30),
-        display_fn=push_to_sse_directly,
+        sync_fn=push_sync,         # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
+        direct_fn=push_direct,     # 流式评估 chunk(segment_report_stream) ➔ 文本帧直推
+        inference_fn=push_direct,  # 最终评估报告(segment_report) ➔ 文本帧直推
     )
     logger.info(f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}")
 
-    if display_buffer:
+    if inference_sync:
         def push_wrapper(event):
-            # 推理流结束信号：ModuleSync 推送 None 表示流水线完成
+            # 推理流结束信号：InferenceSync 推送 None 表示流水线完成
             if event is None or (isinstance(event, dict) and event.get("source") == "done"):
                 app.state.pipeline_state["status"] = "idle"
                 logger.info("检测到流水线运行结束信号，已将 Web 状态置为 idle")
@@ -370,10 +368,10 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                     logger.error(f"FlowEvaluationManager finalize 失败: {e}", exc_info=True)
                 # 3. 刷新 Stream 中剩余事件（评估结果等）到前端，确保 done 之前不丢数据
                 try:
-                    display_buffer.flush_remaining()
+                    inference_sync.flush_remaining()
                 except Exception as e:
                     logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
-            app.state.sse_handler.push(event)
+            app.state.ws_handler.push(event)
             # 一次性运行：done 送达后（此时评估已全部完成、结果已落盘）终止所有模块子进程并退出 Web。
             # 模块子进程即 GPU 占用进程，等价于训练结束后 kill GPU 进程，确保 GPU 显存随之释放；
             # main 的监控循环检测到 web 退出后会自然收尾退出。
@@ -381,7 +379,7 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                 import threading
 
                 def _terminate_pipeline():
-                    time.sleep(2.0)  # 确保 SSE 已把 done 送达前端
+                    time.sleep(2.0)  # 确保 WebSocket 已把 done 送达前端
                     logger.info("推理结果已全部展示完毕，终止所有模块子进程并退出 Web（释放 GPU）")
                     try:
                         import subprocess
@@ -393,14 +391,14 @@ def run_web_process(config_dict, paths_dict, pipeline_runner_key, run_id=None):
                     os._exit(0)
 
                 threading.Thread(target=_terminate_pipeline, daemon=True).start()
-        display_buffer.set_push_callback(push_wrapper)
-        display_buffer.start()
+        inference_sync.set_push_callback(push_wrapper)
+        inference_sync.start()
 
     logger.info("启动 FastAPI 服务器")
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=5002, log_level="warning")
 
-    display_buffer.stop()
+    inference_sync.stop()
     event_bus.stop()
 
 
@@ -501,7 +499,7 @@ def main():
 
     p = multiprocessing.Process(
         target=run_web_process,
-        args=(config_dict, paths_dict, "pipeline:command", run_id),
+        args=(config_dict, paths_dict, run_id),
         name="web", daemon=False,
     )
     p.start()

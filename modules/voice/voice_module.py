@@ -3,12 +3,11 @@
 
 继承 BaseModule，实现统一接口。
 """
-import os
 import logging
 
 from core.base_module import BaseModule
-from core.event_bus import EventBus, EventTopic
-from core.inference_bus import InferenceBus
+from core.event_bus import EventStream, EventTopic
+from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
 
 from modules.voice.speech_transcriber import (
@@ -30,12 +29,12 @@ class VoiceModule(BaseModule):
 
     def __init__(
         self,
-        event_bus: EventBus,
+        event_bus: EventStream,
         config: dict,
         paths: PathManager,
-        display_buffer: InferenceBus,
+        inference_stream: InferenceStream,
     ):
-        super().__init__(event_bus, config, paths, display_buffer)
+        super().__init__(event_bus, config, paths, inference_stream)
         self._transcriber = None
         self._intent_classifier = None
         self._result_storage = None
@@ -89,15 +88,18 @@ class VoiceModule(BaseModule):
                     text = event.get("text", "")
                     key_moment = event.get("key_moment", "")
 
-                    # 推理流：实时转录结果（设备码归一化为纯英文+数字，仅用于展示）
+                    # 推理流：实时转录结果（带关键词 keys 用于前端高亮红字展示）
                     if text:
                         display_text = normalize_devices_in_text(text)
+                        keys = event.get("keys", [])
+                        if not keys and key_moment:
+                            keys = [key_moment]
                         self.push_display("voice", {
                             "localSec": local_sec,
                             "tag": "text",
-                            "data": {"text": display_text}
+                            "data": {"text": display_text, "keys": keys}
                         })
-                        self.display_buffer.update_module_snapshot("voice", {"latest_text": display_text})
+                        self.inference_stream.update_module_snapshot("voice", {"latest_text": display_text})
 
                     # key_moment 既推推理流又推事件流
                     if key_moment:

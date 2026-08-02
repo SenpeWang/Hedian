@@ -3,11 +3,9 @@ ROI 分类模块
 
 负责加载 ROI 配置，分类注视方向。
 """
-import os
 import json
 import logging
 import math
-from pathlib import Path
 from typing import List, Tuple, Optional
 
 import numpy as np

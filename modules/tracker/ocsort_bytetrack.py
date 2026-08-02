@@ -20,7 +20,7 @@ OC-SORT + ByteTrack 融合跟踪器
   阶段四.五：tentative轨迹确认 - 连续匹配confirm_frames帧后分配track_id
 """
 import numpy as np
-from typing import List, Dict, Tuple, Optional
+from typing import List, Dict
 from scipy.optimize import linear_sum_assignment
 from collections import deque
 import warnings

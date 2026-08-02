@@ -1,0 +1,235 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 900" width="1200" height="900">
+  <defs>
+    <marker id="arrowhead" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#4a5568"/>
+    </marker>
+    <marker id="arrowhead-event" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#38a169"/>
+    </marker>
+    <marker id="arrowhead-inference" markerWidth="10" markerHeight="7" refX="9" refY="3.5" orient="auto">
+      <polygon points="0 0, 10 3.5, 0 7" fill="#dd6b20"/>
+    </marker>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1200" height="900" fill="#f7fafc"/>
+
+  <!-- Title -->
+  <text x="600" y="40" font-family="Arial, sans-serif" font-size="24" font-weight="bold" text-anchor="middle" fill="#1a202c">核电站监护制合规检测系统 — 整体架构图</text>
+
+  <!-- Input Layer -->
+  <g transform="translate(0, 70)">
+    <text x="80" y="25" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">输入层</text>
+    <rect x="350" y="5" width="140" height="45" rx="6" fill="#e2e8f0" stroke="#718096" stroke-width="2"/>
+    <text x="420" y="25" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#2d3748">camFRONT.mpg</text>
+    <text x="420" y="42" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#4a5568">语音 + 主视角</text>
+
+    <rect x="530" y="5" width="140" height="45" rx="6" fill="#e2e8f0" stroke="#718096" stroke-width="2"/>
+    <text x="600" y="25" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#2d3748">camBUP.mpg</text>
+    <text x="600" y="42" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#4a5568">手指屏幕</text>
+
+    <rect x="710" y="5" width="140" height="45" rx="6" fill="#e2e8f0" stroke="#718096" stroke-width="2"/>
+    <text x="780" y="25" font-family="Arial, sans-serif" font-size="13" text-anchor="middle" fill="#2d3748">camPOP.mpg</text>
+    <text x="780" y="42" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#4a5568">手指文件</text>
+  </g>
+
+  <!-- Core Infrastructure -->
+  <g transform="translate(0, 140)">
+    <text x="80" y="35" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">核心基础设施</text>
+    <rect x="180" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="240" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">ConfigManager</text>
+
+    <rect x="320" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="380" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">PathManager</text>
+
+    <rect x="460" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="520" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">BaseModule</text>
+
+    <rect x="600" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="660" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">BaseStorage</text>
+
+    <rect x="740" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="800" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">Redis Pool</text>
+
+    <rect x="880" y="15" width="120" height="40" rx="6" fill="#bee3f8" stroke="#3182ce" stroke-width="2"/>
+    <text x="940" y="40" font-family="Arial, sans-serif" font-size="12" text-anchor="middle" fill="#2b6cb0">Logger</text>
+  </g>
+
+  <!-- Inference Layer -->
+  <g transform="translate(0, 220)">
+    <text x="80" y="45" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">推理层 modules/</text>
+    <rect x="230" y="20" width="160" height="60" rx="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+    <text x="310" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#22543d">VoiceModule</text>
+    <text x="310" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#276749">Qwen3-ASR 转录</text>
+
+    <rect x="420" y="20" width="160" height="60" rx="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+    <text x="500" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#22543d">TrackerModule</text>
+    <text x="500" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#276749">MOT + 举手检测</text>
+
+    <rect x="610" y="20" width="160" height="60" rx="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+    <text x="690" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#22543d">GazeModule</text>
+    <text x="690" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#276749">凝视估计</text>
+
+    <rect x="800" y="20" width="160" height="60" rx="8" fill="#c6f6d5" stroke="#38a169" stroke-width="2"/>
+    <text x="880" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#22543d">BehaviorModule</text>
+    <text x="880" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#276749">手指屏幕/文件</text>
+  </g>
+
+  <!-- Two Streams -->
+  <g transform="translate(0, 330)">
+    <text x="80" y="55" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">数据流层</text>
+
+    <!-- Event Stream -->
+    <rect x="230" y="20" width="360" height="80" rx="8" fill="#f0fff4" stroke="#38a169" stroke-width="2" stroke-dasharray="5,5"/>
+    <text x="300" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#22543d">事件流 Event Stream</text>
+    <text x="300" y="65" font-family="Arial, sans-serif" font-size="11" fill="#276749">core/event_bus.py</text>
+    <text x="300" y="85" font-family="Arial, sans-serif" font-size="10" fill="#276749">module:events:*</text>
+
+    <!-- Inference Stream -->
+    <rect x="630" y="20" width="360" height="80" rx="8" fill="#fffaf0" stroke="#dd6b20" stroke-width="2" stroke-dasharray="5,5"/>
+    <text x="700" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" fill="#7c2d12">推理流 Display Stream</text>
+    <text x="700" y="65" font-family="Arial, sans-serif" font-size="11" fill="#9c4221">core/inference_stream.py</text>
+    <text x="700" y="85" font-family="Arial, sans-serif" font-size="10" fill="#9c4221">inference:results:all</text>
+  </g>
+
+  <!-- Rules Layer -->
+  <g transform="translate(0, 450)">
+    <text x="80" y="55" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">规则层 rules/</text>
+
+    <rect x="230" y="20" width="120" height="50" rx="6" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+    <text x="290" y="40" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#553c9a">Supervision</text>
+    <text x="290" y="58" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#553c9a">监护制</text>
+
+    <rect x="370" y="20" width="120" height="50" rx="6" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+    <text x="430" y="40" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#553c9a">SelfTicket</text>
+    <text x="430" y="58" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#553c9a">自唱票</text>
+
+    <rect x="230" y="85" width="120" height="50" rx="6" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+    <text x="290" y="105" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#553c9a">InfoNotice</text>
+    <text x="290" y="123" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#553c9a">信息通报</text>
+
+    <rect x="370" y="85" width="120" height="50" rx="6" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+    <text x="430" y="105" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#553c9a">Personnel</text>
+    <text x="430" y="123" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#553c9a">人员状态</text>
+
+    <rect x="520" y="52" width="120" height="50" rx="6" fill="#e9d8fd" stroke="#805ad5" stroke-width="2"/>
+    <text x="580" y="72" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#553c9a">FlowRecorder</text>
+    <text x="580" y="90" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#553c9a">流程记录</text>
+  </g>
+
+  <!-- InferenceSync -->
+  <g transform="translate(0, 450)">
+    <rect x="730" y="35" width="220" height="70" rx="8" fill="#feebc8" stroke="#dd6b20" stroke-width="2"/>
+    <text x="840" y="60" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#7c2d12">InferenceSync</text>
+    <text x="840" y="80" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#9c4221">global_sec 时间对齐</text>
+    <text x="840" y="95" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#9c4221">打包 batch + 音频切片</text>
+  </g>
+
+  <!-- Evaluation Layer -->
+  <g transform="translate(0, 570)">
+    <text x="80" y="45" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">评估层 evaluation/</text>
+
+    <rect x="230" y="20" width="180" height="60" rx="8" fill="#fed7d7" stroke="#e53e3e" stroke-width="2"/>
+    <text x="320" y="45" font-family="Arial, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#742a2a">FlowEvaluationManager</text>
+    <text x="320" y="65" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#9b2c2c">流程评估编排</text>
+
+    <rect x="440" y="20" width="160" height="60" rx="8" fill="#fed7d7" stroke="#e53e3e" stroke-width="2"/>
+    <text x="520" y="45" font-family="Arial, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#742a2a">FlowDataExtractor</text>
+    <text x="520" y="65" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#9b2c2c">数据提取</text>
+
+    <rect x="630" y="20" width="160" height="60" rx="8" fill="#fed7d7" stroke="#e53e3e" stroke-width="2"/>
+    <text x="710" y="45" font-family="Arial, sans-serif" font-size="13" font-weight="bold" text-anchor="middle" fill="#742a2a">QwenEvaluator</text>
+    <text x="710" y="65" font-family="Arial, sans-serif" font-size="10" text-anchor="middle" fill="#9b2c2c">Qwen3-8B 大模型</text>
+  </g>
+
+  <!-- Web Layer -->
+  <g transform="translate(0, 680)">
+    <text x="80" y="45" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">Web 层 web/</text>
+
+    <rect x="400" y="20" width="180" height="60" rx="8" fill="#b2f5ea" stroke="#319795" stroke-width="2"/>
+    <text x="490" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#234e52">FastAPI</text>
+    <text x="490" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#285e61">/start /ws/data /status</text>
+
+    <rect x="620" y="20" width="180" height="60" rx="8" fill="#b2f5ea" stroke="#319795" stroke-width="2"/>
+    <text x="710" y="45" font-family="Arial, sans-serif" font-size="14" font-weight="bold" text-anchor="middle" fill="#234e52">WSHandler</text>
+    <text x="710" y="65" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#285e61">WebSocket</text>
+  </g>
+
+  <!-- Frontend -->
+  <g transform="translate(0, 790)">
+    <text x="80" y="45" font-family="Arial, sans-serif" font-size="16" font-weight="bold" fill="#2d3748">前端</text>
+
+    <rect x="400" y="20" width="400" height="60" rx="8" fill="#fefcbf" stroke="#d69e2e" stroke-width="2"/>
+    <text x="600" y="45" font-family="Arial, sans-serif" font-size="15" font-weight="bold" text-anchor="middle" fill="#744210">可视化页面 frontend/dist</text>
+    <text x="600" y="67" font-family="Arial, sans-serif" font-size="11" text-anchor="middle" fill="#975a16">三路视频 | ASR 字幕 | 凝视/跟踪 | 评估报告 | 系统通知</text>
+  </g>
+
+  <!-- Arrows -->
+  <!-- Input to Inference -->
+  <line x1="420" y1="120" x2="310" y2="220" stroke="#4a5568" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="420" y1="120" x2="500" y2="220" stroke="#4a5568" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="600" y1="120" x2="880" y2="220" stroke="#4a5568" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="780" y1="120" x2="880" y2="220" stroke="#4a5568" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Core to Inference (dashed) -->
+  <line x1="520" y1="195" x2="310" y2="220" stroke="#3182ce" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+  <line x1="520" y1="195" x2="500" y2="220" stroke="#3182ce" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+  <line x1="520" y1="195" x2="690" y2="220" stroke="#3182ce" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+  <line x1="520" y1="195" x2="880" y2="220" stroke="#3182ce" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+
+  <!-- Inference to Event Stream -->
+  <line x1="310" y1="280" x2="350" y2="330" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+  <line x1="500" y1="280" x2="430" y2="330" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+  <line x1="690" y1="280" x2="510" y2="330" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+  <line x1="880" y1="280" x2="590" y2="330" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+
+  <!-- Inference to Inference Stream -->
+  <line x1="310" y1="280" x2="700" y2="330" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+  <line x1="500" y1="280" x2="740" y2="330" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+  <line x1="690" y1="280" x2="780" y2="330" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+  <line x1="880" y1="280" x2="820" y2="330" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+
+  <!-- Event Stream to Rules -->
+  <line x1="410" y1="410" x2="350" y2="450" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+
+  <!-- Rules to Event Stream (flow started/ended) -->
+  <line x1="520" y1="475" x2="520" y2="410" stroke="#805ad5" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Event Stream to Evaluation -->
+  <line x1="410" y1="410" x2="320" y2="570" stroke="#e53e3e" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Evaluation to Files -->
+  <text x="830" y="600" font-family="Arial, sans-serif" font-size="11" fill="#742a2a">qwen_response_*.json</text>
+  <line x1="790" y1="590" x2="870" y2="570" stroke="#e53e3e" stroke-width="1.5" stroke-dasharray="4,4" marker-end="url(#arrowhead)"/>
+
+  <!-- Evaluation to Display Stream (segment_report) -->
+  <line x1="710" y1="600" x2="840" y2="520" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+
+  <!-- Inference Stream to InferenceSync -->
+  <line x1="840" y1="410" x2="840" y2="450" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+
+  <!-- InferenceSync to Web -->
+  <line x1="840" y1="520" x2="710" y2="680" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+
+  <!-- FastAPI to WSHandler -->
+  <line x1="580" y1="710" x2="620" y2="710" stroke="#319795" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- WSHandler to Frontend -->
+  <line x1="710" y1="740" x2="710" y2="770" stroke="#319795" stroke-width="2" marker-end="url(#arrowhead)"/>
+  <line x1="490" y1="740" x2="490" y2="770" stroke="#319795" stroke-width="2" marker-end="url(#arrowhead)"/>
+
+  <!-- Legend -->
+  <g transform="translate(950, 790)">
+    <rect x="0" y="0" width="230" height="100" rx="6" fill="#ffffff" stroke="#cbd5e0" stroke-width="1"/>
+    <text x="115" y="20" font-family="Arial, sans-serif" font-size="12" font-weight="bold" text-anchor="middle" fill="#2d3748">图例</text>
+
+    <line x1="15" y1="35" x2="45" y2="35" stroke="#38a169" stroke-width="2" marker-end="url(#arrowhead-event)"/>
+    <text x="55" y="39" font-family="Arial, sans-serif" font-size="11" fill="#4a5568">事件流</text>
+
+    <line x1="15" y1="60" x2="45" y2="60" stroke="#dd6b20" stroke-width="2" marker-end="url(#arrowhead-inference)"/>
+    <text x="55" y="64" font-family="Arial, sans-serif" font-size="11" fill="#4a5568">推理流</text>
+
+    <line x1="15" y1="85" x2="45" y2="85" stroke="#4a5568" stroke-width="2" marker-end="url(#arrowhead)"/>
+    <text x="55" y="89" font-family="Arial, sans-serif" font-size="11" fill="#4a5568">通用依赖</text>
+  </g>
+</svg>

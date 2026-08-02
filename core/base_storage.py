@@ -4,7 +4,7 @@
 import os
 import json
 import logging
-from typing import List, Dict
+from typing import Any
 from core.path_manager import PathManager
 
 logger = logging.getLogger("core.storage")
@@ -16,7 +16,7 @@ class BaseStorage:
         self._paths = paths
         self._module_name = module_name
 
-    def _save_json_atomic(self, filename: str, run_id: str, data: any, indent: int = 2) -> None:
+    def _save_json_atomic(self, filename: str, run_id: str, data: Any, indent: int = 2) -> None:
         """原子性地将数据保存为 JSON 文件"""
         output_path = self._paths.get_result_path(
             run_id=run_id,

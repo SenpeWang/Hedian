@@ -3,17 +3,15 @@ HTTP 服务器模块 (FastAPI)
 
 负责 FastAPI 路由和 Web 服务。
 """
-import os
-import json
 import logging
+import time
 from pathlib import Path
-from typing import Callable
 
-from fastapi import FastAPI, Request
-from fastapi.responses import StreamingResponse, FileResponse, JSONResponse
+from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
-from web.sse_handler import SSEHandler
+from web.ws_handler import WSHandler
 
 logger = logging.getLogger("web.server")
 
@@ -21,25 +19,23 @@ logger = logging.getLogger("web.server")
 def create_app(
     config: dict,
     event_bus,
-    registry,
     paths,
-    pipeline_runner: Callable = None,
-    display_buffer=None,
+    inference_sync=None,
 ) -> FastAPI:
     """创建 FastAPI 应用"""
 
     app = FastAPI(title="Hedian A_DemoSrc")
 
-    # SSE 处理器
-    sse_handler = SSEHandler()
+    # WebSocket 处理器
+    ws_handler = WSHandler()
 
     # 流水线状态
     pipeline_state = {"status": "idle", "thread": None}
 
     # 保存到 app.state 供外部访问
-    app.state.sse_handler = sse_handler
+    app.state.ws_handler = ws_handler
     app.state.pipeline_state = pipeline_state
-    app.state.display_buffer = display_buffer
+    app.state.inference_sync = inference_sync
 
     @app.get("/")
     async def index():
@@ -50,7 +46,6 @@ def create_app(
     @app.post("/start")
     async def start(request: Request):
         """启动流水线"""
-        import time as _time
         from core.redis_conn import get_redis_client
         r = get_redis_client(
             host=config.get("_redis_host", "localhost"),
@@ -66,15 +61,15 @@ def create_app(
         for key in r.scan_iter("gaze:*"):
             r.delete(key)
 
-        sig_time = _time.time()
+        sig_time = time.time()
         r.set("pipeline:start_signal", str(sig_time), ex=3600)
 
         from datetime import datetime
         new_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
         config["run_id"] = new_run_id
 
-        if display_buffer:
-            display_buffer.reset()
+        if inference_sync:
+            inference_sync.reset()
 
         event_bus.publish("pipeline.start", {"run_id": new_run_id}, ts=sig_time)
 
@@ -83,39 +78,21 @@ def create_app(
         logger.info(f"启动信号已设置，run_id={new_run_id}，来源: {client_host}")
         return {"status": "started"}
 
-    @app.get("/data")
-    async def data_stream(request: Request):
-        """推理流 SSE"""
-        client_host = request.client.host if request.client else "unknown"
-        logger.info(f"SSE /data 连接建立，来源: {client_host}")
-
-        def generate():
-            client_queue = sse_handler.add_client()
-            try:
-                while True:
-                    try:
-                        item = client_queue.get(timeout=25)
-                    except Exception:
-                        yield ": keepalive\n\n"
-                        continue
-
-                    if item is None:
-                        yield f"data: {json.dumps({'source': 'done'})}\n\n"
-                        break
-
-                    yield f"data: {json.dumps(item, ensure_ascii=False)}\n\n"
-            finally:
-                sse_handler.remove_client(client_queue)
-
-        return StreamingResponse(
-            generate(),
-            media_type="text/event-stream",
-            headers={
-                "Cache-Control": "no-cache",
-                "X-Accel-Buffering": "no",
-                "Connection": "keep-alive",
-            },
-        )
+    @app.websocket("/ws/data")
+    async def websocket_data(websocket: WebSocket):
+        """推理流 WebSocket 高性能双工通道"""
+        import asyncio
+        ws_handler.set_event_loop(asyncio.get_running_loop())
+        await ws_handler.connect(websocket)
+        try:
+            while True:
+                # 保持双工接收心跳
+                await websocket.receive_text()
+        except WebSocketDisconnect:
+            ws_handler.disconnect(websocket)
+        except Exception as e:
+            logger.debug(f"WebSocket 非预期断开: {e}")
+            ws_handler.disconnect(websocket)
 
 
 
@@ -153,7 +130,7 @@ def create_app(
 
         return {
             "pipeline": status_val,
-            "sse_clients": sse_handler.get_client_count(),
+            "ws_clients": ws_handler.get_client_count(),
         }
 
     @app.get("/api/config")
