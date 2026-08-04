@@ -7,7 +7,7 @@ const props = defineProps<{
   progress: ProgressState
 }>()
 
-const emit = defineEmits<{ start: [] }>()
+const emit = defineEmits<{ start: []; stop: [] }>()
 
 function bar(pct: number) {
   const bl = 20, f = Math.round(pct / 100 * bl)
@@ -18,9 +18,29 @@ function bar(pct: number) {
 <template>
   <div class="header">
     <h1>⚛️ 核电站行为合规检测系统</h1>
-    <button class="start-btn" :disabled="status === 'running' || status === 'starting'" @click="emit('start')">
-      {{ status === 'running' || status === 'starting' ? '⏳ 推理中...' : status === 'done' ? '🔄 重新测试' : '👤 开始测试' }}
-    </button>
+    <div class="btn-group">
+      <button
+        v-if="status !== 'running' && status !== 'starting'"
+        class="start-btn"
+        @click="emit('start')"
+      >
+        {{ status === 'done' ? '🔄 重新测试' : '👤 开始测试' }}
+      </button>
+      <button
+        v-if="status === 'running' || status === 'starting'"
+        class="start-btn running-btn"
+        disabled
+      >
+        ⏳ 推理中...
+      </button>
+      <button
+        v-if="status === 'running' || status === 'starting'"
+        class="start-btn stop-btn"
+        @click="emit('stop')"
+      >
+        🛑 停止测试
+      </button>
+    </div>
     <div class="header-right">
       <div class="status-dot" :class="{ active: status === 'running' }"></div>
       <span class="header-status">{{ statusText }}</span>
