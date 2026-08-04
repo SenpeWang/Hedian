@@ -93,14 +93,24 @@ export function useWS() {
           // 收到统一二进制消息：解包
           const parsed = parseBinaryPacket(evt.data)
           if (!parsed) return
-          // 对齐 batch：入队按 30fps 出帧
+          const src = parsed.meta?.source
+          // 直推单事件（segment_report）：立即处理，不进播放队列
+          // 判定依据：meta 顶层有 source 字段而无 globalSec（非对齐 batch）
+
+          // 正常对齐 batch：入队按 30fps 出帧
           // 已渲染的 batch 由 rAF 循环 shift() 出队清除，ObjectURL 在下一帧覆盖时 revoke
           playbackQueue.push(parsed)
         } else {
           // 收到文本消息：done 哨兵或直推数据(如 segment_report_stream)
           const d = JSON.parse(evt.data)
           if (d.source === 'done') {
-            eofReceived = true  // 不立即置 done，等队列排空
+            if (d.tag === 'stop') {
+              status.value = 'done'
+              statusText.value = '🛑 已停止'
+              stopPlaybackLoop()
+            } else {
+              eofReceived = true  // 不立即置 done，等队列排空
+            }
           } else if (d.tag === 'segment_report_stream') {
             bufferSegReportStream(d)
             checkUnlockReports(unifiedBatch.globalSec)
@@ -196,6 +206,14 @@ export function useWS() {
       cancelAnimationFrame(rafId)
       rafId = null
     }
+    const audioEl = document.getElementById('mainAudio') as HTMLAudioElement
+    if (audioEl) {
+      audioEl.pause()
+      audioEl.removeAttribute('src')
+      audioEl.load()
+    }
+    lastRealTime = 0
+    lastGlobalSec = 0
   }
 
   // ── 出帧：应用一个 batch 到响应式状态 ──
@@ -258,8 +276,16 @@ export function useWS() {
     if (d.flow_end && Array.isArray(d.flow_end)) {
       for (const fe of d.flow_end) addFlow(fe, false)
     }
-    // 画面渲染滴答同步解锁评估卡片：评估报告由文本帧直推（onmessage 文本分支处理），
-    // 此处仅按画面 globalSec 推进触发 checkUnlockReports 解锁卡片展示
+    // 8. 流式打字机渲染 Qwen 评估报告 chunk 碎片
+    if (d.segment_report_stream && Array.isArray(d.segment_report_stream)) {
+      for (const s of d.segment_report_stream) bufferSegReportStream(s)
+    }
+    // 9. 最终评估报告（包含分数与完整文本）
+    if (d.segment_report && Array.isArray(d.segment_report)) {
+      for (const r of d.segment_report) bufferSegReport(r)
+    }
+
+    // 10. 画面渲染滴答同步解锁评估卡片（视效画面物理到达流程结束点时打字吐流）
     checkUnlockReports(batch.globalSec)
   }
 
@@ -497,8 +523,20 @@ export function useWS() {
   function totalCount() { return segScores.value.reduce((a, b) => a + b, 0) }
   function avgScore() { return segScores.value.length > 0 ? (totalCount() / segScores.value.length).toFixed(1) : '-' }
 
+  async function stopPipeline() {
+    statusText.value = '⏳ 正在停止...'
+    try {
+      await fetch('/stop', { method: 'POST' })
+    } catch (e) {
+      console.error('停止请求失败:', e)
+    }
+    status.value = 'done'
+    statusText.value = '🛑 已停止'
+    stopPlaybackLoop()
+  }
+
   return {
-    status, statusText, startPipeline, fmt,
+    status, statusText, startPipeline, stopPipeline, fmt,
     voiceEntries, people, gaze, flowEvents,
     segCards, segScores, supN, ticketN, noticeN,
     progress, totalCount, avgScore,
