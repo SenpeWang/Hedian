@@ -11,6 +11,10 @@ const ws = useWS()
 function handleStart() {
   ws.startPipeline()
 }
+
+function handleStop() {
+  ws.stopPipeline()
+}
 </script>
 
 <template>
@@ -20,6 +24,7 @@ function handleStart() {
     :status-text="ws.statusText.value"
     :progress="ws.progress"
     @start="handleStart"
+    @stop="handleStop"
   />
 
   <div class="main">
