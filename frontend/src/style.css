@@ -7,9 +7,13 @@ body { font-family: 'Segoe UI', sans-serif; background: #0a0e1a; color: #e0e6f0;
 
 .header { display: flex; align-items: center; padding: 5px 14px; background: linear-gradient(135deg, #0d1224, #141b2d); border-bottom: 1px solid #1e2a42; justify-content: space-between; min-height: 36px }
 .header h1 { font-size: 15px; color: #00d4ff; white-space: nowrap }
+.btn-group { display: flex; align-items: center; gap: 8px }
 .start-btn { padding: 5px 20px; border: 1px solid #00d4ff; border-radius: 5px; background: linear-gradient(135deg, rgba(0,212,255,.1), rgba(0,100,200,.15)); color: #00d4ff; cursor: pointer; font-size: 13px; font-weight: 600; transition: .3s }
+.start-btn.running-btn { border-color: #6b7a90; background: rgba(30,42,66,.5); color: #8899aa; opacity: 1 }
+.start-btn.stop-btn { border-color: #ff4d4d; background: linear-gradient(135deg, rgba(255,77,77,.2), rgba(200,0,0,.35)); color: #ff4d4d }
 .start-btn:hover { transform: scale(1.05); box-shadow: 0 0 10px rgba(0,212,255,.3) }
-.start-btn:disabled { opacity: .5; cursor: default; transform: none }
+.start-btn.stop-btn:hover { transform: scale(1.05); box-shadow: 0 0 10px rgba(255,77,77,.5) }
+.start-btn:disabled { opacity: .7; cursor: default; transform: none }
 .header-right { display: flex; align-items: center; gap: 8px }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; background: #6b7a90; flex-shrink: 0 }
 .status-dot.active { background: #00ff88; animation: pulse 1.5s infinite }
