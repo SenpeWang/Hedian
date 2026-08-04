@@ -83,7 +83,7 @@ def _run_module_process(
     *,
     env_setup=None,
 ):
-    """业务模块进程的通用模板
+    """业务模块进程的通用模板（单次推理，完成后自动退出释放 VRAM）
 
     Args:
         module_name: 模块名称，用于日志和 EventStream 消费者名
@@ -93,7 +93,6 @@ def _run_module_process(
     # 限制业务子模块仅可见指定的推理 GPU
     import os
     os.environ["CUDA_VISIBLE_DEVICES"] = config_dict.get("gpu", "1")
-    import redis
     from pathlib import Path
     from core.event_bus import EventStream
     from core.inference_stream import InferenceStream
@@ -107,7 +106,7 @@ def _run_module_process(
         add_root_file_handler(_log_file)
 
     logger = setup_logger(f"process.{module_name}")
-    logger.info(f"{module_name} 进程启动")
+    logger.info(f"{module_name} 进程启动，run_id={run_id}")
 
     paths = PathManager(
         base_dir=Path(paths_dict["base_dir"]),
@@ -116,50 +115,32 @@ def _run_module_process(
         result_root=Path(paths_dict["result_root"]),
     )
 
-    _r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
-    last_signal = _r.get(START_SIGNAL_KEY)
-    _r.close()
-    logger.info(f"{module_name} 进程启动，当前信号={last_signal}，等待用户点击'开始测试'触发新推理")
+    active_result_dir = str(paths.get_result_dir(run_id))
+    for sub in ("voice", "tracker", "gaze", "behavior", "qwen", "evaluation"):
+        os.makedirs(os.path.join(active_result_dir, sub), exist_ok=True)
 
-    while True:
-        last_signal = wait_for_start_signal(REDIS_HOST, REDIS_PORT, REDIS_DB, last_signal)
-        
-        # 动态解析信号代际生成全新的批次运行ID，彻底隔离每次运行的结果目录！
-        try:
-            sig_time = float(last_signal)
-            active_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
-        except Exception:
-            active_run_id = run_id
-            
-        logger.info(f"{module_name} 进程开始新一轮推理 run_id={active_run_id}")
-        
-        # 为全新的动态 run_id 自动创建结果子目录结构，防止路径缺失异常
-        active_result_dir = str(paths.get_result_dir(active_run_id))
-        for sub in ("voice", "tracker", "gaze", "behavior", "qwen", "evaluation"):
-            os.makedirs(os.path.join(active_result_dir, sub), exist_ok=True)
-            
-        # 动态将当前子进程的日志重定向到当前活跃 Session 文件夹下的日志文件
-        new_log_file = os.path.join(active_result_dir, "run.log")
-        from core.logger import redirect_file_logger
-        redirect_file_logger(new_log_file)
-            
-        event_bus = EventStream(
-            redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
-            consumer_name=f"{module_name}_process",
-        )
-        inference_stream = InferenceStream(
-            fps=config_dict.get("fps", 30),
-            redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
-        )
-        event_bus.start()
-        inference_stream.start()
+    new_log_file = os.path.join(active_result_dir, "run.log")
+    from core.logger import redirect_file_logger
+    redirect_file_logger(new_log_file)
 
-        module = module_factory(event_bus, config_dict, paths, inference_stream)
-        module.start(video_path, active_run_id)
+    event_bus = EventStream(
+        redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
+        consumer_name=f"{module_name}_process",
+    )
+    inference_stream = InferenceStream(
+        fps=config_dict.get("fps", 30),
+        redis_host=REDIS_HOST, redis_port=REDIS_PORT, redis_db=REDIS_DB,
+    )
+    event_bus.start()
+    inference_stream.start()
 
-        inference_stream.stop()
-        event_bus.stop()
-        logger.info(f"{module_name} 进程完成本轮推理 run_id={run_id}，等待下一次触发")
+    module = module_factory(event_bus, config_dict, paths, inference_stream)
+    module.start(video_path, run_id)
+
+    inference_stream.stop()
+    event_bus.stop()
+    logger.info(f"{module_name} 进程完成本轮推理 run_id={run_id}，顺利退出并 100% 释放 GPU VRAM")
+
 
 
 def run_voice_process(config_dict, paths_dict, video_path, run_id):
@@ -270,9 +251,27 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         else:
             logger.info(f"制度 {name} 已禁用")
 
-    # 定义 pipeline 启动通知回调，以动态重置所有数据记录器和规则的结果路径目录
+    active_worker_processes = []
+
+    def stop_pipeline_processes() -> int:
+        nonlocal active_worker_processes
+        count = 0
+        for name, p in list(active_worker_processes):
+            if p.is_alive():
+                logger.info(f"终止子进程 [{name}]...")
+                p.terminate()
+                p.join(timeout=1.0)
+                count += 1
+            else:
+                p.join(timeout=0.1)
+        active_worker_processes.clear()
+        import multiprocessing
+        multiprocessing.active_children()  # 触发 Linux 内核全量清理已结束进程的 <defunct> 僵尸表项
+        return count
+
+    # 定义 pipeline 启动通知回调，动态按需启动 GPU 推理子进程
     def on_pipeline_start(msg):
-        nonlocal flow_result_dir
+        nonlocal flow_result_dir, active_worker_processes
         data = msg.get("data", {})
         active_run_id = data.get("run_id")
         if not active_run_id:
@@ -280,14 +279,16 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         active_result_dir = str(paths.get_result_dir(active_run_id))
         flow_result_dir = active_result_dir
         config_dict["run_id"] = active_run_id
-        # 音频已通过 /api/audio/stream 加载，无需旧切片
         
-        # 动态将当前 Web 进程的日志重定向到当前活跃 Session 文件夹下的日志文件
+        # 1. 如有上一轮残留的推理进程，安全终止与回收状态码
+        stop_pipeline_processes()
+
+        # 动态将当前 Web 进程的日志重定向到当前 Session run.log
         new_log_file = os.path.join(active_result_dir, "run.log")
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
         
-        # 清理推理流与模块间事件流 Redis key，防止上一轮旧数据混入新 run
+        # 清理 Redis 缓存
         try:
             r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
             for key in r.scan_iter("module:*"):
@@ -311,7 +312,38 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         if flow_evaluator:
             flow_evaluator.reset()
             flow_evaluator.set_result_dir(active_result_dir)
-            
+
+        # 2. 按需动态启动推理子进程（完成推理后自动 exit(0) 退出全量释放 VRAM）
+        v_path = config_dict.get("video_path")
+        if config_dict.get("modules", {}).get("voice"):
+            p = multiprocessing.Process(
+                target=run_voice_process,
+                args=(config_dict, paths_dict, v_path, active_run_id),
+                name="voice", daemon=False,
+            )
+            p.start()
+            active_worker_processes.append(("voice", p))
+
+        if config_dict.get("modules", {}).get("tracker"):
+            p = multiprocessing.Process(
+                target=run_tracker_process,
+                args=(config_dict, paths_dict, v_path, active_run_id),
+                name="tracker", daemon=False,
+            )
+            p.start()
+            active_worker_processes.append(("tracker", p))
+
+        if config_dict.get("modules", {}).get("behavior"):
+            p = multiprocessing.Process(
+                target=run_behavior_process,
+                args=(config_dict, paths_dict, v_path, active_run_id),
+                name="behavior", daemon=False,
+            )
+            p.start()
+            active_worker_processes.append(("behavior", p))
+
+        logger.info(f"已按需启动 {len(active_worker_processes)} 个推理子进程: {[n for n, _ in active_worker_processes]}")
+
     event_bus.subscribe("pipeline.start", on_pipeline_start)
     event_bus.start()
 
@@ -321,19 +353,23 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         paths=paths,
         inference_sync=inference_sync,
     )
+    app.state.stop_pipeline = stop_pipeline_processes
 
     # 大模型评估结果和流式推理文本：具备高实时性，不应随视频播放进度被拖延（对齐）
-    # 直推函数：评估报告(stream/report) 绕过 batch 对齐，经 WebSocket 文本帧直推前端
-    # 走 push_text 而非 push：避免直推事件被塞进二进制 batch 协议（无视频帧、无 globalSec，
-    # 否则前端 globalSec 被拉回 0、meta 结构不匹配，导致评估结果无法识别）
+    # 直接推送函数：评估结果等高实时性事件绕过 batch 对齐，直接经 WebSocket 推送前端
+    # 但必须等该流程在前端播放结束后（即全局时钟追赶上流程结束时间）才允许推送
     def push_direct(event_type: str, data: dict) -> None:
-        """后端评估直推函数：完全绕过对齐中间件，零阻塞、零延迟直推 WebSocket 文本管道"""
-        app.state.ws_handler.push_text({
-            "source": event_type,
-            "localSec": data.get("localSec"),
-            "tag": data.get("tag"),
-            "data": data.get("data"),
-        })
+        """后端评估直推函数：完全绕过对齐中间件，零阻塞、零延迟直推 WebSocket 管道"""
+        if app.state.ws_handler:
+            app.state.ws_handler.push({
+                "source": event_type,
+                "localSec": data.get("localSec"),
+                "tag": data.get("tag"),
+                "data": data.get("data"),
+            })
+        else:
+            if inference_sync:
+                inference_sync.push_display(event_type, data)
 
     def push_sync(event_type: str, data: dict):
         """系统通知推送：经过对齐中间件打包入 Batch meta，与视频帧物理时间点同帧出屏"""
@@ -345,9 +381,8 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         event_bus=event_bus,
         result_dir=flow_result_dir,
         fps=config_dict.get("fps", 30),
-        sync_fn=push_sync,         # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
-        direct_fn=push_direct,     # 流式评估 chunk(segment_report_stream) ➔ 文本帧直推
-        inference_fn=push_direct,  # 最终评估报告(segment_report) ➔ 文本帧直推
+        sync_fn=push_sync,        # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
+        direct_fn=push_direct,    # 评估报告(stream/report) ➔ 完全不经过对齐中间件
     )
     logger.info(f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}")
 
@@ -371,26 +406,11 @@ def run_web_process(config_dict, paths_dict, run_id=None):
                     inference_sync.flush_remaining()
                 except Exception as e:
                     logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
+                # 4. 回收退场的子进程状态码，彻底清除操作系统 ps aux 中的 <defunct> 僵尸进程条目
+                stop_pipeline_processes()
+                logger.info("推理流与评估流程已全部完成，GPU 推理子进程与僵尸表项已 100% 清理，Web 保持运行")
             app.state.ws_handler.push(event)
-            # 一次性运行：done 送达后（此时评估已全部完成、结果已落盘）终止所有模块子进程并退出 Web。
-            # 模块子进程即 GPU 占用进程，等价于训练结束后 kill GPU 进程，确保 GPU 显存随之释放；
-            # main 的监控循环检测到 web 退出后会自然收尾退出。
-            if event is None:
-                import threading
 
-                def _terminate_pipeline():
-                    time.sleep(2.0)  # 确保 WebSocket 已把 done 送达前端
-                    logger.info("推理结果已全部展示完毕，终止所有模块子进程并退出 Web（释放 GPU）")
-                    try:
-                        import subprocess
-                        # [p] 方括号防止 pkill 匹配到自身命令行
-                        subprocess.run(["pkill", "-f", "main.py --g[p]u"], timeout=10)
-                    except Exception as e:
-                        logger.error(f"终止模块子进程失败: {e}")
-                    time.sleep(0.5)
-                    os._exit(0)
-
-                threading.Thread(target=_terminate_pipeline, daemon=True).start()
         inference_sync.set_push_callback(push_wrapper)
         inference_sync.start()
 
@@ -403,7 +423,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
 
 
 def main():
-    """协调器：启动各模块进程"""
+    """入口主控制进程：只启动 Web 服务进程（0 MB 显存占用），等待用户在前端点击‘开始测试’按需启动推理子进程"""
     config_path = args.config or os.path.join(BASE_DIR, "config.yaml")
     config = ConfigManager(config_path)
     paths = PathManager.from_config(config.to_dict(), BASE_DIR)
@@ -452,7 +472,6 @@ def main():
     r2 = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
     r2.delete(START_SIGNAL_KEY)
     r2.close()
-    logger.info("已清除启动信号，等待用户点击'开始测试'")
 
     r3 = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
     for key in r3.scan_iter("gaze:*"):
@@ -464,71 +483,10 @@ def main():
     for key in r3.scan_iter("pipeline:*"):
         r3.delete(key)
     r3.close()
-    logger.info("已清理 Redis 缓存")
+    logger.info("已清理 Redis 缓存，准备启动 Web 服务进程")
 
-    processes = []
-
-    if config.modules.get("voice"):
-        p = multiprocessing.Process(
-            target=run_voice_process,
-            args=(config_dict, paths_dict, config.video_path, run_id),
-            name="voice", daemon=False,
-        )
-        p.start()
-        processes.append(("voice", p))
-
-    if config.modules.get("tracker"):
-        p = multiprocessing.Process(
-            target=run_tracker_process,
-            args=(config_dict, paths_dict, config.video_path, run_id),
-            name="tracker", daemon=False,
-        )
-        p.start()
-        processes.append(("tracker", p))
-
-    if config.modules.get("behavior"):
-        p = multiprocessing.Process(
-            target=run_behavior_process,
-            args=(config_dict, paths_dict, config.video_path, run_id),
-            name="behavior", daemon=False,
-        )
-        p.start()
-        processes.append(("behavior", p))
-
-    # 凝视估计由 tracker 模块内部调用（独立实现，非独立进程）
-
-    p = multiprocessing.Process(
-        target=run_web_process,
-        args=(config_dict, paths_dict, run_id),
-        name="web", daemon=False,
-    )
-    p.start()
-    processes.append(("web", p))
-
-    logger.info(f"已启动 {len(processes)} 个进程: {[name for name, _ in processes]}")
-
-    # 监控所有子进程：模块进程异常退出时记录告警（便于定位），web 进程退出则收尾
-    module_procs = [(name, p) for name, p in processes if name != "web"]
-    web_p = processes[-1][1] if processes and processes[-1][0] == "web" else None
-    crashed = set()
-    while True:
-        for name, p in module_procs:
-            if name in crashed:
-                continue
-            if not p.is_alive():
-                code = p.exitcode
-                if code not in (0, None):
-                    logger.error(f"模块进程 [{name}] 异常退出 (exitcode={code})，该路数据将停更；请检查对应日志")
-                else:
-                    logger.info(f"模块进程 [{name}] 已正常退出 (exitcode={code})")
-                crashed.add(name)
-        if web_p is None or not web_p.is_alive():
-            logger.info("Web 进程结束")
-            break
-        time.sleep(1.0)
-
-    logger.info("═══ 流水线完成 ═══")
-    logger.info(f"结果目录: {result_dir}")
+    # 直接启动 Web 控制服务进程（常驻 0 MB VRAM 监听 HTTP/WebSocket）
+    run_web_process(config_dict, paths_dict, run_id)
 
 
 if __name__ == "__main__":
