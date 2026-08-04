@@ -78,6 +78,35 @@ def create_app(
         logger.info(f"启动信号已设置，run_id={new_run_id}，来源: {client_host}")
         return {"status": "started"}
 
+    @app.post("/stop")
+    async def stop(request: Request):
+        """主动停止当前运行中的推理流水线"""
+        stop_fn = getattr(app.state, "stop_pipeline", None)
+        stopped_count = 0
+        if stop_fn:
+            stopped_count = stop_fn()
+
+        from core.redis_conn import get_redis_client
+        r = get_redis_client(
+            host=config.get("_redis_host", "localhost"),
+            port=config.get("_redis_port", 6379),
+            db=config.get("_redis_db", 0),
+        )
+        for key in r.scan_iter("inference:*"):
+            r.delete(key)
+        for key in r.scan_iter("module:*"):
+            r.delete(key)
+        for key in r.scan_iter("pipeline:*"):
+            r.delete(key)
+
+        if inference_sync:
+            inference_sync.reset()
+
+        pipeline_state["status"] = "idle"
+        ws_handler.push({"source": "done", "tag": "stop", "data": {"reason": "user_stopped"}})
+        logger.info(f"收到主动停止请求，已终止 {stopped_count} 个运行中的推理子进程，显存与状态切回 idle")
+        return {"status": "stopped", "terminated_processes": stopped_count}
+
     @app.websocket("/ws/data")
     async def websocket_data(websocket: WebSocket):
         """推理流 WebSocket 高性能双工通道"""
@@ -141,9 +170,17 @@ def create_app(
     async def get_modules():
         return {"modules": config.get("modules", {})}
 
+    class NoCacheStaticFiles(StaticFiles):
+        async def get_response(self, path: str, scope):
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+            return response
+
     # 静态文件兜底（所有未匹配路由 → dist/）
     dist_dir = Path(__file__).parent.parent / "frontend" / "dist"
     if dist_dir.is_dir():
-        app.mount("/", StaticFiles(directory=str(dist_dir), html=True), name="static")
+        app.mount("/", NoCacheStaticFiles(directory=str(dist_dir), html=True), name="static")
 
     return app
