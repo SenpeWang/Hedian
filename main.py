@@ -52,27 +52,6 @@ logger = setup_logger("main")
 # 启动信号 Redis key
 START_SIGNAL_KEY = "pipeline:start_signal"
 
-
-def wait_for_start_signal(redis_host="localhost", redis_port=6379, redis_db=0, last_signal=None):
-    """等待用户点击'开始测试'的信号，代际机制确保只响应新信号
-
-    Args:
-        last_signal: 上一次消费的信号值，仅当 Redis 中的信号值不同（且非空）时返回
-
-    Returns:
-        新的信号值（时间戳字符串）
-    """
-    r = redis.Redis(host=redis_host, port=redis_port, db=redis_db, decode_responses=True)
-    logger.info(f"等待用户点击'开始测试'... (last_signal={last_signal})")
-    while True:
-        signal = r.get(START_SIGNAL_KEY)
-        if signal and signal != last_signal:
-            logger.info(f"收到启动信号，开始推理 (signal={signal})")
-            r.close()
-            return signal
-        time.sleep(0.5)
-
-
 def _run_module_process(
     module_name: str,
     module_factory,
