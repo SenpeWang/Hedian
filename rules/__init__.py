@@ -2,10 +2,10 @@
 制度层
 
 包含所有制度：
-- supervision_regulation: 监护制度
-- self_ticket_regulation: 自唱票制度
+- SupervisionRule: 监护制度
+- SelfTicketRule: 自唱票制度
 
-所有制度继承 BaseRegulation，实现统一接口。
+所有制度继承 BaseRule，实现统一接口。
 """
 from rules.rule_base import BaseRule, RuleRegistry
 from rules.supervision_rule import SupervisionRule
