@@ -13,7 +13,6 @@
   触发绑定，保存为 key_moment。
   距离本身不是 key_moment，仅作为绑定触发条件。
 """
-import json
 import os
 import logging
 
