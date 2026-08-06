@@ -8,7 +8,7 @@
 2. 监视主控室人数，当人员少于 1 人时，进行一次记录。
 """
 import logging
-from typing import Dict, Optional, List
+from typing import Optional, List
 
 from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule

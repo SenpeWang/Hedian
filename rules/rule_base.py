@@ -9,7 +9,7 @@ import importlib
 import pkgutil
 import logging
 from abc import ABC, abstractmethod
-from typing import Callable, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from core.event_bus import EventStream
 
