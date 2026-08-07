@@ -76,7 +76,6 @@ class SupervisionRule(BaseRule):
         # 操纵人员的最新距离状态
         self._operator_states = {}
         self._ever_bound = False
-        self._ever_bound = False
 
     def name(self) -> str:
         """制度名称"""
