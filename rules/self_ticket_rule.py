@@ -141,6 +141,7 @@ class SelfTicketRule(BaseRule):
         self._operation_executed = False
         self._confirm_closed = False
 
+
 def register():
     """模块注册入口"""
     return SelfTicketRule()

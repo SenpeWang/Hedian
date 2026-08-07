@@ -163,7 +163,7 @@ class TrackerModule(BaseModule):
                 # 目标检测
                 high_dets, low_dets = self._detector.detect_two_thresholds(frame)
                 detections = high_dets + low_dets
-                
+
 
                 # 目标跟踪
                 tracks = self._tracker.track(frame, detections)

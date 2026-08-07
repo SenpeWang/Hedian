@@ -82,10 +82,10 @@ class InfoNoticeRule(BaseRule):
         self._active = True
         self._flow_id = self._next_flow_id()
         self._flow_start_sec = ts
-        
+
         # 判定是否伴随举手：如果在发出语音前的 5 秒内有举手动作，则判定为“举手+通报”
         has_hand_raise = (0 <= (ts - self._last_hand_raise_ts) <= 5.0)
-        
+
         self._checklist = {
             "raise_hand_and_shout": has_hand_raise,
             "others_stopped_and_listened": False,
@@ -196,6 +196,7 @@ class InfoNoticeRule(BaseRule):
         }
         self._last_hand_raise_ts = -999.0
         self._last_voice_shout_ts = -999.0
+
 
 def register():
     """模块注册入口"""

@@ -36,7 +36,7 @@ class EventTopic:
     # Behavior -> EventStream
     BEHAVIOR_HAND_RAISED = "behavior.hand_raised"
     BEHAVIOR_FINGER_SCREEN = "behavior.finger_screen"
-    BEHAVIOR_FINGER_FILE = "behavior.finger_file" 
+    BEHAVIOR_FINGER_FILE = "behavior.finger_file"
 
     # Gaze -> EventStream
     GAZE_ATTENTION = "gaze.attention"

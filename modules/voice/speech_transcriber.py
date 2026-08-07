@@ -415,10 +415,10 @@ def normalize_spoken_text(text):
     if not text:
         return ""
     text = unicodedata.normalize("NFKC", str(text)).upper()
-    
+
     # 替换中文“点”为小数点“.”
     text = text.replace("点", ".")
-    
+
     for word, letter in LETTER_WORDS.items():
         text = text.replace(word, letter)
     text = re.sub(
@@ -433,10 +433,10 @@ def normalize_spoken_text(text):
     # 用负向后行断言，避免对已归一化的 "1EAS" 再次添加前缀变成 "11EAS"
     text = re.sub(r"(?<![1-9])EAS", "1EAS", text)
     text = text.replace("ES", "1EAS")
-    
+
     # RPR 纠错归一为 RPA
     text = text.replace("RPR", "RPA")
-    
+
     # 只保留字母数字和小数点
     return re.sub(r"[^A-Z0-9\.]", "", text)
 
@@ -472,10 +472,10 @@ def normalize_devices_in_text(text: str) -> str:
     """
     if not text:
         return ""
-    
+
     # 预处理：去除所有的空格和制表符，以匹配 ASR 偶发的空格分割（如 "E E S" 或 "T 1 R P A"）
     cleaned_text = re.sub(r"\s+", "", text)
-    
+
     def _norm(m):
         normalized = normalize_spoken_text(m.group(0))
         # 根据前缀严格校验其各自正确的字符长度
@@ -490,11 +490,11 @@ def normalize_devices_in_text(text: str) -> str:
             is_valid = (len(normalized) == 8)
         elif normalized.startswith("SM"):
             is_valid = (len(normalized) == 3)
-            
+
         if is_valid:
             return normalized
         return m.group(0)  # 长度或格式不符，不予归一化，保留原样
-        
+
     return LOOSE_DEVICE_PATTERN.sub(_norm, cleaned_text)
 
 
@@ -534,7 +534,7 @@ def match_keyword_by_pinyin(text: str, keyword: str) -> bool:
     """
     if keyword in text:
         return True
-    
+
     # 动态设定最大编辑距离
     max_dist = 1 if len(keyword) >= 4 else 0
     return match_keyword_by_pinyin_levenshtein(text, keyword, max_distance=max_dist)

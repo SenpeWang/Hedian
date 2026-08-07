@@ -412,10 +412,10 @@ class FlowEvaluationManager:
                 active_futures = list(self._eval_futures.values())
             if not active_futures:
                 break
-            
+
             # 等待当前的所有活跃任务
             concurrent.futures.wait(active_futures, timeout=1.0)
-            
+
             # 超时保护（300秒）
             if time.time() - start_wait > 300.0:
                 logger.warning("等待大模型评估完成超时！强行终止")

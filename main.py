@@ -258,7 +258,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         active_result_dir = str(paths.get_result_dir(active_run_id))
         flow_result_dir = active_result_dir
         config_dict["run_id"] = active_run_id
-        
+
         # 1. 如有上一轮残留的推理进程，安全终止与回收状态码
         stop_pipeline_processes()
 
@@ -266,7 +266,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         new_log_file = os.path.join(active_result_dir, "run.log")
         from core.logger import redirect_file_logger
         redirect_file_logger(new_log_file)
-        
+
         # 清理 Redis 缓存
         try:
             r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
@@ -287,7 +287,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
                 rreg.reset()
                 if hasattr(rreg, "set_result_dir"):
                     rreg.set_result_dir(active_result_dir)
-        
+
         if flow_evaluator:
             flow_evaluator.reset()
             flow_evaluator.set_result_dir(active_result_dir)

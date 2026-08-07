@@ -84,7 +84,7 @@ function toggle(card: SegCard) {
           <div class="sc-bar" v-if="!card.streaming">
             <div class="sc-bar-fill" :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"></div>
           </div>
-          
+
           <!-- 🧠 大模型思考推理过程展示框 (打字中与打字完成全时段常驻显示) -->
           <div v-if="parseReportContent(card.streamBuffer || card.reportText).think" class="think-block">
             <div class="think-title">🧠 思考推理过程</div>

@@ -25,7 +25,7 @@ class PersonnelStatusRule(BaseRule):
         """
         self._config = config or {}
         self._event_bus = None
-        
+
         # 记录所有的违规情况
         self._violations: List[dict] = []
         # 当前的主控室人数状态
@@ -125,7 +125,7 @@ class PersonnelStatusRule(BaseRule):
                 if duration >= 10.0:
                     description = f"警报：主控室无人值守（人员少于1人）持续超过10S（实际持续 {duration:.1f}秒）"
                     logger.warning(f"人员状态违规 (PeopleCount): {description} @{ts:.1f}s")
-                    
+
                     violation = {
                         "localSec": self._no_people_start_ts,
                         "event": "NO_OPERATOR_VIOLATION",
