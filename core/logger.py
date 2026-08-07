@@ -82,7 +82,7 @@ def redirect_file_logger(new_log_file_path: str) -> None:
         if isinstance(handler, logging.FileHandler):
             root_logger.removeHandler(handler)
             handler.close()
-            
+
     # 创建并添加新 Session 的 FileHandler
     if new_log_file_path:
         os.makedirs(os.path.dirname(new_log_file_path), exist_ok=True)

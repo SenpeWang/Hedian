@@ -36,7 +36,7 @@ class FlowDataExtractor:
         self._redis = redis_client or redis.Redis(
             host="localhost", port=6379, db=0, decode_responses=True
         )
-        
+
         # 动态解析 config.yaml 确定启用的模块
         self._enabled_modules = {"voice", "tracker", "gaze", "behavior"}
         config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")

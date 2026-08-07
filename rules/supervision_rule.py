@@ -217,6 +217,7 @@ class SupervisionRule(BaseRule):
                 self._checklist["execution"] = True
             elif key_moment == "核对":
                 self._checklist["verification"] = True
+
     def _on_finger_screen(self, msg: dict) -> None:
         """处理手指指向屏幕事件"""
         if self._active:

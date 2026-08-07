@@ -1,3 +1,9 @@
+"""
+WebSocket 推送管理器
+
+单条二进制消息同时承载多路视频帧与 JSON 元数据，保证原子到达。
+"""
+
 import asyncio
 import json
 import logging
