@@ -30,7 +30,17 @@ data/
 models/
 
 # Documentation
-*.md
+docs/
 
 # Frontend dependencies
 frontend/node_modules/
+
+# Backup files
+*.bak
+*.bak.*
+
+
+# Root markdown files
+CLAUDE.md
+README.md
+git.md
