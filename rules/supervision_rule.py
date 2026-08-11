@@ -251,6 +251,12 @@ class SupervisionRule(BaseRule):
         # 记录每个操纵人员的最新监护状态
         self._operator_states[operator] = state
 
+        # 流程超时兜底（300 秒无进展自动关闭）
+        if self._active and ts - self._flow_start_sec > 300.0:
+            logger.warning(f"监护制流程超时未结束，自动关闭 flow_id={self._flow_id}")
+            self._close_flow(ts, source="timeout")
+            return
+
         # 只在流程活跃时处理距离状态
         if not self._active:
             return
