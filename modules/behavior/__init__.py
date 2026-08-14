@@ -1,26 +1,14 @@
-"""
-行为检测模块
-
-负责：
-- 举手检测（供tracker调用）
-- 手指屏幕检测（camBUP）
-- 手指文件检测（camPOP）
-
-使用方式：
-    from modules.behavior import BehaviorModule
-    module = BehaviorModule(event_bus, config, paths, inference_stream)
-    module.start(video_path, run_id)
-"""
+"""行为检测模块：举手（tracker 调用）+ 手指屏幕/文件检测（camPOP."""
 from modules.behavior.behavior_module import BehaviorModule
 from modules.behavior.hand_raiser import HandRaiser
-from modules.behavior.finger_bup_detector import FingerBupDetector
-from modules.behavior.finger_pop_detector import FingerPopDetector
+from modules.behavior.screen_detect import FingerScreenDetector
+from modules.behavior.file_detector import FingerFileDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 
 __all__ = [
     "BehaviorModule",
     "HandRaiser",
-    "FingerBupDetector",
-    "FingerPopDetector",
+    "FingerScreenDetector",
+    "FingerFileDetector",
     "BehaviorStorage",
 ]
