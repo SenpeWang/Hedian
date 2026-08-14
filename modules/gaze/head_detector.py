@@ -1,5 +1,5 @@
 """
-头部检测模块
+头部检测模块.
 
 使用 YOLOv8 ONNX 模型检测头部。
 """
@@ -35,9 +35,10 @@ logger = logging.getLogger("module.gaze.head_detector")
 
 
 class HeadBox:
-    """头部边界框"""
+    """头部边界框."""
 
     def __init__(self, score: float, x1: int, y1: int, x2: int, y2: int):
+        """初始化."""
         self.score = score
         self.x1 = x1
         self.y1 = y1
@@ -46,18 +47,18 @@ class HeadBox:
 
     @property
     def cx(self) -> int:
-        """中心点 x 坐标"""
+        """中心点 x 坐标."""
         return (self.x1 + self.x2) // 2
 
     @property
     def cy(self) -> int:
-        """中心点 y 坐标"""
+        """中心点 y 坐标."""
         return (self.y1 + self.y2) // 2
 
 
 class HeadDetector:
     """
-    头部检测器
+    头部检测器.
 
     使用 YOLOv8 ONNX 模型检测头部。
     """
@@ -72,7 +73,7 @@ class HeadDetector:
         providers: Optional[List[str]] = None,
     ):
         """
-        初始化头部检测器
+        初始化头部检测器.
 
         Args:
             model_path: 模型路径
@@ -108,7 +109,7 @@ class HeadDetector:
 
     def detect(self, image: np.ndarray) -> List[HeadBox]:
         """
-        检测头部
+        检测头部.
 
         Args:
             image: BGR 图像

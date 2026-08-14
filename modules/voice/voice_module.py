@@ -1,5 +1,5 @@
 """
-语音模块入口
+语音模块入口.
 
 继承 BaseModule，实现统一接口。
 """
@@ -22,7 +22,7 @@ logger = logging.getLogger("module.voice")
 
 class VoiceModule(BaseModule):
     """
-    语音模块
+    语音模块.
 
     负责语音转文字和意图分类。
     """
@@ -34,6 +34,7 @@ class VoiceModule(BaseModule):
         paths: PathManager,
         inference_stream: InferenceStream,
     ):
+        """初始化."""
         super().__init__(event_bus, config, paths, inference_stream)
         self._transcriber = None
         self._intent_classifier = None
@@ -42,10 +43,11 @@ class VoiceModule(BaseModule):
 
     @property
     def module_name(self) -> str:
+        """模块名称."""
         return "voice"
 
     def initialize(self) -> bool:
-        """初始化语音模块"""
+        """初始化语音模块."""
         try:
             # 初始化语音转文字器
             voice_config = self.config.get("voice", {})
@@ -68,7 +70,7 @@ class VoiceModule(BaseModule):
             return False
 
     def process_video(self, video_path: str) -> None:
-        """处理视频，逐段转录、逐段分类、逐段推送"""
+        """处理视频，逐段转录、逐段分类、逐段推送."""
         try:
             # 提取音频
             audio_path = self._extract_audio(video_path)
@@ -79,7 +81,7 @@ class VoiceModule(BaseModule):
             logger.info("开始语音转文字（逐段模式）...")
 
             def on_segment_done(words, seg_start, seg_end, total_dur):
-                """每段转录完成后的回调"""
+                """每段转录完成后的回调."""
                 if not words:
                     return
                 events = process_transcribed_words(words, sentence_gap_sec=self.config.get("voice", {}).get("sentence_gap_sec", 0.6))
@@ -116,10 +118,16 @@ class VoiceModule(BaseModule):
                     # 保存归一化后的文本，确保 voice_full_text.json 中的设备码为纯英文数字
                     event["text"] = display_text if text else event.get("text", "")
                     self._events.append(event)
+                
+                # 实时增量落盘：每段转录产出事件后立即原子写盘，确保 evaluation 随时可提取
+                if events and self._result_storage:
+                    self._result_storage.save_results(self._run_id, self._events)
+
                 self.update_progress(seg_end, total_dur)
                 logger.debug("voice segment %.1f-%.1fs: %d events", seg_start, seg_end, len(events))
 
             def voice_progress(current, total_duration):
+                """语音进度."""
                 self.update_progress(current, total_duration)
 
             self._transcriber.transcribe(
@@ -134,7 +142,7 @@ class VoiceModule(BaseModule):
             logger.error("语音处理失败: %s", e, exc_info=True)
 
     def _extract_audio(self, video_path: str) -> str:
-        """从视频提取音频"""
+        """从视频提取音频."""
         import subprocess
 
         # 使用当前推理的 run_id，确保音频文件与其他结果位于同一 result_dir
@@ -155,5 +163,5 @@ class VoiceModule(BaseModule):
             return None
 
     def save_results(self, run_id: str) -> None:
-        """保存语音结果（委托给 VoiceResultStorage）"""
+        """保存语音结果（委托给 VoiceResultStorage."""
         self._result_storage.save_results(run_id, self._events)

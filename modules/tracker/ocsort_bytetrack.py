@@ -1,5 +1,5 @@
 """
-OC-SORT + ByteTrack 融合跟踪器
+OC-SORT + ByteTrack 融合跟踪器.
 
 核心改进：
   1. 速度预测位置匹配 - 同时使用卡尔曼预测和last_observation，取最小距离
@@ -28,17 +28,30 @@ warnings.filterwarnings('ignore')
 
 
 class OCSORTKalman:
+    """卡尔曼滤波器（针对 OC-SORT 8维状态空间优化）.
+
+    状态向量: [center_x, center_y, aspect_ratio, height, v_cx, v_cy, v_a, v_h].
+    """
+
     _shared_R = None
     _shared_Q_pos = None
     _shared_Q_vel = None
 
     @classmethod
-    def set_parameters(cls, R=0.05, Q_pos=0.01, Q_vel=0.0001):
+    def set_parameters(cls, R: float = 0.05, Q_pos: float = 0.01, Q_vel: float = 0.0001) -> None:
+        """设置卡尔曼滤波器的测量噪声与过程噪声超参数.
+
+        Args:
+            R (float): 测量噪声协方差权重，默认 0.05.
+            Q_pos (float): 位置过程噪声权重，默认 0.01.
+            Q_vel (float): 速度过程噪声权重，默认 0.0001.
+        """
         cls._shared_R = R
         cls._shared_Q_pos = Q_pos
         cls._shared_Q_vel = Q_vel
 
     def __init__(self):
+        """初始化."""
         self.dim_x = 8
         self.dim_z = 4
 
@@ -61,18 +74,45 @@ class OCSORTKalman:
         self.Q[:4, :4] *= Q_pos_val
         self.Q[4:, 4:] *= Q_vel_val
 
-    def initiate(self, measurement):
+    def initiate(self, measurement: np.ndarray) -> tuple:
+        """根据初始观测框初始化状态均值与协方差矩阵.
+
+        Args:
+            measurement (np.ndarray): 初始测量值 [cx, cy, a, h].
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 初始状态均值向量与协方差矩阵.
+        """
         mean = np.zeros(self.dim_x)
         mean[:self.dim_z] = measurement
         covariance = self.P.copy()
         return mean, covariance
 
-    def predict(self, mean, covariance):
+    def predict(self, mean: np.ndarray, covariance: np.ndarray) -> tuple:
+        """执行卡尔曼滤波器的一步前向状态预测.
+
+        Args:
+            mean (np.ndarray): 当前状态均值向量.
+            covariance (np.ndarray): 当前状态协方差矩阵.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 预测后的状态均值与协方差矩阵.
+        """
         mean = self.F @ mean
         covariance = self.F @ covariance @ self.F.T + self.Q
         return mean, covariance
 
-    def update(self, mean, covariance, measurement):
+    def update(self, mean: np.ndarray, covariance: np.ndarray, measurement: np.ndarray) -> tuple:
+        """使用最新测量值执行卡尔曼更新步骤.
+
+        Args:
+            mean (np.ndarray): 预测状态均值.
+            covariance (np.ndarray): 预测状态协方差.
+            measurement (np.ndarray): 实际观测值 [cx, cy, a, h].
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray]: 更新后的状态均值与协方差矩阵.
+        """
         projected_mean = self.H @ mean
         projected_cov = self.H @ covariance @ self.H.T + self.R
         kalman_gain = covariance @ self.H.T @ np.linalg.inv(projected_cov)
@@ -83,6 +123,8 @@ class OCSORTKalman:
 
 
 class TrackState:
+    """轨迹状态枚举常量类."""
+
     NEW = 0
     TRACKED = 1
     LOST = 2
@@ -90,7 +132,10 @@ class TrackState:
 
 
 class STrack:
+    """OC-SORT / ByteTrack 跟踪轨迹内部实体类."""
+
     def __init__(self, tlwh, score):
+        """初始化."""
         self._tlwh = np.asarray(tlwh, dtype=np.float32)
         self.score = score
         self.tracklet_len = 0
@@ -113,37 +158,64 @@ class STrack:
         self.is_activated = False
 
     @staticmethod
-    def tlwh_to_xyah(tlwh):
+    def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
+        """将 [top, left, width, height] 转换为中心坐标与宽高比格式 [cx, cy, aspect_ratio, height].
+
+        Args:
+            tlwh (np.ndarray): 边界框坐标 [x, y, w, h].
+
+        Returns:
+            np.ndarray: 转换后的状态向量 [cx, cy, a, h].
+        """
         ret = np.asarray(tlwh).copy()
         ret[:2] += ret[2:] / 2
         ret[2] /= ret[3]
         return ret
 
     @staticmethod
-    def xyah_to_tlwh(xyah):
+    def xyah_to_tlwh(xyah: np.ndarray) -> np.ndarray:
+        """将中心坐标与宽高比格式 [cx, cy, aspect_ratio, height] 转换为 [top, left, width, height].
+
+        Args:
+            xyah (np.ndarray): 状态向量 [cx, cy, a, h].
+
+        Returns:
+            np.ndarray: 转换后的边界框 [x, y, w, h].
+        """
         ret = np.asarray(xyah).copy()
         ret[2] *= ret[3]
         ret[:2] -= ret[2:] / 2
         return ret
 
     @property
-    def tlwh(self):
+    def tlwh(self) -> np.ndarray:
+        """获取当前估计的 [top_left_x, top_left_y, width, height] 边界框."""
         return self.xyah_to_tlwh(self.mean[:4])
 
     @property
-    def tlbr(self):
+    def tlbr(self) -> np.ndarray:
+        """获取当前估计的 [x1, y1, x2, y2] 边界框."""
         ret = self.tlwh.copy()
         ret[2:] += ret[:2]
         return ret
 
     @property
-    def bbox(self):
+    def bbox(self) -> np.ndarray:
+        """获取标准包围盒坐标数组 [x1, y1, x2, y2]."""
         return self.tlbr
 
-    def predict(self):
+    def predict(self) -> None:
+        """执行卡尔曼滤波前向预测步骤，更新内部状态均值与协方差."""
         self.mean, self.covariance = self.kf.predict(self.mean, self.covariance)
 
-    def update(self, tlwh, score, frame_id=None):
+    def update(self, tlwh: np.ndarray, score: float, frame_id: int = None) -> None:
+        """使用新的检测框观测更新轨迹状态与卡尔曼滤波器.
+
+        Args:
+            tlwh (np.ndarray): 当前检测到的边界框 [x, y, w, h].
+            score (float): 当前检测置信度得分.
+            frame_id (Optional[int]): 当前视频帧号，可选.
+        """
         self._tlwh = tlwh
         self.score = score
 
@@ -168,17 +240,21 @@ class STrack:
         self.last_observation = (self.frame_id, center.copy(), tlwh.copy())
         self.observation_ages.append(self.frame_id)
 
-    def mark_lost(self):
+    def mark_lost(self) -> None:
+        """将当前轨迹状态标记为丢失 (TrackState.LOST)."""
         self.state = TrackState.LOST
 
-    def mark_removed(self):
+    def mark_removed(self) -> None:
+        """将当前轨迹状态标记为移除 (TrackState.REMOVED)."""
         self.state = TrackState.REMOVED
 
-    def get_center(self):
+    def get_center(self) -> np.ndarray:
+        """获取轨迹当前的中心点坐标 [cx, cy]."""
         tlwh = self.tlwh
         return np.array([tlwh[0] + tlwh[2] / 2, tlwh[1] + tlwh[3] / 2])
 
-    def get_velocity(self):
+    def get_velocity(self) -> np.ndarray:
+        """获取轨迹当前的估计速度矢量 [vx, vy]."""
         if len(self.position_history) < 2:
             return np.zeros(2)
         n = min(5, len(self.position_history))
@@ -189,7 +265,15 @@ class STrack:
         velocity /= (len(positions) - 1)
         return velocity
 
-    def oc_sort_recover(self, new_tlwh, new_score, lost_frames, frame_id=None):
+    def oc_sort_recover(self, new_tlwh: np.ndarray, new_score: float, lost_frames: int, frame_id: int = None) -> None:
+        """执行 OC-SORT 观察恢复（Observation-Centric Recovery）.
+
+        Args:
+            new_tlwh (np.ndarray): 新匹配到的观测框 [x, y, w, h].
+            new_score (float): 新检测置信度.
+            lost_frames (int): 轨迹已连续丢失的帧数.
+            frame_id (Optional[int]): 当前视频帧号，可选.
+        """
         if self.last_observation is not None:
             old_center = self.last_observation[1]
             new_center = np.array([new_tlwh[0] + new_tlwh[2] / 2, new_tlwh[1] + new_tlwh[3] / 2])
@@ -205,6 +289,8 @@ class STrack:
 
 
 class OCSORTByteTracker:
+    """OCSORTByteTracker."""
+
     def __init__(self,
                  track_thresh: float = 0.50,
                  match_thresh: float = 0.80,
@@ -217,7 +303,7 @@ class OCSORTByteTracker:
                  confirm_frames: int = 3,
                  max_recover_distance: float = 300.0,
                  max_speed_per_frame: float = 10.0):
-
+        """初始化."""
         OCSORTKalman.set_parameters(kalman_R, kalman_Q_pos, kalman_Q_vel)
 
         self.track_thresh = track_thresh
@@ -242,7 +328,15 @@ class OCSORTByteTracker:
         self.frame_id = 0
         self.track_id = 0
 
-    def _get_predicted_center(self, track):
+    def _get_predicted_center(self, track: STrack) -> np.ndarray:
+        """计算轨迹在当前帧的预测中心点位置.
+
+        Args:
+            track (STrack): 目标轨迹对象.
+
+        Returns:
+            np.ndarray: 预测中心坐标 [cx, cy].
+        """
         if track.last_observation is None:
             return track.get_center()
 
@@ -262,6 +356,7 @@ class OCSORTByteTracker:
         return last_center
 
     def update(self, high_dets: List[Dict], low_dets: List[Dict] = None) -> List[STrack]:
+        """更新."""
         self.frame_id += 1
 
         if low_dets is None:
@@ -518,7 +613,17 @@ class OCSORTByteTracker:
 
         return [t for t in self.tracked_stracks if t.state == TrackState.TRACKED and t.is_activated]
 
-    def _try_recover_lost(self, det, det_center, lost_tracks):
+    def _try_recover_lost(self, det: dict, det_center: np.ndarray, lost_tracks: list) -> tuple:
+        """尝试将未匹配的检测框与已丢失的轨迹进行恢复匹配.
+
+        Args:
+            det (dict): 检测框字典.
+            det_center (np.ndarray): 检测框中心点.
+            lost_tracks (list): 已丢失的轨迹列表.
+
+        Returns:
+            tuple: (best_match_track, is_recovered) 匹配恢复元组.
+        """
         if len(lost_tracks) == 0:
             return None
 
@@ -575,7 +680,15 @@ class OCSORTByteTracker:
 
         return None
 
-    def _check_spatial_filter(self, det_center):
+    def _check_spatial_filter(self, det_center: np.ndarray) -> bool:
+        """检查新检测框是否与已有活跃轨迹保持最小空间距离过滤.
+
+        Args:
+            det_center (np.ndarray): 检测框中心坐标.
+
+        Returns:
+            bool: 满足空间距离约束返回 True，否则返回 False.
+        """
         all_active = self.tracked_stracks + self.lost_stracks + self.tentative_stracks
         for track in all_active:
             if track.state in [TrackState.TRACKED, TrackState.LOST]:
@@ -595,6 +708,14 @@ class OCSORTByteTracker:
         return False
 
     def _convert_detections(self, dets: List[Dict]) -> List[Dict]:
+        """将输入检测字典列表转换为内部标准 [tlwh, score] 格式.
+
+        Args:
+            dets (List[Dict]): 原始检测框列表.
+
+        Returns:
+            List[Dict]: 转换后的检测列表.
+        """
         result = []
         for d in dets:
             box = d['box']
@@ -604,7 +725,16 @@ class OCSORTByteTracker:
             })
         return result
 
-    def _compute_oc_sort_distance(self, tracks, detections):
+    def _compute_oc_sort_distance(self, tracks: list, detections: list) -> np.ndarray:
+        """计算轨迹与检测框之间的 OC-SORT 综合距离代价矩阵.
+
+        Args:
+            tracks (list): 轨迹列表.
+            detections (list): 检测框列表.
+
+        Returns:
+            np.ndarray: 代价矩阵 (N, M).
+        """
         if len(tracks) == 0 or len(detections) == 0:
             return np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
@@ -631,7 +761,16 @@ class OCSORTByteTracker:
 
         return cost_matrix
 
-    def _compute_center_distance(self, tracks, detections):
+    def _compute_center_distance(self, tracks: list, detections: list) -> np.ndarray:
+        """计算轨迹与检测框之间的欧氏中心距离代价矩阵.
+
+        Args:
+            tracks (list): 轨迹列表.
+            detections (list): 检测框列表.
+
+        Returns:
+            np.ndarray: 代价矩阵 (N, M).
+        """
         if len(tracks) == 0 or len(detections) == 0:
             return np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
@@ -680,7 +819,16 @@ class OCSORTByteTracker:
 
         return cost_matrix
 
-    def _compute_iou_distance(self, tracks, detections):
+    def _compute_iou_distance(self, tracks: list, detections: list) -> np.ndarray:
+        """计算轨迹与检测框之间的纯 IoU 距离代价矩阵 (1 - IoU).
+
+        Args:
+            tracks (list): 轨迹列表.
+            detections (list): 检测框列表.
+
+        Returns:
+            np.ndarray: 代价矩阵 (N, M).
+        """
         if len(tracks) == 0 or len(detections) == 0:
             return np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
@@ -694,7 +842,16 @@ class OCSORTByteTracker:
         return cost_matrix
 
     @staticmethod
-    def _iou(box1, box2):
+    def _iou(box1: np.ndarray, box2: np.ndarray) -> float:
+        """计算两个矩形框 [tlwh] 之间的交并比 (IoU).
+
+        Args:
+            box1 (np.ndarray): 矩形框 1 [x, y, w, h].
+            box2 (np.ndarray): 矩形框 2 [x, y, w, h].
+
+        Returns:
+            float: 交并比数值 (0.0 ~ 1.0).
+        """
         if box2.shape[0] == 4:
             box2 = np.array([box2[0], box2[1], box2[0] + box2[2], box2[1] + box2[3]])
 
@@ -711,7 +868,16 @@ class OCSORTByteTracker:
         return inter / union if union > 0 else 0
 
     @staticmethod
-    def _linear_assignment(cost_matrix, thresh):
+    def _linear_assignment(cost_matrix: np.ndarray, thresh: float) -> tuple:
+        """使用匈牙利算法求解二分图最小代价匹配.
+
+        Args:
+            cost_matrix (np.ndarray): 代价矩阵 (N, M).
+            thresh (float): 最大允许匹配代价阈值.
+
+        Returns:
+            Tuple[np.ndarray, np.ndarray, np.ndarray]: 匹配对、未匹配行、未匹配列.
+        """
         if cost_matrix.size == 0:
             if cost_matrix.ndim == 0:
                 return [], [], []
@@ -740,6 +906,11 @@ class OCSORTByteTracker:
         return matches, unmatched_a, unmatched_b
 
     def get_statistics(self) -> Dict:
+        """获取跟踪器的实时运行统计指标字典.
+
+        Returns:
+            Dict[str, Any]: 包含活跃数、丢失数、确认数等统计指标的字典.
+        """
         return {
             'active_tracks': len(self.tracked_stracks),
             'lost_tracks': len(self.lost_stracks),
