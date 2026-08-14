@@ -8,7 +8,6 @@ export interface BatchEvent {
 export interface WSBatch {
   globalSec: number
   video_front?: BatchEvent[]
-  video_bup?: BatchEvent[]
   video_pop?: BatchEvent[]
   voice?: BatchEvent[]
   tracking?: BatchEvent[]

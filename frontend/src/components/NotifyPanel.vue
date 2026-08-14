@@ -10,10 +10,21 @@ const props = defineProps<{
 }>()
 
 const flowEl = ref<HTMLElement | null>(null)
-watch(() => props.flowEvents.length, async () => {
-  await nextTick()
-  if (flowEl.value) flowEl.value.scrollTop = flowEl.value.scrollHeight
-})
+
+// 当有新的流程开始/结束系统通知时，自动平滑滚动到底部
+watch(
+  () => props.flowEvents.length,
+  async () => {
+    await nextTick()
+    if (flowEl.value) {
+      flowEl.value.scrollTo({
+        top: flowEl.value.scrollHeight,
+        behavior: 'smooth',
+      })
+    }
+  },
+  { deep: true, immediate: true }
+)
 
 function gazeColor() {
   if (!props.gaze.hasHeads) return '#6b7a90'
@@ -32,7 +43,10 @@ function awayPct() {
 
 <template>
   <div class="panel">
-    <div class="panel-title">📊 系统通知</div>
+    <div class="panel-title">
+      <span>📊 系统通知</span>
+    </div>
+    <!-- 监控室实时人员与凝视状态看板 -->
     <div class="status-stats">
       <div class="stat-grid">
         <div class="stat-block">
@@ -46,7 +60,7 @@ function awayPct() {
         <div class="stat-block">
           <div class="stat-block-label">👁️ 凝视状态</div>
           <div class="stat-block-content">
-            <span class="stat-val" :style="{ color: gazeColor(), fontSize: gaze.hasHeads ? '18px' : '14px' }">
+            <span class="stat-val" :style="{ color: gazeColor(), fontSize: gaze.hasHeads ? '22px' : '15px' }">
               {{ gaze.hasHeads ? gaze.headsCount : '待检测' }}
             </span>
             <span class="stat-unit" v-if="gaze.hasHeads">{{ gazeLabel() }}</span>
@@ -65,11 +79,54 @@ function awayPct() {
         </div>
       </div>
     </div>
+    <!-- 制度流程起止通知列表（无任何符号，纯文字如：监护制开始 / 监护制结束） -->
     <div class="flow-events" ref="flowEl">
-      <div v-for="(ev, i) in flowEvents" :key="i" class="flow-event" :style="{ borderLeftColor: ev.color }">
+      <div
+        v-for="(ev, i) in flowEvents"
+        :key="i"
+        class="flow-event"
+        :style="{ borderLeftColor: ev.color }"
+      >
         <span class="ts">[{{ fmt(ev.sec) }}]</span>
-        <span :style="{ color: ev.color }">{{ ev.name }}{{ ev.isStart ? '开始' : '结束' }}</span>
+        <span class="flow-name" :style="{ color: ev.color }">
+          {{ ev.name }}{{ ev.isStart ? '开始' : '结束' }}
+        </span>
       </div>
     </div>
   </div>
 </template>
+
+<style scoped>
+.flow-events {
+  flex: 1;
+  overflow-y: auto;
+  padding: 6px 8px;
+  border-top: 1px solid #1e2a42;
+  margin-top: 4px;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.flow-event {
+  display: flex;
+  align-items: center;
+  font-size: 14px;
+  padding: 6px 10px;
+  border-left: 3px solid #00d4ff;
+  background: rgba(10, 14, 26, 0.7);
+  border-radius: 4px;
+  color: #e0e6f0;
+  animation: fadeIn 0.3s;
+}
+.flow-event .ts {
+  color: #6b7a90;
+  margin-right: 8px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 12px;
+}
+.flow-name {
+  font-weight: 600;
+  font-size: 14px;
+}
+</style>
