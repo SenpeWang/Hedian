@@ -2,8 +2,14 @@
 # 此文件覆盖 config.py 中的默认值
 
 app:
-  gpu: "1"
+  gpu: "0"
   fps: 30.0
+  port: 5002
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
 
 paths:
   data_root: "data"
@@ -12,7 +18,6 @@ paths:
 
 videos:
   front: "data/videos/camFRONT.mpg"
-  bup: "data/videos/camBUP.mpg"
   pop: "data/videos/camPOP.mpg"
 
 supervision:
@@ -20,9 +25,16 @@ supervision:
   unbind_hold_sec: 10.0
   dist_close_px: 200
   dist_near_px: 560
-  vote_window: 3
-  vote_threshold: 2
-  cooldown_frames: 300
+  consec_raise: 3
+  consec_idle: 3
+  cooldown_sec: 1.5
+
+tracker:
+  detection:
+    conf_threshold: 0.65
+    pose_confidence: 0.35
+    nms_threshold: 0.35
+    img_size: 640
 
 bus:
   max_queue_size: 1024
@@ -44,14 +56,13 @@ gaze:
 
 behavior:
   finger_screen:
-    detect_conf: 0.3
-    pose_conf: 0.5
-    hand_to_screen_dist: 400
+    detect_conf: 0.25
+    screen_overlap_threshold: 0.2
+    max_dist: 10
     cooldown_sec: 1.5
   finger_file:
     detect_conf: 0.25
-    track_iou: 0.5
-    file_iou_threshold: 0.1
+    file_iou_threshold: 0.2
     cooldown_sec: 1.5
 
 modules:
