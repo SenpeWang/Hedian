@@ -1,5 +1,5 @@
 """
-模块基类 — 统一所有业务模块的接口
+模块基类 — 统一所有业务模块的接口.
 
 所有业务模块（Voice, MOT, Gaze, Behavior）继承此基类，
 实现统一的初始化、处理、保存接口。
@@ -27,7 +27,7 @@ _ALIGN_PROGRESS_KEY = KEY_PROGRESS
 
 class BaseModule(ABC):
     """
-    业务模块基类
+    业务模块基类.
 
     所有业务模块必须继承此类并实现以下方法：
     - module_name: 模块名称
@@ -48,7 +48,7 @@ class BaseModule(ABC):
         inference_stream: Union[InferenceStream, InferenceSync],
     ):
         """
-        初始化模块
+        初始化模块.
 
         Args:
             event_bus: 消息总线
@@ -81,7 +81,7 @@ class BaseModule(ABC):
 
     def _on_save_key_moments(self, msg: dict) -> None:
         """
-        响应评估器的 SAVE_KEY_MOMENTS 事件：立即保存当前 key_moments。
+        响应评估器的 SAVE_KEY_MOMENTS 事件：立即保存当前 key_moments.
 
         这样在 FLOW_ENDED 触发时，各模块的数据已经落盘，评估器可以马上读取。
         """
@@ -96,7 +96,7 @@ class BaseModule(ABC):
     @abstractmethod
     def module_name(self) -> str:
         """
-        模块名称
+        模块名称.
 
         Returns:
             模块名称，如 'voice', 'tracker', 'gaze', 'behavior'
@@ -107,7 +107,7 @@ class BaseModule(ABC):
     @abstractmethod
     def initialize(self) -> bool:
         """
-        初始化模块（加载模型等）
+        初始化模块（加载模型等.
 
         Returns:
             初始化是否成功
@@ -117,7 +117,7 @@ class BaseModule(ABC):
     @abstractmethod
     def process_video(self, video_path: str) -> None:
         """
-        处理视频
+        处理视频.
 
         Args:
             video_path: 视频文件路径
@@ -127,7 +127,7 @@ class BaseModule(ABC):
     @abstractmethod
     def save_results(self, run_id: str) -> None:
         """
-        保存结果
+        保存结果.
 
         Args:
             run_id: 运行 ID
@@ -136,7 +136,7 @@ class BaseModule(ABC):
 
     def start(self, video_path: str, run_id: str) -> None:
         """
-        启动模块（模板方法）
+        启动模块（模板方法.
 
         按顺序执行：初始化 → 注册到聚合器 → 处理视频 → 保存结果
 
@@ -180,17 +180,17 @@ class BaseModule(ABC):
                 self.logger.warning(f"模块 {self.module_name} 上报 source 结束信号失败: {e}")
 
     def stop(self) -> None:
-        """停止模块"""
+        """停止模块."""
         self._running = False
         self.logger.info(f"模块 {self.module_name} 停止")
 
     @property
     def is_running(self) -> bool:
-        """模块是否正在运行"""
+        """模块是否正在运行."""
         return self._running
 
     def update_progress(self, current: float, total: Optional[float] = None) -> None:
-        """更新进度：per-source 写入（借用 source 与独立进度 source 跳过）"""
+        """更新进度：per-source 写入（借用 source 与独立进度 source 跳过."""
         for source in self._inference_sources:
             if source in self._borrowed_sources or source in self._independent_progress_sources:
                 continue
@@ -210,17 +210,17 @@ class BaseModule(ABC):
                 self.align_with_slowest_module(current)
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
-        """推送数据到推理流（非即时类型自动登记为归属 source）"""
+        """推送数据到推理流（非即时类型自动登记为归属 source."""
         if event_type not in ("progress", "video_start"):
             self._inference_sources.add(event_type)
         self.inference_stream.push_display(event_type, data)
 
     def push_event(self, msg_type: str, data: Dict[str, Any], ts: float = 0.0) -> None:
-        """推送指令到跨进程消息流"""
+        """推送指令到跨进程消息流."""
         self.event_bus.publish(msg_type, data, ts=ts)
 
     def align_with_slowest_module(self, my_progress_sec: float) -> None:
-        """通用对齐限速：本模块不能比最慢模块快超过 ALIGN_MAX_LEAD_SEC 秒"""
+        """通用对齐限速：本模块不能比最慢模块快超过 ALIGN_MAX_LEAD_SEC 秒."""
         try:
             from core.redis_conn import get_redis_client
             r = get_redis_client(host=_ALIGN_REDIS_HOST, port=_ALIGN_REDIS_PORT, db=_ALIGN_REDIS_DB)

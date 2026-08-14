@@ -1,5 +1,5 @@
 """
-模块同步器 — Web/主管理进程从 Redis 读取各 source 进度与事件，按 global_sec 对齐并推送。
+模块同步器 — Web/主管理进程从 Redis 读取各 source 进度与事件，按 global_sec 对齐并推送.
 
 per-source 模型：进度按 source 记录，结束信号由模块退出时主动写。
 global_sec = min(未结束且 expected 的 source 进度)；已结束 source 从 min 剔除、缺失视频帧用最后帧补全。
@@ -26,7 +26,7 @@ INFERENCE_DEADLOCK_TIMEOUT = 600.0
 
 
 class InferenceSync:
-    """模块同步器（per-source 对齐，去限速，主动结束信号驱动 done）"""
+    """模块同步器（per-source 对齐，去限速，主动结束信号驱动 done）."""
 
     def __init__(
         self,
@@ -37,6 +37,7 @@ class InferenceSync:
         redis_db: int = 0,
         duration: float = 0.0,
     ):
+        """初始化."""
         self.fps = fps
         self.duration = duration
 
@@ -79,18 +80,17 @@ class InferenceSync:
         # 上一次推送的三路视频帧，用于 batch 补全
         self._last_video_cache: Dict[str, Optional[Dict[str, Any]]] = {
             "video_front": None,
-            "video_bup": None,
             "video_pop": None,
         }
 
     # ── 对外接口 ────────────────────────────────────────────────
 
     def set_push_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
-        """设置推送回调函数"""
+        """设置推送回调函数."""
         self._push_callback = callback
 
     def reset(self) -> None:
-        """重置同步器状态，用于新一轮推理，避免旧结果混入当前 batch"""
+        """重置同步器状态，用于新一轮推理，避免旧结果混入当前 batch."""
         try:
             self._redis.delete(
                 self._KEY_PROGRESS,
@@ -108,11 +108,11 @@ class InferenceSync:
         self._event_counter = 0
         self._cycle_done = False
         self._last_progress_ts = time.time()
-        self._last_video_cache = {"video_front": None, "video_bup": None, "video_pop": None}
+        self._last_video_cache = {"video_front": None, "video_pop": None}
         logger.info("InferenceSync 对齐基准时间与状态已重置为 0.0 秒")
 
     def start(self) -> None:
-        """启动事件对齐聚合线程"""
+        """启动事件对齐聚合线程."""
         if self._running:
             return
         self._stop_event.clear()
@@ -123,7 +123,7 @@ class InferenceSync:
         logger.info("InferenceSync 线程启动")
 
     def stop(self) -> None:
-        """停止事件对齐聚合线程"""
+        """停止事件对齐聚合线程."""
         if not self._running:
             return
         self._stop_event.set()
@@ -134,7 +134,7 @@ class InferenceSync:
         logger.info("InferenceSync 线程已停止")
 
     def push_sentinel(self) -> None:
-        """推送终止信号（done 哨兵）"""
+        """推送终止信号（done 哨兵）."""
         if self._push_callback is not None:
             try:
                 self._push_callback(None)
@@ -142,7 +142,7 @@ class InferenceSync:
                 logger.warning(f"推送 done 哨兵回调失败: {e}")
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
-        """同步器推送单事件到前端 — 所有事件统一写入 Redis Stream，由对齐循环按 global_sec 推送
+        """同步器推送单事件到前端 — 所有事件统一写入 Redis Stream，由对齐循环按 global_sec 推送.
 
         前端看到的任何内容都必须经过 global_sec 对齐，禁止绕过对齐直接推送。
         done 哨兵不通过此接口，由 push_sentinel 单独处理。
@@ -163,11 +163,11 @@ class InferenceSync:
             logger.error(f"同步器写入事件失败: {event_type}, {e}")
 
     def flush_remaining(self) -> None:
-        """强制刷新 Stream 中所有剩余事件到前端（done 信号推送前调用，确保评估结果不丢）"""
+        """强制刷新 Stream 中所有剩余事件到前端（done 信号推送前调用，确保评估结果不丢）."""
         self._flush_remaining_events()
 
     def get_stats(self) -> Dict[str, Any]:
-        """获取统计状态"""
+        """获取统计状态."""
         try:
             all_progress = self._redis.hgetall(self._KEY_PROGRESS)
             all_snapshots = self._redis.hgetall(self._KEY_SNAPSHOT)
@@ -190,7 +190,7 @@ class InferenceSync:
     # ── 私有辅助 ────────────────────────────────────────────────
 
     def _get_done_sources(self) -> Set[str]:
-        """读取已上报结束信号的 source 集合"""
+        """读取已上报结束信号的 source 集合."""
         try:
             return set(self._redis.hgetall(self._KEY_SOURCE_DONE).keys())
         except Exception as e:
@@ -198,7 +198,7 @@ class InferenceSync:
             return set()
 
     def _all_sources_done(self) -> bool:
-        """判定所有预期 source 是否都已上报结束信号"""
+        """判定所有预期 source 是否都已上报结束信号."""
         if not self._expected_sources:
             return False
         # source_done 字段为 "大类.细粒度"，按细粒度名与 expected_sources 比对
@@ -206,7 +206,7 @@ class InferenceSync:
         return self._expected_sources.issubset(done_fine)
 
     def _compute_global_sec(self) -> float:
-        """全局时钟 = min(未结束且 expected 的 source 进度)"""
+        """全局时钟 = min(未结束且 expected 的 source 进度."""
         try:
             all_progress = self._redis.hgetall(self._KEY_PROGRESS)
             done = self._get_done_sources()
@@ -235,7 +235,7 @@ class InferenceSync:
             return float("inf")
 
     def _get_context(self) -> Dict[str, Dict[str, Any]]:
-        """获取所有模块的快照"""
+        """获取所有模块的快照."""
         try:
             snapshots = self._redis.hgetall(self._KEY_SNAPSHOT)
             return {k: json.loads(v) for k, v in snapshots.items()}
@@ -244,7 +244,7 @@ class InferenceSync:
             return {}
 
     def _reset_cycle(self) -> None:
-        """本轮完成后重置游标与 Redis，准备等待下一次 /start"""
+        """本轮完成后重置游标与 Redis，准备等待下一次 /start."""
         self._cycle_done = True
         self._pushed_global_sec = 0.0
         self._last_stream_id = "0-0"
@@ -257,12 +257,13 @@ class InferenceSync:
         logger.info("InferenceSync 已重置本轮状态，等待下一次推理触发")
 
     def _is_deadlocked(self) -> bool:
+        """isdeadlocked."""
         return time.time() - self._last_progress_ts > INFERENCE_DEADLOCK_TIMEOUT
 
     # ── Stream 读取 ─────────────────────────────────────────────
 
     def _read_stream_entries(self, count: Optional[int] = None) -> List[Tuple[str, Dict[str, Any]]]:
-        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过"""
+        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过."""
         if self._last_stream_id == "0-0":
             entries = self._redis.xrange(self._KEY_EVENT_STREAM, min="-", max="+", count=count)
         else:
@@ -275,7 +276,7 @@ class InferenceSync:
     def _parse_stream_entries(
         self, entries: List[Tuple[str, Dict[str, Any]]]
     ) -> Tuple[List[Tuple[float, Dict[str, Any], str]], List[str]]:
-        """解析 Stream 条目为 (local_sec, event, entry_id)，返回待处理事件与待删除 id 列表"""
+        """解析 Stream 条目为 (local_sec, event, entry_id)，返回待处理事件与待删除 id 列表."""
         events: List[Tuple[float, Dict[str, Any], str]] = []
         ids_to_delete: List[str] = []
         for entry_id, fields in entries:
@@ -291,7 +292,7 @@ class InferenceSync:
     # ── Batch 构建与推送 ─────────────────────────────────────────
 
     def _build_batch(self, events: List[Dict[str, Any]], global_sec: float) -> Dict[str, Any]:
-        """把事件列表聚合成前端 batch（视频去重、最后帧补全）"""
+        """把事件列表聚合成前端 batch（视频去重、最后帧补全）."""
         batch = {"globalSec": global_sec}
         video_sources = {"video_front", "video_bup", "video_pop"}
 
@@ -315,7 +316,7 @@ class InferenceSync:
         return batch
 
     def _do_push(self, event: Dict[str, Any]) -> None:
-        """执行实际的回调推送"""
+        """执行实际的回调推送."""
         if self._push_callback is None:
             return
         try:
@@ -326,7 +327,7 @@ class InferenceSync:
     # ── 主循环 ──────────────────────────────────────────────────
 
     def _aggregation_loop(self) -> None:
-        """对齐推送循环：不限速对齐即发；done 由所有 source 结束驱动"""
+        """对齐推送循环：不限速对齐即发；done 由所有 source 结束驱动."""
         while not self._stop_event.is_set():
             try:
                 global_sec = self._compute_global_sec()
@@ -336,7 +337,7 @@ class InferenceSync:
             time.sleep(POLL_INTERVAL_SEC)
 
     def _try_finish_or_push(self, global_sec: float) -> None:
-        """根据当前 global_sec 决定：推送 batch / 触发 done / 等待"""
+        """根据当前 global_sec 决定：推送 batch / 触发 done / 等待."""
         if self._cycle_done:
             return
 
@@ -359,7 +360,7 @@ class InferenceSync:
             self._finish_cycle(global_sec)
 
     def _finish_cycle(self, global_sec: float) -> None:
-        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态"""
+        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态."""
         logger.info("所有 expected source 已上报结束信号，本轮推理完成，刷新剩余事件并推送 done")
         if global_sec != float("inf"):
             self._push_events_up_to(global_sec)
@@ -368,7 +369,7 @@ class InferenceSync:
         self._reset_cycle()
 
     def _push_events_up_to(self, global_sec: float) -> None:
-        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送"""
+        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送."""
         try:
             entries = self._read_stream_entries(count=500)
             if not entries:
@@ -380,6 +381,12 @@ class InferenceSync:
             ids_to_delete.extend(more_ids)
             self._pending_events = pending
             self._delete_entries(ids_to_delete)
+            # 滚动修剪已消费的高频视频帧与推理流，确保 Redis 极低内存水位（业务事件流保存在 module:events:* 永久保留）
+            if self._event_counter % 20 == 0:
+                try:
+                    self._redis.xtrim(self._KEY_EVENT_STREAM, maxlen=300, approximate=True)
+                except Exception:
+                    pass
 
             self._pushed_global_sec = global_sec
             if ready:
@@ -390,7 +397,7 @@ class InferenceSync:
     def _classify_events(
         self, parsed: List[Tuple[float, Dict[str, Any], str]], global_sec: float
     ) -> Tuple[List[Dict[str, Any]], List[Tuple[float, Dict[str, Any], Optional[str]]], List[str]]:
-        """将 pending 事件与解析后的事件合并排序，按 global_sec 切分。
+        """将 pending 事件与解析后的事件合并排序，按 global_sec 切分.
 
         返回：
             ready: 可立即推送的事件列表
@@ -416,7 +423,7 @@ class InferenceSync:
         return ready, pending, ids_to_delete
 
     def _flush_remaining_events(self) -> None:
-        """强制刷新剩余的所有事件(打包为batch)，done 信号推送前调用"""
+        """强制刷新剩余的所有事件(打包为batch)，done 信号推送前调用."""
         try:
             entries = self._read_stream_entries()
             if not entries:
@@ -435,7 +442,7 @@ class InferenceSync:
     def _extract_events_with_context(
         self, entries: List[Tuple[str, Dict[str, Any]]]
     ) -> List[Dict[str, Any]]:
-        """解析 Stream 条目并注入当前上下文快照"""
+        """解析 Stream 条目并注入当前上下文快照."""
         context = self._get_context()
         events: List[Dict[str, Any]] = []
         for _, fields in entries:
@@ -448,7 +455,7 @@ class InferenceSync:
         return events
 
     def _delete_entries(self, ids_to_delete: List[str]) -> None:
-        """批量删除已消费 Stream 条目"""
+        """批量删除已消费 Stream 条目."""
         if not ids_to_delete:
             return
         try:
