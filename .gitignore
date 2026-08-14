@@ -39,8 +39,7 @@ frontend/node_modules/
 *.bak
 *.bak.*
 
+# Markdown files
+*.md
 
-# Root markdown files
-CLAUDE.md
-README.md
-git.md
+
