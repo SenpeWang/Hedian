@@ -1,5 +1,5 @@
 """
-流程数据提取模块
+流程数据提取模块.
 
 负责从各模块的 JSON 文件中提取指定时间范围的事件数据。
 从 Redis 读取模块实时进度，等待所有模块处理完再提取。
@@ -18,7 +18,7 @@ logger = logging.getLogger("evaluation.data_extractor")
 
 class FlowDataExtractor:
     """
-    流程数据提取器
+    流程数据提取器.
 
     从各模块的 JSON 文件中提取指定时间范围的事件数据。
     从 Redis 读取模块实时进度，等待所有模块处理完再提取。
@@ -26,7 +26,7 @@ class FlowDataExtractor:
 
     def __init__(self, result_dir: str, redis_client=None):
         """
-        初始化数据提取器
+        初始化数据提取器.
 
         Args:
             result_dir: 结果目录路径
@@ -61,7 +61,7 @@ class FlowDataExtractor:
     def extract(self, start_sec: float, end_sec: float,
                 wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict]]:
         """
-        提取指定时间范围的事件
+        提取指定时间范围的事件.
 
         Args:
             start_sec: 开始时间（秒）
@@ -90,7 +90,7 @@ class FlowDataExtractor:
         return voice_events, tracker_events, gaze_events, behavior_events
 
     def save_extracted_data(self, flow_data: dict) -> None:
-        """保存到 evaluation/extracted_{flow_type}_{flow_id}.json"""
+        """保存到 evaluation/extracted_{flow_type}_{flow_id}.json."""
         try:
             eval_dir = os.path.join(self._result_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
@@ -110,7 +110,7 @@ class FlowDataExtractor:
 
     def _wait_all_modules(self, target_sec: float, timeout: int) -> None:
         """
-        等待所有模块都处理到目标时间
+        等待所有模块都处理到目标时间.
 
         从 Redis 读取 inference:progress（per-source 粒度，与 InferenceSync
         _compute_global_sec 一致），取所有未结束 source 的最小进度，当最小值
@@ -152,7 +152,7 @@ class FlowDataExtractor:
 
     def _get_all_module_progress(self) -> Dict[str, float]:
         """
-        从 Redis 获取所有未结束 source 的实时进度
+        从 Redis 获取所有未结束 source 的实时进度.
 
         读取 inference:progress 全部字段（per-source），剔除已写入
         inference:source_done 的结束 source。
@@ -179,7 +179,7 @@ class FlowDataExtractor:
 
     def _extract_voice_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 voice_key_moments.json 提取语音事件
+        从 voice_key_moments.json 提取语音事件.
 
         Args:
             start_sec: 开始时间
@@ -213,7 +213,7 @@ class FlowDataExtractor:
 
     def _extract_tracker_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 tracker_key_moments.json 提取 Tracker 事件
+        从 tracker_key_moments.json 提取 Tracker 事件.
 
         Args:
             start_sec: 开始时间
@@ -247,7 +247,7 @@ class FlowDataExtractor:
 
     def _extract_gaze_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 gaze_key_moments.json 提取 Gaze 事件
+        从 gaze_key_moments.json 提取 Gaze 事件.
 
         Args:
             start_sec: 开始时间
@@ -281,7 +281,7 @@ class FlowDataExtractor:
 
     def _extract_behavior_events(self, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 behavior_key_moments.json 提取 Behavior 事件（举手、手指屏幕等）
+        从 behavior_key_moments.json 提取 Behavior 事件（举手、手指屏幕等.
 
         Args:
             start_sec: 开始时间

@@ -1,13 +1,16 @@
-"""
-大模型评估模块
-"""
+"""大模型评估模块."""
 import os
 import logging
 import multiprocessing as mp
 import queue
-from typing import Dict, Optional
+from typing import Any, Dict, Optional, Tuple
+
+from evaluation.gpu_manager import GPUManager
 
 logger = logging.getLogger("evaluation.qwen")
+
+
+
 
 # 设置离线模式
 os.environ["HF_HUB_OFFLINE"] = "1"
@@ -26,19 +29,20 @@ _THINK_BLOCK_PROMPT = """
 """
 
 
-def _qwen_worker(model_path: str, prompt: str, queue):
-    """子进程工作函数：在物理 GPU 0 上加载模型并生成评估报告
+def _qwen_worker(model_path: str, prompt: str, message_queue: Any):
+    """子进程工作函数：在智能挑选的空闲 GPU 上加载模型并生成评估报告.
 
-    子进程设置 CUDA_VISIBLE_DEVICES=0，使 cuda:0 映射到物理 GPU 0。
-    评估完成后子进程退出，显存自动释放。
+    启动即探测并选择当前最空闲的物理 GPU，使 cuda:0 映射到该卡。
+    评估完成后子进程退出，显存 100% 自动释放。
+
+    Args:
+        model_path (str): Qwen 模型本地权重目录路径.
+        prompt (str): 输入的大模型提示词.
+        message_queue (Any): 跨进程消息通信队列.
     """
-    # 必须在 import torch 前设置 CPU 核心使用限制与 GPU 绑定，避免抢占 Web 线程 CPU 造成声音卡顿
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
-    os.environ["OMP_NUM_THREADS"] = "1"
-    os.environ["MKL_NUM_THREADS"] = "1"
-    os.environ["OPENBLAS_NUM_THREADS"] = "1"
-    os.environ["VECLIB_MAXIMUM_THREADS"] = "1"
-    os.environ["NUMEXPR_NUM_THREADS"] = "1"
+    # 必须在 import torch 前选卡并配置 GPU 运行环境
+    selected_gpu = GPUManager.select_best_gpu(min_free_memory_mb=10000.0)
+    GPUManager.setup_gpu_environment(selected_gpu)
 
     try:
         import torch
@@ -47,7 +51,7 @@ def _qwen_worker(model_path: str, prompt: str, queue):
         from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
 
         logging.getLogger("evaluation.qwen").info(
-            f"子进程加载 Qwen3 模型: {model_path} (物理 GPU 0, bfloat16)"
+            f"子进程加载 Qwen3 模型: {model_path} (GPU {selected_gpu}, bfloat16)"
         )
 
         tokenizer = AutoTokenizer.from_pretrained(
@@ -64,7 +68,7 @@ def _qwen_worker(model_path: str, prompt: str, queue):
         try:
             allocated = torch.cuda.memory_allocated("cuda:0") / 1024**3
             logging.getLogger("evaluation.qwen").info(
-                f"Qwen3 模型加载完成，物理 GPU 0 显存占用: {allocated:.2f} GB"
+                f"Qwen3 模型加载完成，GPU {selected_gpu} 显存占用: {allocated:.2f} GB"
             )
         except RuntimeError:
             # 显存查询为纯信息性日志，CUDA 不可用或设备无效时静默跳过
@@ -95,43 +99,45 @@ def _qwen_worker(model_path: str, prompt: str, queue):
         thread.start()
 
         for text in streamer:
-            queue.put(("chunk", text))
+            message_queue.put(("chunk", text))
 
         thread.join()
-        queue.put(("done", None))
+        message_queue.put(("done", None))
 
     except Exception as e:
         import traceback
-        queue.put(("error", f"{e}\n{traceback.format_exc()}"))
+        message_queue.put(("error", f"{e}\n{traceback.format_exc()}"))
 
 
 class QwenEvaluator:
-    """Qwen 大模型评估器（子进程模式，物理 GPU 0，评估完自动释放显存）"""
+    """Qwen 大模型评估器（子进程模式，动态选择空闲 GPU，评估完自动释放显存）."""
 
     def __init__(self, model_path: Optional[str] = None):
+        """初始化."""
         self._model_path = model_path
 
     def evaluate(self, flow_data: Dict, stream_callback=None, total_flows: int = 0) -> Dict:
-        """在独立子进程中评估流程（物理 GPU 0），评估完子进程退出释放显存"""
-        p = None
+        """在独立子进程中评估流程（动态选择空闲 GPU），评估完子进程退出释放显存."""
+        worker_process = None
         prompt = ""
         try:
             prompt = self._build_prompt(flow_data, total_flows=total_flows)
 
             logger.info(
-                f"开始 Qwen 评估（子进程，物理 GPU 0），"
+                f"开始 Qwen 评估（子进程，动态空闲 GPU），"
                 f"flow_id={flow_data.get('flow_id')} total_flows={total_flows}..."
             )
 
-            msg_queue = mp.Queue()
-            p = mp.Process(
+            ctx = mp.get_context("spawn")
+            msg_queue = ctx.Queue()
+            worker_process = ctx.Process(
                 target=_qwen_worker,
                 args=(self._model_path, prompt, msg_queue),
             )
-            p.start()
+            worker_process.start()
 
             report_text = ""
-            while p.is_alive() or not msg_queue.empty():
+            while worker_process.is_alive() or not msg_queue.empty():
                 try:
                     msg_type, data = msg_queue.get(timeout=0.2)
                 except queue.Empty:
@@ -155,11 +161,11 @@ class QwenEvaluator:
                         "prompt": prompt,
                     }
 
-            p.join(timeout=5)
-            if p.is_alive():
+            worker_process.join(timeout=5)
+            if worker_process.is_alive():
                 logger.warning("子进程未正常退出，强制终止")
-                p.terminate()
-                p.join(timeout=3)
+                worker_process.terminate()
+                worker_process.join(timeout=3)
 
             score = self._extract_score(report_text)
             logger.info(f"Qwen 评估完成，评分: {score}")
@@ -180,24 +186,24 @@ class QwenEvaluator:
                 "prompt": prompt,
             }
         finally:
-            if p is not None:
+            if worker_process is not None:
                 try:
-                    if p.is_alive():
+                    if worker_process.is_alive():
                         logger.warning("清理：评估子进程仍在运行，强制终止")
-                        p.terminate()
-                        p.join(timeout=3)
+                        worker_process.terminate()
+                        worker_process.join(timeout=3)
                     else:
-                        p.join(timeout=1)
+                        worker_process.join(timeout=1)
                 except Exception as ex:
                     logger.error(f"清理评估子进程出错: {ex}")
                 try:
-                    p.close()
+                    worker_process.close()
                 except (OSError, ValueError):
                     # ValueError: 进程仍运行；OSError: 管道/句柄问题，均为清理兜底，可忽略
                     pass
 
     def _build_prompt(self, flow_data: Dict, total_flows: int = 0) -> str:
-        """构建评估 prompt"""
+        """构建评估 prompt."""
         flow_type = flow_data.get("flow_type", "未知")
         flow_id = flow_data.get("flow_id", 0)
 
@@ -226,7 +232,7 @@ class QwenEvaluator:
             return f"评估流程类型: {flow_type}"
 
     def _build_info_notice_prompt(self, flow_data: Dict) -> str:
-        """构建信息通报评估 prompt"""
+        """构建信息通报评估 prompt."""
         voice_events = flow_data.get("voice_events", [])
         gaze_events = flow_data.get("gaze_events", [])
         behavior_events = flow_data.get("behavior_events", [])
@@ -302,7 +308,7 @@ class QwenEvaluator:
         return prompt
 
     def _build_supervision_prompt(self, flow_data: Dict) -> str:
-        """构建监护制评估 prompt"""
+        """构建监护制评估 prompt."""
         voice_events = flow_data.get("voice_events", [])
         tracker_events = flow_data.get("tracker_events", [])
         behavior_events = flow_data.get("behavior_events", [])
@@ -389,7 +395,7 @@ class QwenEvaluator:
         return prompt
 
     def _build_self_ticket_prompt(self, flow_data: Dict) -> str:
-        """构建自唱票评估 prompt"""
+        """构建自唱票评估 prompt."""
         voice_events = flow_data.get("voice_events", [])
         behavior_events = flow_data.get("behavior_events", [])
 
@@ -459,7 +465,7 @@ class QwenEvaluator:
         return prompt
 
     def _extract_score(self, report_text: str) -> int:
-        """从报告文本中提取评分"""
+        """从报告文本中提取评分."""
         import re
 
         # 清除 <think>...</think> 思考块的干扰，防止匹配到大模型在思考推理过程中演算的各项中间分值
