@@ -1,122 +1,209 @@
-"""
-举手检测模块
+"""举手动作检测器.
 
-使用 YOLOPose 检测举手动作，带投票确认和冷却期。
+基于 modules.behavior.behavior_utils 提供的姿态平滑、几何计算与空间匹配工具，
+结合连续帧积分累加器与冷却去重机制，实现高精度、无抖动的举手行为识别。
 """
 import logging
-from collections import deque
-from typing import Optional
-
+from typing import Dict, List, Optional, Tuple, Any
 import numpy as np
+
+from modules.behavior.behavior_utils import PoseEMAFilter, PoseTools, bbox_iou
+from modules.tracker.multi_object_tracker import STrack
 
 logger = logging.getLogger("module.behavior.hand_raiser")
 
 
-class HandRaiser:
+def is_hand_up(
+    shoulder: np.ndarray,
+    elbow: np.ndarray,
+    wrist: np.ndarray,
+    bbox_height: float,
+    conf_thres: float = 0.25,
+) -> bool:
+    """判断单臂是否处于举手状态.
+
+    几何规则（对齐 behavior-v1）:
+    1. 肩膀与手腕关键点置信度需达到阈值；
+    2. 手腕垂直位置高于肩膀基准线（结合人体高度自适应比例阈值）；
+    3. 若肘部可见，手臂夹角 (shoulder-elbow-wrist) 需 >= 50 度，避免自然下垂或搭手误判。
+
+    Args:
+        shoulder (np.ndarray): 肩膀关键点坐标及置信度 [x, y, conf].
+        elbow (np.ndarray): 肘部关键点坐标及置信度 [x, y, conf].
+        wrist (np.ndarray): 手腕关键点坐标及置信度 [x, y, conf].
+        bbox_height (float): 姿态检测边界框高度（像素）.
+        conf_thres (float): 关键点有效置信度阈值，默认 0.25.
+
+    Returns:
+        bool: 满足举手几何特征返回 True，否则返回 False.
     """
-    举手检测器
+    if shoulder[2] < conf_thres or wrist[2] < conf_thres:
+        return False
+    elbow_visible = elbow[2] >= conf_thres
+    ratio_thresh = bbox_height * (0.06 if elbow_visible else 0.12)
+    if wrist[1] > shoulder[1] - max(ratio_thresh, 15.0):
+        return False
+    if elbow_visible:
+        angle = PoseTools.calc_angle(shoulder, elbow, wrist)
+        if angle is not None and angle < 50.0:
+            return False
+    return True
+
+
+class HandRaiser:
+    """举手动作检测器（实现归属 behavior 模块）.
 
     检测流程：
-    1. YOLOPose 检测姿态关键点
-    2. 判断手腕是否高于肩膀
-    3. 投票确认（vote_window 帧中 vote_threshold 帧举起）
-    4. 冷却期（cooldown_frames 帧内不重复触发）
+    1. 接收跟踪模块传入的前置视角视频帧与多目标跟踪轨迹（List[STrack]）；
+    2. 使用 YOLO-Pose 模型检测画面中所有人体骨架关键点；
+    3. 采用水平中心对齐与 bbox_iou 综合评分匹配 MOT 全身框与 Pose 姿态框；
+    4. 使用 PoseEMAFilter 对匹配的人体关键点执行指数移动平均平滑滤波；
+    5. 对左右双臂分别执行 is_hand_up 几何特征判定；
+    6. 以 track_id 为键维护连续帧积分累加器（consec_raise 与 consec_idle）及冷却期；
+    7. 返回当前帧触发举手的目标元组列表 [(track_id, identity), ...]供驱动方调用。
     """
 
     def __init__(
         self,
         detector,
-        vote_window: int = 3,
-        vote_threshold: int = 2,
-        cooldown_frames: int = 300,
+        consec_raise: int = 2,
+        consec_idle: int = 3,
+        cooldown_frames: int = 45,
     ):
-        """
-        初始化举手检测器
+        """初始化举手检测器.
 
         Args:
-            detector: 目标检测器
-            vote_window: 投票窗口大小
-            vote_threshold: 投票阈值
-            cooldown_frames: 冷却帧数
+            detector: 目标检测器，包含 detect_pose 方法.
+            consec_raise (int): 判定举手所需的连续累加得分阈值，默认 2.
+            consec_idle (int): 退出举手所需的连续静息得分阈值，默认 3.
+            cooldown_frames (int): 触发举手后的冷却帧数（如 1.5s * 30fps = 45帧）.
         """
         self._detector = detector
-        self._vote_window = vote_window
-        self._vote_threshold = vote_threshold
+        self._consec_raise = consec_raise
+        self._consec_idle = consec_idle
         self._cooldown_frames = cooldown_frames
-        self._buffers = {}  # {role: deque}
-        self._last_raise_frame = {}  # {role: frame_count}
+
+        self._pose_filter = PoseEMAFilter(alpha=0.5, conf_thres=0.25)
+        self._raise_state: Dict[int, Dict[str, Any]] = {}
+        self._event_cooldown: Dict[int, int] = {}
+        self._last_seen_frame: Dict[int, int] = {}
 
     def check(
         self,
         frame: np.ndarray,
-        tracks: list,
-        roles_assigned: bool,
+        tracks: List[STrack],
         frame_count: int,
-        roles: dict = None,
-    ) -> Optional[str]:
-        """
-        检查是否有举手
+    ) -> List[Tuple[int, Optional[str]]]:
+        """对当前帧所有跟踪目标执行举手动作检测.
 
         Args:
-            frame: 视频帧
-            tracks: 跟踪轨迹列表
-            roles_assigned: 是否已分配角色
-            frame_count: 当前帧号
-            roles: 角色映射 {"LEADER": track, "ROAD1": track, ...}
+            frame (np.ndarray): 原始视频帧 (BGR 格式).
+            tracks (List[STrack]): 当前帧的多目标跟踪轨迹列表.
+            frame_count (int): 当前视频帧号.
 
         Returns:
-            举手的角色名，或 None
+            List[Tuple[int, Optional[str]]]: 触发举手的目标列表 [(track_id, identity), ...]。
+                若已分配工位身份，identity 为 'LEADER'|'ROAD1'|'ROAD2'；若未分配则为 None。
         """
-        if not roles_assigned or frame_count % 5 != 0:
-            return None
+        if not tracks:
+            return []
 
+        # 1. 姿态检测
         poses = self._detector.detect_pose(frame)
+        if not poses:
+            return []
 
-        for role_name in ("ROAD1", "ROAD2"):
-            # 冷却期检查
-            in_cooldown = (
-                frame_count - self._last_raise_frame.get(role_name, -9999)
-                < self._cooldown_frames
-            )
-            if in_cooldown:
-                continue
+        raised_targets: List[Tuple[int, Optional[str]]] = []
 
-            # 获取对应角色的跟踪
-            rt = None
-            if roles:
-                rt = roles.get(role_name)
-            if rt is None:
-                continue
+        # 2. 遍历跟踪目标
+        for track in tracks:
+            track_id = track.track_id
+            self._last_seen_frame[track_id] = frame_count
+            t_box = track.bbox
 
-            rc = rt.get_center()
+            # 3. 空间匹配：使用水平中心对齐与 bbox_iou 综合评分匹配 MOT 全身框与 Pose 姿态框
+            best_pose, best_score = None, 0.0
+            t_width = max(1.0, float(t_box[2] - t_box[0]))
+            tc_x = (float(t_box[0]) + float(t_box[2])) / 2.0
 
-            # 找最近的姿态
-            best_pose, best_d = None, float("inf")
             for p in poses:
-                d = np.linalg.norm(rc - p["center"])
-                if d < best_d:
-                    best_d, best_pose = d, p
+                p_box = p["box"]
+                iou = bbox_iou(t_box, p_box)
+                pc_x = (float(p_box[0]) + float(p_box[2])) / 2.0
+                x_dist = abs(tc_x - pc_x)
 
-            # 判断举手
-            raised = (
-                best_pose is not None
-                and self._detector.check_hand_raised(best_pose["keypoints"])
+                if x_dist < t_width * 0.8:
+                    score = iou * 2.0 + (1.0 - x_dist / t_width)
+                    if score > best_score:
+                        best_score = score
+                        best_pose = p
+
+            if best_pose is None:
+                continue
+
+            # 4. 关键点 EMA 平滑滤波
+            raw_kp = best_pose["keypoints"]
+            kp = self._pose_filter.update(track_id, raw_kp)
+            bx = best_pose["box"]
+            bh = float(bx[3] - bx[1])
+
+            # 5. 左右臂举手几何判定
+            truly_raised = (
+                is_hand_up(kp[5], kp[7], kp[9], bh)
+                or is_hand_up(kp[6], kp[8], kp[10], bh)
             )
 
-            # 投票缓冲
-            if role_name not in self._buffers:
-                self._buffers[role_name] = deque(maxlen=self._vote_window)
-            self._buffers[role_name].append(raised)
+            # 6. 时序连续得分累加器
+            if track_id not in self._raise_state:
+                self._raise_state[track_id] = {"score": 0, "raised": False}
+            st = self._raise_state[track_id]
 
-            buf = self._buffers[role_name]
-            if len(buf) == self._vote_window and sum(buf) >= self._vote_threshold:
-                self._last_raise_frame[role_name] = frame_count
-                self._buffers[role_name].clear()
-                return role_name
+            if truly_raised:
+                st["score"] += 1
+            else:
+                st["score"] = max(st["score"] - 1, -self._consec_idle)
 
-        return None
+            if st["score"] >= self._consec_raise and not st["raised"]:
+                st["raised"] = True
+            elif st["score"] <= -self._consec_idle and st["raised"]:
+                st["raised"] = False
+
+            # 7. 冷却期判定与事件触发
+            if (
+                st["raised"]
+                and frame_count - self._event_cooldown.get(track_id, -99999) > self._cooldown_frames
+            ):
+                self._event_cooldown[track_id] = frame_count
+                raised_targets.append((track_id, track.identity))
+
+        # 8. 定期清理长期未见轨迹的内部状态缓存
+        if frame_count % 600 == 0:
+            self._cleanup_expired_tracks(frame_count)
+
+        return raised_targets
+
+    def _cleanup_expired_tracks(
+        self, current_frame: int, expire_frames: int = 600
+    ) -> None:
+        """清理已消失轨迹的内部缓存，防止内存泄漏.
+
+        Args:
+            current_frame (int): 当前帧号.
+            expire_frames (int): 判定过期的未见帧数阈值，默认 600 帧.
+        """
+        expired_ids = [
+            tid for tid, last_f in self._last_seen_frame.items()
+            if current_frame - last_f > expire_frames
+        ]
+        for tid in expired_ids:
+            self._raise_state.pop(tid, None)
+            self._event_cooldown.pop(tid, None)
+            self._last_seen_frame.pop(tid, None)
+            self._pose_filter.remove(tid)
 
     def reset(self) -> None:
-        """重置状态"""
-        self._buffers.clear()
-        self._last_raise_frame.clear()
+        """重置内部所有状态与缓存."""
+        self._raise_state.clear()
+        self._event_cooldown.clear()
+        self._last_seen_frame.clear()
+        self._pose_filter.clear()
