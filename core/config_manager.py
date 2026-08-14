@@ -1,5 +1,5 @@
 """
-全局配置管理
+全局配置管理.
 
 从 config.yaml 加载配置，提供统一访问接口。
 所有硬编码值集中在此管理。
@@ -29,7 +29,6 @@ _DEFAULTS = {
     },
     "videos": {
         "front": "data/videos/camFRONT.mpg",
-        "bup": "data/videos/camBUP.mpg",
         "pop": "data/videos/camPOP.mpg",
     },
     "supervision": {
@@ -37,8 +36,8 @@ _DEFAULTS = {
         "unbind_hold_sec": 20.0,
         "dist_close_px": 200,
         "dist_near_px": 560,
-        "vote_window": 3,
-        "vote_threshold": 2,
+        "consec_raise": 3,
+        "consec_idle": 3,
         "cooldown_frames": 300,
     },
     "event_bus": {
@@ -89,16 +88,7 @@ _DEFAULTS = {
 
 
 def _deep_merge(base: dict, override: dict) -> dict:
-    """
-    深度合并 override 到 base
-
-    Args:
-        base: 基础配置
-        override: 覆盖配置
-
-    Returns:
-        合并后的配置
-    """
+    """deep合并."""
     result = dict(base)
     for k, v in override.items():
         if k in result and isinstance(result[k], dict) and isinstance(v, dict):
@@ -110,7 +100,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 class ConfigManager:
     """
-    全局配置管理器（单例）
+    全局配置管理器（单例）.
 
     从 config.yaml 加载配置，提供统一访问接口。
     """
@@ -118,12 +108,7 @@ class ConfigManager:
     _instance: Optional["ConfigManager"] = None
 
     def __init__(self, config_path: str = None):
-        """
-        初始化配置管理器
-
-        Args:
-            config_path: 配置文件路径（默认使用 config.yaml）
-        """
+        """初始化."""
         self._data = dict(_DEFAULTS)
         yaml_path = config_path or str(BASE_DIR / "config.yaml")
 
@@ -137,105 +122,89 @@ class ConfigManager:
 
     @classmethod
     def load(cls, config_path: str = None) -> "ConfigManager":
-        """
-        获取配置管理器实例（单例）
-
-        Args:
-            config_path: 配置文件路径
-
-        Returns:
-            ConfigManager 实例
-        """
+        """加载."""
         if cls._instance is None:
             cls._instance = cls(config_path)
         return cls._instance
 
     @classmethod
     def reset(cls) -> None:
-        """重置单例"""
+        """重置."""
         cls._instance = None
 
     @property
     def gpu(self) -> str:
-        """GPU 编号"""
+        """返回 GPU 设备编号."""
         return self._data["app"]["gpu"]
 
     @property
     def fps(self) -> float:
-        """帧率"""
+        """返回推理帧率."""
         return self._data["app"]["fps"]
 
     @property
     def data_root(self) -> str:
-        """数据根目录（相对项目根）"""
+        """返回数据根目录."""
         return self._data["paths"]["data_root"]
 
     @property
     def model_root(self) -> str:
-        """模型根目录（相对项目根）"""
+        """返回模型根目录."""
         return self._data["paths"]["model_root"]
 
     @property
     def result_root(self) -> str:
-        """结果根目录（相对项目根）"""
+        """返回结果根目录."""
         return self._data["paths"]["result_root"]
 
     @property
     def video_path(self) -> str:
-        """主视频路径（front 视角，相对项目根）"""
+        """返回默认视频路径."""
         return self._data["videos"]["front"]
 
     @property
     def supervision(self) -> dict:
-        """监护配置"""
+        """返回监护相关配置."""
         return self._data["supervision"]
 
     @property
     def event_bus(self) -> dict:
-        """总线配置"""
+        """返回事件总线配置."""
         return self._data["event_bus"]
 
     @property
     def voice(self) -> dict:
-        """语音配置"""
+        """返回语音相关配置."""
         return self._data["voice"]
 
     @property
     def gaze(self) -> dict:
-        """注视配置"""
+        """返回注视相关配置."""
         return self._data["gaze"]
 
     @property
     def behavior(self) -> dict:
-        """行为检测配置"""
+        """返回行为相关配置."""
         return self._data["behavior"]
 
     @property
     def videos(self) -> dict:
-        """视频路径配置（front/bup/pop）"""
+        """返回视频路径配置."""
         return self._data["videos"]
 
     @property
     def modules(self) -> dict:
-        """模块开关"""
+        """返回各模块启用开关."""
         return self._data["modules"]
 
     @property
     def rules(self) -> dict:
-        """制度配置"""
+        """返回各制度启用开关."""
         return self._data["rules"]
 
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        获取配置值
-
-        Args:
-            key: 配置键（支持点号分隔，如 'app.gpu'）
-            default: 默认值
-
-        Returns:
-            配置值
-        """
+        """获取."""
+        # key 支持点号分隔，如 'app.gpu'
         keys = key.split(".")
         value = self._data
         for k in keys:
@@ -246,10 +215,5 @@ class ConfigManager:
         return value
 
     def to_dict(self) -> dict:
-        """
-        导出配置为字典
-
-        Returns:
-            配置字典
-        """
+        """转换为dict."""
         return dict(self._data)

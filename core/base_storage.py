@@ -1,6 +1,4 @@
-"""
-结果存储抽象基类
-"""
+"""结果存储抽象基类."""
 import os
 import json
 import logging
@@ -9,15 +7,21 @@ from core.path_manager import PathManager
 
 logger = logging.getLogger("core.storage")
 
+
 class BaseStorage:
-    """结果存储抽象基类，封装通用的原子性 JSON 保存逻辑"""
+    """结果存储抽象基类，封装通用的原子性 JSON 保存逻辑."""
 
     def __init__(self, paths: PathManager, module_name: str):
+        """初始化."""
         self._paths = paths
         self._module_name = module_name
 
-    def _save_json_atomic(self, filename: str, run_id: str, data: Any, indent: int = 2) -> None:
-        """原子性地将数据保存为 JSON 文件"""
+    def _save_json_atomic(self,
+                          filename: str,
+                          run_id: str,
+                          data: Any,
+                          indent: int = 2) -> None:
+        """原子性地将数据保存为 JSON 文件."""
         output_path = self._paths.get_result_path(
             run_id=run_id,
             module=self._module_name,

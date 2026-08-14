@@ -1,8 +1,9 @@
 """
-统一日志系统
+统一日志系统.
 
 所有模块使用此模块创建 logger，保证日志格式统一。
 """
+import os
 import logging
 import sys
 from pathlib import Path
@@ -17,16 +18,14 @@ def setup_logger(
     level: int = logging.INFO,
     format_str: str = None,
 ) -> logging.Logger:
-    """创建模块专用 logger"""
+    """配置并返回 logger."""
     global _root_configured
 
-    # 默认格式
     if format_str is None:
         format_str = "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s"
 
     formatter = logging.Formatter(format_str, datefmt="%H:%M:%S")
 
-    # 配置 root logger
     if not _root_configured:
         root = logging.getLogger()
         root.setLevel(level)
@@ -39,7 +38,6 @@ def setup_logger(
 
     logger = logging.getLogger(name)
 
-    # 文件输出
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -51,8 +49,9 @@ def setup_logger(
     return logger
 
 
-def get_module_logger(module_name: str, result_dir: str = None) -> logging.Logger:
-    """获取模块 logger"""
+def get_module_logger(module_name: str,
+                      result_dir: str = None) -> logging.Logger:
+    """返回按模块命名的 logger."""
     log_file = None
     if result_dir:
         log_file = str(Path(result_dir) / f"{module_name}.log")
@@ -61,7 +60,7 @@ def get_module_logger(module_name: str, result_dir: str = None) -> logging.Logge
 
 
 def add_root_file_handler(log_file: str, level: int = logging.INFO) -> None:
-    """向 root logger 添加文件 handler，用于多进程场景"""
+    """向 root logger 添加文件 handler，用于多进程场景."""
     formatter = logging.Formatter(
         "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
         datefmt="%H:%M:%S",
@@ -73,23 +72,20 @@ def add_root_file_handler(log_file: str, level: int = logging.INFO) -> None:
     file_handler.setFormatter(formatter)
     logging.getLogger().addHandler(file_handler)
 
+
 def redirect_file_logger(new_log_file_path: str) -> None:
-    """动态重定向当前进程的根日志文件 Handler，保证日志写入当前活跃 session 目录下"""
-    import os
+    """重定向根日志 FileHandler 到当前活跃 session 目录."""
     root_logger = logging.getLogger()
-    # 查找并移除现有的 FileHandler
     for handler in list(root_logger.handlers):
         if isinstance(handler, logging.FileHandler):
             root_logger.removeHandler(handler)
             handler.close()
 
-    # 创建并添加新 Session 的 FileHandler
     if new_log_file_path:
         os.makedirs(os.path.dirname(new_log_file_path), exist_ok=True)
         handler = logging.FileHandler(new_log_file_path, encoding="utf-8")
         formatter = logging.Formatter(
             "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
-            datefmt="%H:%M:%S"
-        )
+            datefmt="%H:%M:%S")
         handler.setFormatter(formatter)
         root_logger.addHandler(handler)
