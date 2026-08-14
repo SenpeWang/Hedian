@@ -1,5 +1,5 @@
 """
-注视推断模块
+注视推断模块.
 
 使用 Gazelle ONNX 模型推断注视方向。
 """
@@ -38,7 +38,7 @@ logger = logging.getLogger("module.gaze.estimator")
 
 class GazeEstimator:
     """
-    注视推断器
+    注视推断器.
 
     使用 Gazelle ONNX 模型推断注视方向。
     """
@@ -49,7 +49,7 @@ class GazeEstimator:
         providers: Optional[List[str]] = None,
     ):
         """
-        初始化注视推断器
+        初始化注视推断器.
 
         Args:
             model_path: 模型路径
@@ -92,7 +92,7 @@ class GazeEstimator:
         head_boxes: List[HeadBox],
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[HeadBox]]:
         """
-        推断注视方向
+        推断注视方向.
 
         Args:
             image: BGR 图像

@@ -1,5 +1,5 @@
 """
-语音转文字模块
+语音转文字模块.
 
 使用 Qwen3-ASR 进行语音转录，带后处理纠错和幻觉过滤。
 """
@@ -40,7 +40,7 @@ CORRECTIONS = [
 
 
 def apply_corrections(text: str) -> str:
-    """应用后处理纠错规则，按最长匹配优先"""
+    """应用后处理纠错规则，按最长匹配优先."""
     corrected = text
     for wrong, right in sorted(CORRECTIONS, key=lambda x: len(x[0]), reverse=True):
         corrected = corrected.replace(wrong, right)
@@ -53,6 +53,7 @@ def apply_corrections(text: str) -> str:
 
 # ======================== Qwen3-ASR 辅助函数 ========================
 def _read_attr_or_key(item, *names, default=None):
+    """读取attrorkey."""
     for name in names:
         if isinstance(item, dict) and name in item:
             return item[name]
@@ -61,6 +62,7 @@ def _read_attr_or_key(item, *names, default=None):
     return default
 
 def _safe_float(value, default=0.0):
+    """safefloat."""
     try:
         if value is None or value == "":
             return default
@@ -69,6 +71,7 @@ def _safe_float(value, default=0.0):
         return default
 
 def normalize_qwen_results(results, duration_seconds=0.0):
+    """归一化qwen结果."""
     if results is None:
         return []
     if not isinstance(results, (list, tuple)):
@@ -123,7 +126,7 @@ def normalize_qwen_results(results, duration_seconds=0.0):
 
 class SpeechTranscriber:
     """
-    语音转文字器
+    语音转文字器.
 
     使用 Qwen3-ASR 模型进行语音转录，带后处理纠错。
     """
@@ -137,6 +140,7 @@ class SpeechTranscriber:
         device: str = "cpu",
         torch_dtype: Optional[str] = None,
     ):
+        """初始化."""
         self.model_path = model_path
         self.aligner_path = aligner_path
         self.asr_engine = asr_engine
@@ -146,7 +150,7 @@ class SpeechTranscriber:
         self._model = None
 
     def _load_model(self):
-        """加载 ASR 模型"""
+        """加载 ASR 模型."""
         if self._model is not None:
             return
 
@@ -188,7 +192,7 @@ class SpeechTranscriber:
 
     def transcribe(self, audio_path: str, progress_callback=None, on_segment=None) -> List[Dict]:
         """
-        转录音频文件
+        转录音频文件.
 
         Args:
             audio_path: 音频文件路径
@@ -248,7 +252,7 @@ class SpeechTranscriber:
         progress_callback=None,
         on_segment=None,
     ) -> List[Dict]:
-        """分段转录(带重叠)，每段独立转录，midpoint去重"""
+        """分段转录(带重叠)，每段独立转录，midpoint去重."""
         if end_time is None:
             end_time = len(audio) / sr
 
@@ -334,7 +338,7 @@ class SpeechTranscriber:
 
 
     def _detect_speech_end(self, audio: np.ndarray, sr: int, frame_len=2048, hop=512, rms_threshold=0.005) -> float:
-        """从音频尾部向前扫描，找到最后一个 RMS > threshold 的位置（秒）"""
+        """从音频尾部向前扫描，找到最后一个 RMS > threshold 的位置（秒."""
         n_frames = 1 + (len(audio) - frame_len) // hop
         if n_frames <= 0:
             return len(audio) / sr
@@ -388,6 +392,7 @@ LETTER_WORDS = {
 }
 
 def _convert_cn_number(token):
+    """转换cnnumber."""
     if not token:
         return ""
     if any(ch in CN_UNITS for ch in token):
@@ -411,7 +416,7 @@ def _convert_cn_number(token):
     return "".join(chars)
 
 def normalize_spoken_text(text):
-    """把口语化的设备码文本归一化为纯英文+数字格式"""
+    """把口语化的设备码文本归一化为纯英文+数字格式."""
     if not text:
         return ""
     text = unicodedata.normalize("NFKC", str(text)).upper()
@@ -462,7 +467,8 @@ LOOSE_DEVICE_PATTERN = re.compile(
 
 def normalize_devices_in_text(text: str) -> str:
     """
-    把文本中的设备码片段归一化为纯英文+数字格式（保留其他中文）。
+    把文本中的设备码片段归一化为纯英文+数字格式（保留其他中文）.
+
     严格校验不同类型设备码的正确长度：
       - 九字码 (1EAS) 必须为 9 字符
       - T1RPA 必须为 8 字符
@@ -477,6 +483,7 @@ def normalize_devices_in_text(text: str) -> str:
     cleaned_text = re.sub(r"\s+", "", text)
 
     def _norm(m):
+        """norm."""
         normalized = normalize_spoken_text(m.group(0))
         # 根据前缀严格校验其各自正确的字符长度
         is_valid = False
@@ -501,7 +508,8 @@ def normalize_devices_in_text(text: str) -> str:
 # 拼音模糊编辑距离（Levenshtein 距离）匹配算法
 def match_keyword_by_pinyin_levenshtein(text: str, keyword: str, max_distance: int = 1) -> bool:
     """
-    利用拼音序列滑动窗口编辑距离，在 ASR 文本中寻找发音高度相似的关键词。
+    利用拼音序列滑动窗口编辑距离，在 ASR 文本中寻找发音高度相似的关键词.
+
     - max_distance: 允许的最大单字拼音不同数量，1 表示最多允许错一个字音
     - 相比 Syllable Intersection 比例比对，能极大地避免字词交集造成的误判，并提供优秀的 ASR 音似容错
     """
@@ -528,7 +536,8 @@ def match_keyword_by_pinyin_levenshtein(text: str, keyword: str, max_distance: i
 
 def match_keyword_by_pinyin(text: str, keyword: str) -> bool:
     """
-    综合文本精准匹配与拼音编辑距离匹配。
+    综合文本精准匹配与拼音编辑距离匹配.
+
     - 对于长度 <= 3 的短关键词（如“监护”、“核对”、“收到”），拼音必须严格 100% 匹配（max_distance = 0）
     - 对于长度 >= 4 的长关键词（如“请求监护”、“信息通报”），允许 1 位字音偏差（max_distance = 1）以容忍 ASR 偶发的字词偏差
     """
@@ -558,7 +567,7 @@ KEYWORD_LABELS = [
 
 def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
     """
-    对字/词按停顿切分出段落，并提取关键事件。
+    对字/词按停顿切分出段落，并提取关键事件.
 
     - 每个句子推送一条事件（带完整 text）
     - 检测到的关键词和 9 字符设备码作为 key_moment

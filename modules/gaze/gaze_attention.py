@@ -1,4 +1,4 @@
-"""注视关注度判定模块。
+"""注视关注度判定模块.
 
 在给定时间窗口内，基于注视点累计位移判断视线是否发生了转动：
 - 累计位移 >= 阈值 → 视线转动 → 认为给予了关注
@@ -17,7 +17,7 @@ from typing import List, Tuple
 
 @dataclass
 class GazePoint:
-    """单个注视点记录。"""
+    """单个注视点记录."""
 
     timestamp_ms: float
     gx: float    # 注视点 x 坐标（像素）
@@ -26,7 +26,7 @@ class GazePoint:
 
 @dataclass
 class AttentionResult:
-    """注视关注度判定结果。"""
+    """注视关注度判定结果."""
 
     has_turned: bool              # True=视线转动（给予了关注）, False=未转动（未关注）
     sample_count: int
@@ -36,7 +36,7 @@ class AttentionResult:
 
 @dataclass
 class PersonAttentionRecord:
-    """单个人员的注视点记录。"""
+    """单个人员的注视点记录."""
 
     zone_id: int
     head_box: Tuple[int, int, int, int]  # (x1, y1, x2, y2) 当前框
@@ -53,7 +53,7 @@ class PersonAttentionRecord:
 
 
 class GazeAttentionChecker:
-    """注视关注度检查器。
+    """注视关注度检查器.
 
     在给定的时间窗口内，分析注视点序列，判断视线是否发生了转动。
     判定逻辑：累计位移 >= 阈值 → 视线转动 → 给予了关注。
@@ -66,6 +66,8 @@ class GazeAttentionChecker:
         min_samples: int = 5,
     ):
         """
+        初始化注意力估算器.
+
         Args:
             min_turn_displacement: 转动判定下限（像素）。累计位移达到此值视为转动。
             min_samples: 最少需要的样本数。
@@ -77,7 +79,7 @@ class GazeAttentionChecker:
         self,
         gaze_points: List[GazePoint],
     ) -> AttentionResult:
-        """评估一组注视点是否发生了转动（即是否给予了关注）。
+        """评估一组注视点是否发生了转动（即是否给予了关注）.
 
         Args:
             gaze_points: 按时间排序的注视点列表。
@@ -118,7 +120,7 @@ class GazeAttentionChecker:
 
     @property
     def thresholds(self) -> dict:
-        """返回当前阈值配置（用于报告）。"""
+        """返回当前阈值配置（用于报告）."""
         return {
             "min_turn_displacement": self._min_turn_displacement,
             "min_samples": self._min_samples,

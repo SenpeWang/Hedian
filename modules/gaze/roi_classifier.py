@@ -1,5 +1,5 @@
 """
-ROI 分类模块
+ROI 分类模块.
 
 负责加载 ROI 配置，分类注视方向。
 """
@@ -18,7 +18,7 @@ logger = logging.getLogger("module.gaze.roi")
 
 class ROIClassifier:
     """
-    ROI 分类器
+    ROI 分类器.
 
     负责加载 ROI 配置，分类注视方向。
     """
@@ -30,7 +30,7 @@ class ROIClassifier:
         heatmap_threshold: float = 0.3,
     ):
         """
-        初始化 ROI 分类器
+        初始化 ROI 分类器.
 
         Args:
             roi_json_path: ROI 配置文件路径
@@ -49,7 +49,7 @@ class ROIClassifier:
         self, roi_json_path: str
     ) -> Tuple[List[Tuple[str, np.ndarray]], List[Tuple[str, np.ndarray]]]:
         """
-        加载 ROI 多边形（支持 LabelMe 格式）
+        加载 ROI 多边形（支持 LabelMe 格式.
 
         Args:
             roi_json_path: ROI 配置文件路径
@@ -102,7 +102,7 @@ class ROIClassifier:
 
     def filter_heads_by_zone(self, heads: List[HeadBox]) -> List[HeadBox]:
         """
-        只保留在 head_zone 内的头部
+        只保留在 head_zone 内的头部.
 
         Args:
             heads: 头部边界框列表
@@ -129,7 +129,7 @@ class ROIClassifier:
         img_h: int,
     ) -> Optional[Tuple[int, int]]:
         """
-        从热力图提取注视点（加权质心）
+        从热力图提取注视点（加权质心.
 
         Args:
             heatmap_2d: 热力图
@@ -161,7 +161,7 @@ class ROIClassifier:
         gaze_point: Tuple[int, int],
     ) -> Tuple[str, str]:
         """
-        分类注视状态
+        分类注视状态.
 
         Args:
             inout_score: 进出分数

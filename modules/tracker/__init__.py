@@ -1,16 +1,4 @@
-"""
-多目标跟踪模块
-
-负责：
-- 目标检测（YOLO）
-- 多目标跟踪（OC-SORT + ByteTrack）
-- 举手检测
-
-使用方式：
-    from modules.tracker import TrackerModule
-    module = TrackerModule(event_bus, config, paths, inference_stream)
-    module.start(video_path, run_id)
-"""
+"""多目标跟踪模块：YOLO 检测 + OC-SORT/ByteTrack 跟踪 + 举手检测."""
 from modules.tracker.tracker_module import TrackerModule
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker
