@@ -28,14 +28,11 @@ function handleStop() {
   />
 
   <div class="main">
-    <div class="video-col tracker">
+    <div class="video-col">
       <VideoPanel title="🎥 目标跟踪 (front)" :frame-src="ws.frameFront.value" :has-frame="ws.hasFrameFront.value" />
     </div>
     <div class="video-col">
-      <VideoPanel title="🔍 屏幕检测 (bup)" :frame-src="ws.frameBup.value" :has-frame="ws.hasFrameBup.value" />
-    </div>
-    <div class="video-col">
-      <VideoPanel title="🔍 文件检测 (pop)" :frame-src="ws.framePop.value" :has-frame="ws.hasFramePop.value" />
+      <VideoPanel title="🔍 屏幕检测 + 文件检测 (pop)" :frame-src="ws.framePop.value" :has-frame="ws.hasFramePop.value" />
     </div>
   </div>
 
