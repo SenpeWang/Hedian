@@ -1,5 +1,5 @@
 """
-自唱票制度
+自唱票制度.
 
 实现 BaseRegulation 接口，管理自唱票流程。
 
@@ -15,11 +15,12 @@ from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.self_ticket")
 
+
 class SelfTicketRule(BaseRule):
-    """自唱票制度"""
+    """自唱票制度."""
 
     def __init__(self, config: dict = None):
-        """初始化自唱票制度"""
+        """初始化."""
         self._config = config or {}
         self._event_bus = None
 
@@ -35,18 +36,16 @@ class SelfTicketRule(BaseRule):
         self._confirm_closed = False
 
     def name(self) -> str:
-        """制度名称"""
+        """名称."""
         return "self_ticket"
 
     def subscribe_events(self, event_bus: EventStream) -> None:
-        """订阅事件"""
+        """订阅events."""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
 
-
-
     def get_current_flow(self) -> dict:
-        """获取当前活跃流程"""
+        """获取当前流程."""
         if not self._active:
             return None
         return {
@@ -59,12 +58,8 @@ class SelfTicketRule(BaseRule):
             "confirm_closed": self._confirm_closed,
         }
 
-
-
-
-
     def _start_flow(self, ts: float, device_code: str) -> None:
-        """启动自唱票流程"""
+        """启动流程."""
         # 关闭上一个自唱票
         if self._active:
             self._close_flow(ts, source="new_ticket")
@@ -83,12 +78,14 @@ class SelfTicketRule(BaseRule):
                 "flow_type": "self_ticket",
                 "flow_start_sec": ts,
                 "device_code": device_code,
-            }, ts=ts)
+            },
+                                    ts=ts)
 
-        logger.info(f"流程开始 flow_id={self._flow_id} @{ts:.1f}s 设备={device_code}")
+        logger.info(
+            f"流程开始 flow_id={self._flow_id} @{ts:.1f}s 设备={device_code}")
 
     def _close_flow(self, ts: float = 0, source: str = "unknown") -> dict:
-        """关闭自唱票流程"""
+        """关闭流程."""
         if not self._active:
             return None
 
@@ -117,7 +114,7 @@ class SelfTicketRule(BaseRule):
         return flow
 
     def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音事件"""
+        """处理语音事件."""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0.0))
         key_moment = data.get("key_moment", "")
@@ -125,16 +122,17 @@ class SelfTicketRule(BaseRule):
             return
 
         # 不是控制关键字则视为设备识别码
-        is_device = key_moment not in ["监护", "请求监护", "执行", "核对", "收到", "信息通报", "信息通告", "通报完毕", "通告完毕"]
+        is_device = key_moment not in [
+            "监护", "请求监护", "执行", "核对", "收到", "信息通报", "信息通告", "通报完毕", "通告完毕"
+        ]
         if is_device:
-            # TODO: 等弹窗模块实现后由弹窗信号触发
-            # 现在不自动启动自唱票
-            # self._start_flow(ts, device_code=key_moment)
+            # 设计说明：自唱票流程暂不自动启动（待弹窗模块实现后由弹窗信号触发），
+            # 当前仅登记设备码读取状态，不调用 self._start_flow。
             if self._active:
                 self._code_read = True
 
     def reset(self) -> None:
-        """重置自唱票状态，防止新一轮推理混入旧的设备码/检查状态"""
+        """重置自唱票状态，防止新一轮推理混入旧的设备码/检查状态."""
         super().reset()
         self._device_code = ""
         self._code_read = False
@@ -143,5 +141,5 @@ class SelfTicketRule(BaseRule):
 
 
 def register():
-    """模块注册入口"""
+    """注册."""
     return SelfTicketRule()

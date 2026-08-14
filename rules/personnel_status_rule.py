@@ -1,5 +1,5 @@
 """
-人员状态监控制度
+人员状态监控制度.
 
 实现 BaseRegulation 接口，管理人员状态监控规程。
 
@@ -17,40 +17,36 @@ logger = logging.getLogger("rules.personnel_status")
 
 
 class PersonnelStatusRule(BaseRule):
-    """人员状态监控制度"""
+    """人员状态监控制度."""
 
     def __init__(self, config: dict = None):
-        """
-        初始化人员状态监控制度
-        """
+        """初始化."""
         self._config = config or {}
         self._event_bus = None
 
-        # 记录所有的违规情况
         self._violations: List[dict] = []
-        # 当前的主控室人数状态
         self._current_people_count = -1
 
-        # 状态计时器与缓存时间戳
         self._no_people_start_ts = None
         self._last_ts = 0.0
 
     def name(self) -> str:
-        """制度名称"""
+        """名称."""
         return "personnel_status"
 
     def subscribe_events(self, event_bus: EventStream) -> None:
-        """订阅事件"""
+        """订阅events."""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.GAZE_ALERT, self._on_gaze_alert)
-        event_bus.subscribe(EventTopic.TRACKER_HEADCOUNT, self._on_people_count)
+        event_bus.subscribe(EventTopic.TRACKER_HEADCOUNT,
+                            self._on_people_count)
 
     def is_active(self) -> bool:
-        """人员状态监控始终是激活状态"""
+        """人员状态监控始终是激活状态."""
         return True
 
     def get_current_flow(self) -> Optional[dict]:
-        """获取当前监控状态摘要"""
+        """获取当前流程."""
         return {
             "type": "personnel_status_monitoring",
             "current_people_count": self._current_people_count,
@@ -58,13 +54,15 @@ class PersonnelStatusRule(BaseRule):
         }
 
     def finalize(self) -> Optional[dict]:
-        """视频结束时关闭"""
+        """finalize."""
         # 视频收尾时，检查是否仍有未结束的无人值守状态且时长已超过 10 秒
         if self._no_people_start_ts is not None:
             duration = self._last_ts - self._no_people_start_ts
             if duration >= 10.0:
                 description = f"警报：主控室无人值守（人员少于1人）持续超过10S（实际持续 {duration:.1f}秒）"
-                logger.warning(f"人员状态违规 (PeopleCount/Finalize): {description} @{self._last_ts:.1f}s")
+                logger.warning(
+                    f"人员状态违规 (PeopleCount/Finalize): {description} @{self._last_ts:.1f}s"
+                )
                 violation = {
                     "localSec": self._no_people_start_ts,
                     "event": "NO_OPERATOR_VIOLATION",
@@ -78,7 +76,7 @@ class PersonnelStatusRule(BaseRule):
         return None
 
     def _on_gaze_alert(self, msg: dict) -> None:
-        """处理两名操纵员视线同时离开盘台超过 60 秒的事件"""
+        """处理两名操纵员视线同时离开盘台超过 60 秒的事件."""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
         self._last_ts = max(self._last_ts, ts)
@@ -93,7 +91,6 @@ class PersonnelStatusRule(BaseRule):
         description = f"警报：两名操纵员视线同时离开盘台持续超过1分钟（实际持续 {away_duration:.1f}秒）"
         logger.warning(f"人员状态违规 (Gaze): {description} @{ts:.1f}s")
 
-        # 记录违规
         violation = {
             "localSec": ts,
             "event": "PANEL_VIOLATION",
@@ -105,7 +102,7 @@ class PersonnelStatusRule(BaseRule):
         self._violations.append(violation)
 
     def _on_people_count(self, msg: dict) -> None:
-        """处理主控室人数变动事件"""
+        """处理peoplecount."""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
         count = data.get("count", 0)
@@ -124,7 +121,8 @@ class PersonnelStatusRule(BaseRule):
                 duration = ts - self._no_people_start_ts
                 if duration >= 10.0:
                     description = f"警报：主控室无人值守（人员少于1人）持续超过10S（实际持续 {duration:.1f}秒）"
-                    logger.warning(f"人员状态违规 (PeopleCount): {description} @{ts:.1f}s")
+                    logger.warning(
+                        f"人员状态违规 (PeopleCount): {description} @{ts:.1f}s")
 
                     violation = {
                         "localSec": self._no_people_start_ts,
@@ -136,11 +134,12 @@ class PersonnelStatusRule(BaseRule):
                     }
                     self._violations.append(violation)
                 else:
-                    logger.info(f"人员状态监控: 无人值守时长仅 {duration:.1f}秒，未达10S阈值，不作记录")
+                    logger.info(
+                        f"人员状态监控: 无人值守时长仅 {duration:.1f}秒，未达10S阈值，不作记录")
                 self._no_people_start_ts = None
 
     def reset(self) -> None:
-        """重置人员状态监控，防止新一轮推理混入旧的违规记录"""
+        """重置人员状态监控，防止新一轮推理混入旧的违规记录."""
         self.finalize()
         self._violations = []
         self._current_people_count = -1
@@ -148,10 +147,10 @@ class PersonnelStatusRule(BaseRule):
         self._last_ts = 0.0
 
     def get_violations(self) -> list:
-        """获取所有记录的违规"""
+        """获取violations."""
         return list(self._violations)
 
 
 def register():
-    """模块注册入口"""
+    """注册."""
     return PersonnelStatusRule()

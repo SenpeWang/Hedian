@@ -1,5 +1,5 @@
 """
-信息通报制度
+信息通报制度.
 
 实现 BaseRule 接口，管理信息通报流程。
 
@@ -19,15 +19,10 @@ logger = logging.getLogger("rules.info_notice")
 
 
 class InfoNoticeRule(BaseRule):
-    """信息通报制度"""
+    """信息通报制度."""
 
     def __init__(self, config: dict = None):
-        """
-        初始化信息通报制度
-
-        Args:
-            config: 配置字典
-        """
+        """初始化."""
         self._config = config or {}
         self._event_bus = None
 
@@ -50,20 +45,19 @@ class InfoNoticeRule(BaseRule):
         }
 
     def name(self) -> str:
-        """制度名称"""
+        """名称."""
         return "info_notice"
 
     def subscribe_events(self, event_bus: EventStream) -> None:
-        """订阅事件"""
+        """订阅events."""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
-        event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised)
+        event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED,
+                            self._on_hand_raised)
         event_bus.subscribe(EventTopic.GAZE_ATTENTION, self._on_gaze_status)
 
-
-
     def get_current_flow(self) -> dict:
-        """获取当前活跃流程"""
+        """获取当前流程."""
         if not self._active:
             return None
         return {
@@ -73,12 +67,8 @@ class InfoNoticeRule(BaseRule):
             "content_checklist": self._checklist.copy(),
         }
 
-
-
-
-
     def _start_flow(self, ts: float, source: str) -> None:
-        """启动信息通报流程"""
+        """启动流程."""
         self._active = True
         self._flow_id = self._next_flow_id()
         self._flow_start_sec = ts
@@ -100,12 +90,15 @@ class InfoNoticeRule(BaseRule):
                 "flow_type": "info_notice",
                 "flow_start_sec": ts,
                 "start_source": source,
-            }, ts=ts)
+            },
+                                    ts=ts)
 
-        logger.info(f"信息通报流程开始 flow_id={self._flow_id} @{ts:.1f}s 伴随举手={has_hand_raise} source={source}")
+        logger.info(
+            f"信息通报流程开始 flow_id={self._flow_id} @{ts:.1f}s 伴随举手={has_hand_raise} source={source}"
+        )
 
     def _close_flow(self, ts: float = 0, source: str = "unknown") -> dict:
-        """关闭信息通报流程"""
+        """关闭流程."""
         if not self._active:
             return None
 
@@ -122,7 +115,8 @@ class InfoNoticeRule(BaseRule):
         if self._event_bus:
             self._event_bus.publish(EventTopic.FLOW_ENDED, flow, ts=ts)
 
-        logger.info(f"信息通报流程结束 flow_id={self._flow_id} @{ts:.1f}s source={source}")
+        logger.info(
+            f"信息通报流程结束 flow_id={self._flow_id} @{ts:.1f}s source={source}")
 
         self._active = False
         self._flow_id = 0
@@ -132,7 +126,7 @@ class InfoNoticeRule(BaseRule):
         return flow
 
     def _on_hand_raised(self, msg: dict) -> None:
-        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}）"""
+        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}."""
         data = msg.get("data", {})
         ts = data.get("localSec", msg.get("ts", 0))
 
@@ -141,7 +135,7 @@ class InfoNoticeRule(BaseRule):
         logger.debug(f"信息通报: 收到举手事件 @{ts:.1f}s（单独举手不触发信息通报流程）")
 
     def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音事件（仅包含 localSec 和 key_moment 字段）"""
+        """处理语音事件（仅包含 localSec 和 key_moment 字段."""
         data = msg.get("data", {})
         key_moment = data.get("key_moment", "")
         ts = data.get("localSec", msg.get("ts", 0.0))
@@ -169,7 +163,7 @@ class InfoNoticeRule(BaseRule):
                 logger.info(f"信息通报: 收到'收到'语音回应 @{ts:.1f}s")
 
     def _on_gaze_status(self, msg: dict) -> None:
-        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}）"""
+        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}."""
         if not self._active:
             return
         data = msg.get("data", {})
@@ -181,11 +175,8 @@ class InfoNoticeRule(BaseRule):
             self._checklist["others_stopped_and_listened"] = True
             logger.info(f"信息通报: 团队成员均予以关注 @{ts:.1f}s")
 
-
-
-
     def reset(self) -> None:
-        """重置信息通报状态，防止新一轮推理混入旧的举手/关注状态"""
+        """重置信息通报状态，防止新一轮推理混入旧的举手/关注状态."""
         super().reset()
         self._checklist = {
             "raise_hand_and_shout": False,
@@ -199,5 +190,5 @@ class InfoNoticeRule(BaseRule):
 
 
 def register():
-    """模块注册入口"""
+    """注册."""
     return InfoNoticeRule()

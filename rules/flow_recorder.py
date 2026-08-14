@@ -1,5 +1,5 @@
 """
-流程事件记录器
+流程事件记录器.
 
 职责：
 - 订阅事件流中的 FLOW_STARTED / FLOW_ENDED
@@ -20,28 +20,30 @@ logger = logging.getLogger("rules.flow_recorder")
 
 
 class FlowEventRecorder:
-    """流程事件记录器 — 保存每个流程的开始/结束时间到 rules/flow_events.json"""
+    """流程事件记录器 — 保存每个流程的开始/结束时间到 rules/flow_events.json."""
 
     def __init__(self, event_bus: EventStream):
-        """
-        初始化流程事件记录器
-
-        Args:
-            event_bus: 事件总线实例
-        """
+        """初始化."""
         self._event_bus = event_bus
         self._result_dir: Optional[str] = None
         self._active_flows: Dict[int, dict] = {}
         self._completed_flows: List[dict] = []
         self._lock = threading.Lock()
 
-        # 订阅流程事件
-        self._event_bus.subscribe(EventTopic.FLOW_STARTED, self._on_flow_started)
+        self._event_bus.subscribe(EventTopic.FLOW_STARTED,
+                                  self._on_flow_started)
         self._event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
         logger.info("FlowEventRecorder 已订阅 FLOW_STARTED/FLOW_ENDED")
 
+    def reset(self) -> None:
+        """重置流程事件记录状态."""
+        with self._lock:
+            self._active_flows.clear()
+            self._completed_flows.clear()
+        logger.info("FlowEventRecorder 状态已重置")
+
     def set_result_dir(self, result_dir: str) -> None:
-        """设置结果目录（由主流程在每次推理启动时调用）"""
+        """设置结果目录（由主流程在每次推理启动时调用."""
         with self._lock:
             self._result_dir = result_dir
             self._active_flows.clear()
@@ -49,7 +51,7 @@ class FlowEventRecorder:
         logger.info(f"FlowEventRecorder 结果目录设置为: {result_dir}")
 
     def _on_flow_started(self, msg: dict) -> None:
-        """处理流程开始事件"""
+        """处理流程开始事件."""
         data = msg.get("data", {})
         flow_id = data.get("flow_id")
         if flow_id is None:
@@ -61,7 +63,7 @@ class FlowEventRecorder:
         logger.info(f"记录流程开始 flow_id={flow_id} type={data.get('flow_type')}")
 
     def _on_flow_ended(self, msg: dict) -> None:
-        """处理流程结束事件：合并开始/结束信息并保存"""
+        """处理流程结束事件：合并开始/结束信息并保存."""
         data = msg.get("data", {})
         flow_id = data.get("flow_id")
         if flow_id is None:
@@ -70,7 +72,7 @@ class FlowEventRecorder:
 
         with self._lock:
             start_data = self._active_flows.pop(flow_id, {})
-            # 以 FLOW_ENDED 数据为准，合并开始阶段的信息
+            # 以 FLOW_ENDED 为准，合并开始阶段的信息
             flow_record = {
                 "flow_id": flow_id,
                 "flow_type": data.get("flow_type", start_data.get("flow_type", "unknown")),
@@ -80,7 +82,8 @@ class FlowEventRecorder:
                 "end_source": data.get("end_source", "unknown"),
                 "flow_continue_sec": data.get(
                     "flow_continue_sec",
-                    round(data.get("flow_end_sec", 0) - start_data.get("flow_start_sec", 0), 2),
+                    round(data.get("flow_end_sec", 0) - \
+                          start_data.get("flow_start_sec", 0), 2),
                 ),
                 "device_code": data.get("device_code", start_data.get("device_code", "")),
                 "content_checklist": data.get("content_checklist", start_data.get("content_checklist", {})),
@@ -88,11 +91,12 @@ class FlowEventRecorder:
             }
             self._completed_flows.append(flow_record)
 
-        logger.info(f"记录流程结束 flow_id={flow_id} type={flow_record['flow_type']}")
+        logger.info(
+            f"记录流程结束 flow_id={flow_id} type={flow_record['flow_type']}")
         self._save_flow_events()
 
     def _save_flow_events(self) -> None:
-        """保存流程事件到 result_dir/rules/flow_events.json"""
+        """保存流程事件到 result_dir/rules/flow_events.json."""
         with self._lock:
             result_dir = self._result_dir
             flows = list(self._completed_flows)
@@ -112,6 +116,6 @@ class FlowEventRecorder:
             logger.error(f"保存流程事件失败: {e}", exc_info=True)
 
     def get_completed_flows(self) -> List[dict]:
-        """获取已完成的流程列表（只读副本）"""
+        """获取completedflows."""
         with self._lock:
             return list(self._completed_flows)
