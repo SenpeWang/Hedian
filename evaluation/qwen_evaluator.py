@@ -5,7 +5,6 @@ import multiprocessing as mp
 import queue
 from typing import Any, Dict, Optional, Tuple
 
-from evaluation.gpu_manager import GPUManager
 
 logger = logging.getLogger("evaluation.qwen")
 
@@ -29,7 +28,7 @@ _THINK_BLOCK_PROMPT = """
 """
 
 
-def _qwen_worker(model_path: str, prompt: str, message_queue: Any):
+def _qwen_worker(model_path: str, prompt: str, message_queue: Any, eval_gpu: str = "1"):
     """子进程工作函数：在智能挑选的空闲 GPU 上加载模型并生成评估报告.
 
     启动即探测并选择当前最空闲的物理 GPU，使 cuda:0 映射到该卡。
@@ -40,9 +39,9 @@ def _qwen_worker(model_path: str, prompt: str, message_queue: Any):
         prompt (str): 输入的大模型提示词.
         message_queue (Any): 跨进程消息通信队列.
     """
-    # 必须在 import torch 前选卡并配置 GPU 运行环境
-    selected_gpu = GPUManager.select_best_gpu(min_free_memory_mb=10000.0)
-    GPUManager.setup_gpu_environment(selected_gpu)
+    # 视角级 GPU 分配: 评估走 config 指定的 GPU(eval_gpu), 不再自主探测
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(eval_gpu)
+    selected_gpu = eval_gpu
 
     try:
         import torch
@@ -110,11 +109,12 @@ def _qwen_worker(model_path: str, prompt: str, message_queue: Any):
 
 
 class QwenEvaluator:
-    """Qwen 大模型评估器（子进程模式，动态选择空闲 GPU，评估完自动释放显存）."""
+    """Qwen 大模型评估器（子进程模式，走 config 分配的 GPU，评估完自动释放显存）."""
 
-    def __init__(self, model_path: Optional[str] = None):
+    def __init__(self, model_path: Optional[str] = None, eval_gpu: str = "1"):
         """初始化."""
         self._model_path = model_path
+        self._eval_gpu = eval_gpu
 
     def evaluate(self, flow_data: Dict, stream_callback=None, total_flows: int = 0) -> Dict:
         """在独立子进程中评估流程（动态选择空闲 GPU），评估完子进程退出释放显存."""
@@ -132,7 +132,7 @@ class QwenEvaluator:
             msg_queue = ctx.Queue()
             worker_process = ctx.Process(
                 target=_qwen_worker,
-                args=(self._model_path, prompt, msg_queue),
+                args=(self._model_path, prompt, msg_queue, self._eval_gpu),
             )
             worker_process.start()
 
@@ -317,7 +317,7 @@ class QwenEvaluator:
         prompt = f"""你是核电站主控室监护制规程合规检测评审专家。请根据附带的关键事件（keymoment），评估该流程与监护制规程要求的合规性。
 
 ## 监护制规程要求（动作与语音步骤顺序）
-1. 流程启动：操作人喊出"请求监护" + 流程内有举手动作（红线规则：单独举手不启动流程，必须语音 + 举手）
+1. 流程启动：操作人喊出"请求监护"，且发起前后5秒内有举手动作（双向5秒窗口：举手落在"请求监护"语音±5秒内即为合格；红线规则：单独举手不启动流程，必须语音 + 举手）
 2. 监护人到位：监护人移动至操作人身旁（跟踪事件"监护员已到位监护X回路"）
 3. 手指指向文件：若有纸质程序计划，操作人左手指向程序待执行指令（有程序分支的关键判断特征）
 4. 手指指向屏幕与复述：操作人/监护人手指指向操作控件，操作人读出9字码，监护人核对并复述9字码
@@ -328,7 +328,7 @@ class QwenEvaluator:
 ## 评估维度（共6项评估要点，满分10分）
 | 维度 | 评估要点 | 评分标准 |
 |------|---------|---------|
-| 1. 流程启动 | 是否有"请求监护" + 流程内举手 | 2分=语音+举手；1分=仅语音；0分=无启动信号 |
+| 1. 流程启动 | "请求监护"语音发起前后5秒内是否有举手(双向5秒) | 2分=语音+5秒内举手(合格)；1分=仅语音(无举手或举手超5秒)；0分=无启动信号 |
 | 2. 监护人到位 | 跟踪事件是否记录到位 | 2分=有到位记录；0分=无 |
 | 3. 指令复述与设备码 | 操作人读9字码 + 监护人复述9字码 | 2分=双方都复述；1分=单方复述；0分=无复述 |
 | 4. 动作规范(指向屏幕/文件) | 是否有手指指向屏幕(操作控件)或指向文件(程序指令)动作 | 2分=双动作/指向规范；1分=有单项指向；0分=无指向动作 |

@@ -13,6 +13,7 @@ from core.base_module import BaseModule
 from core.event_bus import EventStream, EventTopic
 from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
+from core.vis_encoder import VisEncoder
 
 from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.multi_object_tracker import MultiObjectTracker, STrack
@@ -54,6 +55,7 @@ class TrackerModule(BaseModule):
         self._result_storage: Optional[TrackerStorage] = None
         self._events: List[Dict] = []
         self._identity_map: Dict[str, int] = {}
+        self._vis_encoder: Optional[VisEncoder] = None
         self._last_supervision_states: Dict[str, str] = {}
         self._supervision_active: bool = False
 
@@ -107,6 +109,7 @@ class TrackerModule(BaseModule):
                 consec_raise=int(supervision_config.get("consec_raise", 2)),
                 consec_idle=int(supervision_config.get("consec_idle", 3)),
                 cooldown_frames=int(fps * cooldown_sec),
+                frame_step=int(supervision_config.get("hand_frame_step", 3)),
             )
 
             # 初始化结果存储管理器
@@ -136,12 +139,21 @@ class TrackerModule(BaseModule):
             video_path (str): 视频文件路径.
         """
         try:
+            from pathlib import Path
+            if not video_path:
+                video_path = str(self.paths.base_dir / self.config.get("videos", {}).get("front", "data/videos/camFRONT.mpg"))
+            elif not Path(video_path).is_absolute() and not Path(video_path).exists():
+                video_path = str(self.paths.base_dir / video_path)
+
             video_capture = cv2.VideoCapture(video_path)
             if not video_capture.isOpened():
                 logger.error(f"无法打开视频: {video_path}")
                 return
 
-            fps = video_capture.get(cv2.CAP_PROP_FPS) or self.config.get("fps", 30.0)
+            _fps_read = video_capture.get(cv2.CAP_PROP_FPS)
+            if not _fps_read or _fps_read <= 0:
+                raise RuntimeError(f"读取 front 视频帧率失败(CAP_PROP_FPS={_fps_read}), 不再兜底")
+            fps = float(_fps_read)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_count = 0
 
@@ -152,6 +164,17 @@ class TrackerModule(BaseModule):
 
             logger.info(f"开始处理视频: {video_path}")
             logger.info(f"FPS={fps}, 总帧数={total_frames}")
+
+            # 视觉流编码器:把带标注的帧编码为 fMP4(带 front 原音频)推 Redis Stream
+            self._vis_encoder = VisEncoder(
+                view="front",
+                video_path=video_path,
+                fps=fps,
+                with_audio=True,
+                redis_host=self.config.get("_redis_host", "localhost"),
+                redis_port=self.config.get("_redis_port", 6379),
+                redis_db=self.config.get("_redis_db", 0),
+            )
 
             # 通知前端启动视频流
             self.push_display("video_start", {"localSec": 0, "tag": "start", "data": {}})
@@ -247,31 +270,31 @@ class TrackerModule(BaseModule):
                     self._monitor_distance(timestamp)
                     self._monitor_headcount(timestamp, tracks)
 
-                # 6. 可视化绘制与推理流逐帧全量推送
+                # 6. 标注叠加到帧 + 喂入视觉流编码器(标注画进帧,fMP4 推送,前端 MSE 直接播)
                 try:
-                    annotated_vis_frame = draw_tracks(frame, tracks, self._identity_map)
-                    if self._tracker.identities_assigned:
-                        self._draw_distance_lines(annotated_vis_frame)
-                    annotated_vis_frame = self._draw_gaze(
-                        annotated_vis_frame, frame_count, timestamp, tracks
-                    )
-
-                    # 降分辨率到 720p 并压缩为 JPEG 发送
-                    vis_small = cv2.resize(annotated_vis_frame, (960, 540))
-                    encode_success, jpeg_buffer = cv2.imencode(
-                        ".jpg", vis_small, [cv2.IMWRITE_JPEG_QUALITY, 35]
-                    )
-                    if encode_success:
-                        self.push_display("video_front", {
-                            "localSec": round(timestamp, 2),
-                            "tag": "frame",
-                            "data": {
-                                "frame_data": jpeg_buffer.tobytes().decode('latin1'),
-                                "frame_id": frame_count,
-                            },
-                        })
+                    # 凝视:process_frame 用原始 frame 推理 + 绘制 ROI/head/gaze 到 frame 副本并返回
+                    if self._gaze_processor:
+                        vis = self._gaze_processor.process_frame(frame, timestamp, frame_count)
+                    else:
+                        vis = frame.copy()
+                    # 跟踪框 + 身份标签
+                    vis = draw_tracks(vis, tracks, self._identity_map)
+                    # LEADER 与 ROAD 距离线
+                    self._draw_distance_lines(vis)
+                    # 举手标签(在对应跟踪框上方)
+                    for track_id, identity in raised_targets:
+                        tr = next((t for t in tracks if t.track_id == track_id), None)
+                        if tr is not None:
+                            bx = tr.bbox if hasattr(tr, "bbox") else (tr.tlbr if hasattr(tr, "tlbr") else None)
+                            if bx is not None:
+                                cv2.putText(vis, "举手",
+                                            (int(bx[0]), max(20, int(bx[1]) - 10)),
+                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                    # 喂入编码器(惰性启动,首帧确定分辨率)
+                    if self._vis_encoder is not None:
+                        self._vis_encoder.feed_frame(vis, timestamp)
                 except Exception as vis_error:
-                    logger.warning(f"可视化帧失败: {vis_error}")
+                    logger.warning(f"视觉帧叠加失败: {vis_error}")
 
                 # 进度日志
                 if frame_count % 300 == 0:
@@ -279,6 +302,8 @@ class TrackerModule(BaseModule):
                     logger.info(f"{frame_count}/{total_frames}帧 {percentage}%")
 
             video_capture.release()
+            if self._vis_encoder is not None:
+                self._vis_encoder.finalize()
             logger.info(f"视频处理完成，共 {frame_count} 帧")
 
         except Exception as process_error:
@@ -323,7 +348,7 @@ class TrackerModule(BaseModule):
             self._result_storage.save_key_moments(self._run_id, self._events)
         logger.debug(f"Tracker 接收 RULE_KEY_MOMENT: {key_moment} @{timestamp:.1f}s")
 
-    def update_progress(self, current: float, total: float = None) -> None:
+    def update_progress(self, current: float, total: Optional[float] = None) -> None:
         """更新 tracker 进度并推送 gaze 前端进度条."""
         super().update_progress(current, total)
         if total and total > 0:
@@ -453,12 +478,3 @@ class TrackerModule(BaseModule):
                 2,
             )
 
-    def _draw_gaze(
-        self,
-        frame: np.ndarray,
-        frame_count: int,
-        timestamp: float,
-        tracks: Optional[list] = None,
-    ) -> np.ndarray:
-        """调用凝视处理器：异步检测、绘制缓存结果、推送."""
-        return self._gaze_processor.process_frame(frame, timestamp, frame_count)

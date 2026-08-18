@@ -87,9 +87,10 @@ class HeadDetector:
             raise FileNotFoundError(f"YOLOv8 模型不存在: {model_path}")
 
         import onnxruntime
+        if providers is None:
+            providers = ["CUDAExecutionProvider"]
 
         # 仅使用 GPU
-        providers = ["CUDAExecutionProvider"]
         sess_opts = onnxruntime.SessionOptions()
         sess_opts.log_severity_level = 3
         onnxruntime.set_default_logger_severity(3)

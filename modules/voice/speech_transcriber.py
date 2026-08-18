@@ -137,7 +137,7 @@ class SpeechTranscriber:
         aligner_path: Optional[str] = None,
         asr_engine: str = "qwen3",
         sample_rate: int = 16000,
-        device: str = "cpu",
+        device: str = "cuda",
         torch_dtype: Optional[str] = None,
     ):
         """初始化."""
