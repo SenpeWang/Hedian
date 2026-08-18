@@ -15,7 +15,7 @@ import redis
 
 
 
-from core.inference_stream import KEY_EVENT_STREAM, KEY_PROGRESS, KEY_SNAPSHOT, KEY_SOURCE_DONE, _fine_source
+from core.inference_stream import KEY_EVENT_STREAM, KEY_PROGRESS, KEY_SNAPSHOT, KEY_SOURCE_DONE, _fine_source, _SOURCE_CATEGORY
 
 logger = logging.getLogger("core.inference_sync")
 
@@ -77,11 +77,6 @@ class InferenceSync:
         # 死锁兜底：记录最后一次 global_sec 推进时间
         self._last_progress_ts: float = time.time()
 
-        # 上一次推送的三路视频帧，用于 batch 补全
-        self._last_video_cache: Dict[str, Optional[Dict[str, Any]]] = {
-            "video_front": None,
-            "video_pop": None,
-        }
 
     # ── 对外接口 ────────────────────────────────────────────────
 
@@ -108,7 +103,6 @@ class InferenceSync:
         self._event_counter = 0
         self._cycle_done = False
         self._last_progress_ts = time.time()
-        self._last_video_cache = {"video_front": None, "video_pop": None}
         logger.info("InferenceSync 对齐基准时间与状态已重置为 0.0 秒")
 
     def start(self) -> None:
@@ -215,8 +209,12 @@ class InferenceSync:
             for source, val in all_progress.items():
                 if source in done:
                     continue
-                # source 为 "大类.细粒度"，expected_sources 存的是细粒度名
-                if self._expected_sources and _fine_source(source) not in self._expected_sources:
+                # source 为 "大类.细粒度"; 用大类(_SOURCE_CATEGORY 映射)比对 expected
+                # 修正: behavior.video_pop 细粒度名 video_pop 不匹配 expected(behavior)
+                #       改用大类比对, 使 pop 视角进度计入 global_sec
+                _fine = _fine_source(source)
+                _cat = _SOURCE_CATEGORY.get(_fine, _fine)
+                if self._expected_sources and _cat not in self._expected_sources and _fine not in self._expected_sources:
                     continue
                 try:
                     sec = float(val)
@@ -292,26 +290,39 @@ class InferenceSync:
     # ── Batch 构建与推送 ─────────────────────────────────────────
 
     def _build_batch(self, events: List[Dict[str, Any]], global_sec: float) -> Dict[str, Any]:
-        """把事件列表聚合成前端 batch（视频去重、最后帧补全）."""
-        batch = {"globalSec": global_sec}
-        video_sources = {"video_front", "video_bup", "video_pop"}
+        """把事件列表聚合成前端 batch（视频去重、最后帧补全）.
 
+        携带 sourceTimes: 各视角整体进度(秒), 供前端按视角算实时速度取 min 决定播放倍率.
+        视角整体进度映射: front=tracker.tracking, pop=behavior.video_pop, voice=voice.voice.
+        """
+        batch = {"globalSec": global_sec, "totalDuration": self.duration}
+        # 各视角整体进度(供前端速率引擎)
+        try:
+            all_prog = self._redis.hgetall(self._KEY_PROGRESS)
+            from core.inference_stream import _fine_source, _SOURCE_CATEGORY
+            view_secs = {}
+            for fld, val in all_prog.items():
+                try:
+                    sec = float(val)
+                except (ValueError, TypeError):
+                    continue
+                fine = _fine_source(fld)
+                # 视角整体进度归类: tracking/gaze/video_front -> front(取最大, 视角已产出位置)
+                if fine in ("tracking", "gaze", "video_front"):
+                    if sec > view_secs.get("front", -1): view_secs["front"] = sec
+                elif fine in ("video_pop", "behavior"):
+                    if sec > view_secs.get("pop", -1): view_secs["pop"] = sec
+                elif fine == "voice":
+                    view_secs["voice"] = sec
+            batch["sourceTimes"] = view_secs
+        except Exception as e:
+            logger.warning(f"采集 sourceTimes 失败: {e}")
+        # 视频流走独立二进制通道(vis_stream→ws.send_bytes), 不进 results:all;
+        # 此处只聚合结构化事件(progress/voice/tracking/gaze/flow/evaluation)
         for ev in events:
             source = ev.get("source", "unknown")
             item = {"localSec": ev.get("localSec"), "tag": ev.get("tag"), "data": ev.get("data")}
-
-            # 单批次内同种视频流只保留最新一帧；非视频 source 追加到列表
-            if source in video_sources:
-                batch[source] = [item]
-                self._last_video_cache[source] = item
-                continue
-
             batch.setdefault(source, []).append(item)
-
-        # 任一视角缺失时用最后帧补全（已结束 source 也补，画面定格不黑屏）
-        for source, cached in self._last_video_cache.items():
-            if source not in batch and cached is not None:
-                batch[source] = [cached]
 
         return batch
 
@@ -337,27 +348,25 @@ class InferenceSync:
             time.sleep(POLL_INTERVAL_SEC)
 
     def _try_finish_or_push(self, global_sec: float) -> None:
-        """根据当前 global_sec 决定：推送 batch / 触发 done / 等待."""
+        """流式直推模式：实时将已生成的结构化推理数据推向前端，由前端时序池进行视频时间帧同步渲染."""
         if self._cycle_done:
             return
+
+        # 实时推送当前 Stream 中的所有事件到前端
+        effective_sec = global_sec if global_sec != float("inf") else 999999.0
+        self._push_events_up_to(effective_sec)
 
         all_done = self._all_sources_done()
 
         # 所有 source 完成 → 收尾并 done
         if all_done:
-            self._finish_cycle(global_sec)
+            self._finish_cycle(effective_sec)
             return
 
-        # global_sec 有效 → 推送已对齐事件
-        if global_sec != float("inf"):
-            self._last_progress_ts = time.time()
-            self._push_events_up_to(global_sec)
-            return
-
-        # global_sec=inf 但还没全完成 → 死锁兜底
+        # 死锁兜底
         if self._is_deadlocked():
             logger.warning(f"推理死锁兜底触发（{INFERENCE_DEADLOCK_TIMEOUT:.0f}s 无推进），强制收尾推送 done")
-            self._finish_cycle(global_sec)
+            self._finish_cycle(effective_sec)
 
     def _finish_cycle(self, global_sec: float) -> None:
         """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态."""
@@ -384,7 +393,7 @@ class InferenceSync:
             # 滚动修剪已消费的高频视频帧与推理流，确保 Redis 极低内存水位（业务事件流保存在 module:events:* 永久保留）
             if self._event_counter % 20 == 0:
                 try:
-                    self._redis.xtrim(self._KEY_EVENT_STREAM, maxlen=300, approximate=True)
+                    self._redis.xtrim(self._KEY_EVENT_STREAM, maxlen=200000, approximate=True)  # 增大:保留整个推理期间数据，避免删未读条目导致前端数据缺失
                 except Exception:
                     pass
 
