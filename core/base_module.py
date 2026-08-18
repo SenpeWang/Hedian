@@ -15,14 +15,7 @@ from core.inference_sync import InferenceSync
 from core.path_manager import PathManager
 
 
-# 全局对齐参数：任何模块推理进度不能比最慢的模块快超过此秒数
-ALIGN_MAX_LEAD_SEC = 60.0
 # 单次对齐等待最长秒数
-ALIGN_WAIT_TIMEOUT_SEC = 30.0
-_ALIGN_REDIS_HOST = "localhost"
-_ALIGN_REDIS_PORT = 6379
-_ALIGN_REDIS_DB = 0
-_ALIGN_PROGRESS_KEY = KEY_PROGRESS
 
 
 class BaseModule(ABC):
@@ -195,19 +188,17 @@ class BaseModule(ABC):
             if source in self._borrowed_sources or source in self._independent_progress_sources:
                 continue
             self.inference_stream.update_module_time(source, current)
-        # 推送进度事件到前端（每秒最多一次）
+        # 推送进度事件到前端（每 0.3 秒高频更新）
         if total and total > 0:
             now = time.time()
-            if now - self._last_progress_push >= 1.0:
+            if now - self._last_progress_push >= 0.3:
                 self._last_progress_push = now
-                pct = min(100, current / total * 100)
+                pct = min(100.0, current / total * 100.0)
                 self.push_display("progress", {
                     "localSec": round(current, 2),
                     "tag": "progress",
                     "data": {"label": self.module_name, "pct": round(pct, 1)},
                 })
-                # 通用对齐限速
-                self.align_with_slowest_module(current)
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
         """推送数据到推理流（非即时类型自动登记为归属 source."""
@@ -218,57 +209,4 @@ class BaseModule(ABC):
     def push_event(self, msg_type: str, data: Dict[str, Any], ts: float = 0.0) -> None:
         """推送指令到跨进程消息流."""
         self.event_bus.publish(msg_type, data, ts=ts)
-
-    def align_with_slowest_module(self, my_progress_sec: float) -> None:
-        """通用对齐限速：本模块不能比最慢模块快超过 ALIGN_MAX_LEAD_SEC 秒."""
-        try:
-            from core.redis_conn import get_redis_client
-            r = get_redis_client(host=_ALIGN_REDIS_HOST, port=_ALIGN_REDIS_PORT, db=_ALIGN_REDIS_DB)
-            wait_start_ts = time.time()
-            while True:
-                progress_map = r.hgetall(_ALIGN_PROGRESS_KEY)
-                # 收集除自身外其他模块的进度（per-source：排除本模块产出的所有 source）
-                # progress 字段为 "大类.细粒度"，按细粒度名与 my_sources 比对
-                my_sources = self._inference_sources | self._borrowed_sources | self._independent_progress_sources
-                other_progress_secs = []
-                for name, val in progress_map.items():
-                    if _fine_source(name) in my_sources:
-                        continue
-                    try:
-                        other_progress_secs.append(float(val))
-                    except ValueError:
-                        pass
-
-                if not other_progress_secs:
-                    # 其他模块尚未启动，短暂等待
-                    if time.time() - wait_start_ts > ALIGN_WAIT_TIMEOUT_SEC:
-                        self.logger.warning(
-                            f"模块 {self.module_name} 等待其他模块启动超时(>{ALIGN_WAIT_TIMEOUT_SEC}s)，继续推理"
-                        )
-                        break
-                    time.sleep(0.1)
-                    continue
-
-                slowest_other_sec = min(other_progress_secs)
-                lead_sec = my_progress_sec - slowest_other_sec
-                if lead_sec <= ALIGN_MAX_LEAD_SEC:
-                    break
-                # 超时保护：防止最慢模块异常卡死时本模块永久阻塞
-                if time.time() - wait_start_ts > ALIGN_WAIT_TIMEOUT_SEC:
-                    self.logger.warning(
-                        f"模块 {self.module_name} 对齐限速超时(>{ALIGN_WAIT_TIMEOUT_SEC}s)："
-                        f"self={my_progress_sec:.1f}s, slowest_other={slowest_other_sec:.1f}s, "
-                        f"领先{lead_sec:.1f}s > {ALIGN_MAX_LEAD_SEC}s，继续推理"
-                    )
-                    break
-                if time.time() - self._last_align_log_ts > 5.0:
-                    self._last_align_log_ts = time.time()
-                    self.logger.info(
-                        f"模块 {self.module_name} 对齐限速：self={my_progress_sec:.1f}s, "
-                        f"slowest_other={slowest_other_sec:.1f}s, 领先{lead_sec:.1f}s > {ALIGN_MAX_LEAD_SEC}s，等待"
-                    )
-                time.sleep(0.1)
-            r.close()
-        except Exception as e:
-            self.logger.warning(f"模块 {self.module_name} 对齐限速异常（不阻塞推理）: {e}")
 

@@ -4,9 +4,16 @@ HTTP 服务器模块 (FastAPI).
 负责 FastAPI 路由和 Web 服务。
 """
 import asyncio
+import json
 import logging
 import time
 from pathlib import Path
+
+import redis as _redis
+
+REDIS_HOST = "localhost"
+REDIS_PORT = 6379
+REDIS_DB = 0
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -36,12 +43,19 @@ def create_app(
     app.state.ws_handler = ws_handler
     app.state.pipeline_state = pipeline_state
     app.state.inference_sync = inference_sync
+    # 注入总时长/状态/同步器, 供 WSHandler connect 补发状态快照(前端刷新即恢复进度)
+    ws_handler.set_state_refs(config.get("duration", 0.0), pipeline_state, inference_sync)
 
     @app.get("/")
     async def index():
         """首页 — 由 StaticFiles 兜底，此处仅为显式声明."""
         dist = Path(__file__).parent.parent / "frontend" / "dist"
-        return FileResponse(str(dist / "index.html"))
+        resp = FileResponse(str(dist / "index.html"))
+        # index.html 禁缓存: 确保 rebuild 后刷新引用最新 bundle(旧 bundle 不含 status 处理→progress 恒 0)
+        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
+        resp.headers["Pragma"] = "no-cache"
+        resp.headers["Expires"] = "0"
+        return resp
 
     @app.post("/start")
     async def start(request: Request):
@@ -114,6 +128,26 @@ def create_app(
         logger.info(f"收到主动停止请求，已终止 {stopped_count} 个运行中的推理子进程，显存与状态切回 idle")
         return {"status": "stopped", "terminated_processes": stopped_count}
 
+    @app.post("/reset")
+    async def reset(request: Request):
+        """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存,回到干净 idle."""
+        stop_fn = getattr(app.state, "stop_pipeline", None)
+        stopped_count = stop_fn() if stop_fn else 0
+        from core.redis_conn import get_redis_client
+        r = get_redis_client(
+            host=config.get("_redis_host", "localhost"),
+            port=config.get("_redis_port", 6379),
+            db=config.get("_redis_db", 0),
+        )
+        # 彻底清空所有 Redis 残留(与 /start 一致), 不遗漏非前缀 key
+        r.flushdb()
+        if inference_sync:
+            inference_sync.reset()
+        ws_handler.clear_vis_cache()
+        pipeline_state["status"] = "idle"
+        logger.info(f"页面刷新重置:已终止 {stopped_count} 个推理子进程,清空状态,切回 idle")
+        return {"status": "reset", "terminated_processes": stopped_count}
+
     @app.websocket("/ws/data")
     async def websocket_data(websocket: WebSocket):
         """websocket数据."""
@@ -136,22 +170,33 @@ def create_app(
             logger.debug(f"WebSocket 非预期断开: {e}")
             ws_handler.disconnect(websocket)
 
-    @app.get("/api/audio/stream")
-    async def get_audio_stream():
-        """提供从 camFRONT 提取的完整音频文件，确保 100% 毫秒级 200 OK 秒开播放."""
-        import os
+    @app.get("/api/video/front")
+    async def get_video_front():
+        """流式提供前置视角视频流（支持 HTTP Range 206 硬解与原生声音）."""
         base_dir = Path(__file__).resolve().parent.parent
         candidates = [
-            base_dir / "data/videos/camFRONT_audio.wav",
-            Path("/home/wangshengping/Hedian/A_DemoSrc/data/videos/camFRONT_audio.wav"),
+            base_dir / "data/videos/camFRONT.mp4",
+            base_dir / "data/videos/camFRONT.mpg",
+            Path("/home/wangshengping/Hedian/A_DemoSrc/data/videos/camFRONT.mp4"),
         ]
         for c in candidates:
             if c.is_file():
-                logger.info(f"[AudioStream] 成功找到音频文件: {c}")
-                return FileResponse(str(c), media_type="audio/wav")
-        
-        logger.error(f"[AudioStream] 未找到任何候选音频文件, checked: {candidates}")
-        return JSONResponse({"error": "audio file not found"}, status_code=404)
+                return FileResponse(str(c), media_type="video/mp4")
+        return JSONResponse({"error": "front video not found"}, status_code=404)
+
+    @app.get("/api/video/pop")
+    async def get_video_pop():
+        """流式提供俯视视角视频流（支持 HTTP Range 206 硬解）."""
+        base_dir = Path(__file__).resolve().parent.parent
+        candidates = [
+            base_dir / "data/videos/camPOP.mp4",
+            base_dir / "data/videos/camPOP.mpg",
+            Path("/home/wangshengping/Hedian/A_DemoSrc/data/videos/camPOP.mp4"),
+        ]
+        for c in candidates:
+            if c.is_file():
+                return FileResponse(str(c), media_type="video/mp4")
+        return JSONResponse({"error": "pop video not found"}, status_code=404)
 
     @app.get("/status")
     async def status():
