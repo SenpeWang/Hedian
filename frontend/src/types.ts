@@ -5,18 +5,6 @@ export interface BatchEvent {
   source?: string
 }
 
-export interface WSBatch {
-  globalSec: number
-  video_front?: BatchEvent[]
-  video_pop?: BatchEvent[]
-  voice?: BatchEvent[]
-  tracking?: BatchEvent[]
-  gaze?: BatchEvent[]
-  flow_start?: BatchEvent[]
-  flow_end?: BatchEvent[]
-  progress?: BatchEvent[]
-}
-
 export interface VoiceEntry {
   sec: number
   text: string
@@ -44,8 +32,8 @@ export interface SegCard {
 
 export interface ProgressState {
   voice: number
-  tracker: number
-  gaze: number
+  front: number
+  pop: number
   detail: string
 }
 
