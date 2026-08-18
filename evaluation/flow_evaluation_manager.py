@@ -66,7 +66,7 @@ class FlowEvaluationManager:
         self._data_extractor = FlowDataExtractor(result_dir, redis_client=redis_client)
 
         # Qwen 大模型评估器
-        self._qwen_evaluator = QwenEvaluator(model_path=model_path)
+        self._qwen_evaluator = QwenEvaluator(model_path=model_path, eval_gpu=os.environ.get("_EVAL_GPU", "1"))
 
         # 流程与评估状态
         self._completed_flows: List[Dict[str, Any]] = []
@@ -197,12 +197,10 @@ class FlowEvaluationManager:
         end_sec = float(flow.get("flow_end_sec", start_sec))
 
         # 步骤 1：非阻塞等待各算法模块（语音/跟踪/行为/注视）推理进度均到达 end_sec
+        # 步骤 1+2：等待各模块推理到 end_sec 后提取 keymoment(extract 内部 wait=True 处理)
         logger.info(f"[flow_id={flow_id}] 检查并等待各算法模块推理进度到达 {end_sec:.2f}s...")
-        self._data_extractor._wait_all_modules(end_sec, timeout=90)
-
-        # 步骤 2：提取多模态事实数据
         voice_events, tracker_events, gaze_events, behavior_events = self._data_extractor.extract(
-            start_sec, end_sec, wait=False, timeout=90
+            start_sec, end_sec, wait=True, timeout=90
         )
 
         flow_data: Dict[str, Any] = {
@@ -237,7 +235,7 @@ class FlowEvaluationManager:
         has_playback_waited = False
 
         def wait_playback_reached() -> None:
-            """在推流前等待前端画面播放到达流程结束时刻（附带 5.0 秒安全超时保护）."""
+            """在推流前等待前端画面播放到达流程结束时刻（附带 60.0 秒安全超时保护）."""
             nonlocal has_playback_waited
             if has_playback_waited or not self._get_playback_sec_fn:
                 return
@@ -247,9 +245,9 @@ class FlowEvaluationManager:
                 current_playback = self._get_playback_sec_fn()
                 if current_playback >= target_sec:
                     break
-                if time.time() - start_wait > 5.0:
+                if time.time() - start_wait > 60.0:
                     logger.warning(
-                        f"wait_playback_reached 等待前端播放进度超时(5.0s)，目标={target_sec:.2f}s, 当前={current_playback:.2f}s，强制放行"
+                        f"wait_playback_reached 等待前端播放进度超时(60.0s)，目标={target_sec:.2f}s, 当前={current_playback:.2f}s，强制放行"
                     )
                     break
                 time.sleep(0.1)

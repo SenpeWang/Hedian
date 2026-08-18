@@ -75,6 +75,8 @@ class FlowDataExtractor:
         if wait:
             logger.info(f"等待所有模块处理到 {end_sec}s...")
             self._wait_all_modules(end_sec, timeout)
+            # 等 progress 后额外 sleep 等各模块 key_moments 文件写完(progress 是帧处理进度, 事件写盘滞后)
+            time.sleep(2.0)
 
         voice_events = self._extract_voice_events(start_sec, end_sec)
         tracker_events = self._extract_tracker_events(start_sec, end_sec)
@@ -117,7 +119,7 @@ class FlowDataExtractor:
         >= target_sec 时返回。
 
         注意：进度字段名是 source 名（voice/tracking/gaze/video_front/
-        video_bup/video_pop 等），而非模块名。早期实现用 hget 按模块名
+        video_pop 等），而非模块名。早期实现用 hget 按模块名
         读取 tracker/behavior，这两个字段永远不存在 → 恒为 0 → 每次都空等
         到 timeout，导致流程结束后评估被延迟数分钟。
 
