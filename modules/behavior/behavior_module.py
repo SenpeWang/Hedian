@@ -16,10 +16,15 @@ from core.base_module import BaseModule
 from core.event_bus import EventStream, EventTopic
 from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
+from core.vis_encoder import VisEncoder
 
 from modules.behavior.screen_detect import FingerScreenDetector
 from modules.behavior.file_detector import FingerFileDetector
 from modules.behavior.storage_behavior import BehaviorStorage
+from modules.behavior.behavior_vis import (
+    screen_polygons_as_tuples,
+    draw_roi_overlay,
+)
 
 logger = logging.getLogger("module.behavior")
 
@@ -54,6 +59,7 @@ class BehaviorModule(BaseModule):
         self._screen_detector: Optional[FingerScreenDetector] = None
         self._file_detector: Optional[FingerFileDetector] = None
         self._result_storage: Optional[BehaviorStorage] = None
+        self._vis_encoder: Optional[VisEncoder] = None
         self._events: List[Dict[str, Any]] = []
         self._events_lock = threading.Lock()
         self._last_progress_push: float = 0.0
@@ -78,7 +84,7 @@ class BehaviorModule(BaseModule):
             screen_cfg = cfg.get("screen", {})
             file_cfg = cfg.get("file", {})
 
-            fps = self._read_video_fps("pop", 30.0)
+            fps = self._read_video_fps("pop")
 
             self._screen_detector = FingerScreenDetector(
                 detect_conf=screen_cfg.get("detect_conf", 0.25),
@@ -105,42 +111,46 @@ class BehaviorModule(BaseModule):
             logger.error(f"行为检测模块初始化失败: {init_error}", exc_info=True)
             return False
 
-    def _read_video_fps(self, video_key: str, default_fps: float = 30.0) -> float:
-        """读取配置中指定视角视频的真实帧率.
+    def _read_video_fps(self, video_key: str) -> float:
+        """读取配置中指定视角视频的真实帧率, 读不到直接报错(不兜底,避免时间轴错位).
 
         Args:
             video_key (str): 视频键名（如 'pop'）.
-            default_fps (float): 读取失败时的回退默认帧率.
 
         Returns:
-            float: 视频真实帧率或默认帧率.
+            float: 视频真实帧率.
+
+        Raises:
+            RuntimeError: 视频无法打开或帧率读取失败.
         """
-        try:
-            videos_cfg = self.config.get("videos", {})
-            rel_path = videos_cfg.get(video_key, f"data/videos/cam{video_key.upper()}.mpg")
-            abs_path = str(self.paths.base_dir / rel_path)
-            cap = cv2.VideoCapture(abs_path)
-            if cap.isOpened():
-                fps = cap.get(cv2.CAP_PROP_FPS)
-                cap.release()
-                if fps and fps > 0:
-                    return float(fps)
-        except Exception as init_error:
-            logger.warning(f"读取视频帧率失败 ({video_key}): {init_error}，使用默认值 {default_fps}")
-        return default_fps
+        videos_cfg = self.config.get("videos", {})
+        rel_path = videos_cfg.get(video_key, f"data/videos/cam{video_key.upper()}.mpg")
+        abs_path = str(self.paths.base_dir / rel_path)
+        cap = cv2.VideoCapture(abs_path)
+        if not cap.isOpened():
+            raise RuntimeError(f"无法打开视频读取帧率 ({video_key}): {abs_path}")
+        fps = cap.get(cv2.CAP_PROP_FPS)
+        cap.release()
+        if not fps or fps <= 0:
+            raise RuntimeError(f"读取视频帧率失败 ({video_key}, CAP_PROP_FPS={fps}): {abs_path}")
+        return float(fps)
 
     def _append_event(self, local_sec: float, key_moment: str) -> None:
-        """线程安全地收集关键事件.
+        """线程安全地收集关键事件 + 实时落盘(保证评估提取时文件有全部事件).
 
         Args:
             local_sec (float): 事件发生的时间戳（秒）.
             key_moment (str): 关键时刻描述文本.
         """
+        event = {"localSec": round(local_sec, 2), "key_moment": key_moment}
         with self._events_lock:
-            self._events.append({
-                "localSec": round(local_sec, 2),
-                "key_moment": key_moment,
-            })
+            self._events.append(event)
+        # 实时落盘(不等到 save_results), 保证评估提取时 behavior_key_moments.json 有全部事件
+        if self._result_storage and self._run_id:
+            try:
+                self._result_storage.add_event(self._run_id, event)
+            except Exception as e:
+                logger.warning(f"实时落盘行为事件失败: {e}")
 
     def _on_hand_raised(self, msg: dict) -> None:
         """订阅 BEHAVIOR_HAND_RAISED 事件的回调函数.
@@ -180,7 +190,10 @@ class BehaviorModule(BaseModule):
                 logger.error(f"[pop_view] 无法打开视频: {video_path}")
                 return
 
-            fps = video_capture.get(cv2.CAP_PROP_FPS) or self.config.get("fps", 30.0)
+            _fps_read = video_capture.get(cv2.CAP_PROP_FPS)
+            if not _fps_read or _fps_read <= 0:
+                raise RuntimeError(f"读取 pop 视频帧率失败(CAP_PROP_FPS={_fps_read}), 不再兜底")
+            fps = float(_fps_read)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_count = 0
 
@@ -188,6 +201,17 @@ class BehaviorModule(BaseModule):
             cached_results = None
 
             logger.info(f"[pop_view] 开始处理: {video_path} ({total_frames}帧, {fps:.1f}fps)")
+
+            # 视觉流编码器:pop 视角(无音频) -> fMP4 推 Redis Stream
+            self._vis_encoder = VisEncoder(
+                view="pop",
+                video_path=video_path,
+                fps=fps,
+                with_audio=False,
+                redis_host=self.config.get("_redis_host", "localhost"),
+                redis_port=self.config.get("_redis_port", 6379),
+                redis_db=self.config.get("_redis_db", 0),
+            )
 
             while True:
                 frame_read_success, frame = video_capture.read()
@@ -200,13 +224,13 @@ class BehaviorModule(BaseModule):
                 self.inference_stream.update_module_time(video_source, timestamp)
                 if total_frames > 0:
                     current_time = time.time()
-                    if current_time - self._last_progress_push >= 1.0:
+                    if current_time - self._last_progress_push >= 0.3:
                         self._last_progress_push = current_time
                         progress_percentage = min(100.0, timestamp / (total_frames / fps) * 100)
                         self.push_display("progress", {
                             "localSec": round(timestamp, 2),
                             "tag": "progress",
-                            "data": {"label": video_source, "pct": round(progress_percentage, 1)},
+                            "data": {"label": "pop", "pct": round(progress_percentage, 1)},
                         })
 
                 if frame_count % infer_every_n_frames == 0 or cached_results is None:
@@ -219,21 +243,20 @@ class BehaviorModule(BaseModule):
                     )[0]
                 results = cached_results
 
+                # 先画 ROI 底层,detector 随后在 detect 中画检测框+触发框(in-place)
+                if self._vis_encoder is not None:
+                    draw_roi_overlay(frame, screen_polygons_as_tuples())
                 events = []
                 events += screen_detector.detect(frame, results, frame_count, fps)
                 events += file_detector.detect(frame, results, frame_count, fps)
 
-                if frame_count % self.FRAME_PUSH_INTERVAL == 0:
-                    frame_small = cv2.resize(frame, (960, 540))
-                    encode_success, jpeg_buffer = cv2.imencode(
-                        ".jpg", frame_small, [cv2.IMWRITE_JPEG_QUALITY, 40]
-                    )
-                    if encode_success:
-                        self.push_display(video_source, {
-                            "localSec": round(timestamp, 2),
-                            "tag": "video",
-                            "data": {"frame_data": jpeg_buffer.tobytes().decode("latin1")},
-                        })
+                # POP 视角标注已由 detector 在 detect 中画进帧(检测框+触发),
+                # 此处把带标注帧喂入视觉流编码器 -> fMP4 -> 前端 MSE
+                if self._vis_encoder is not None:
+                    try:
+                        self._vis_encoder.feed_frame(frame, timestamp)
+                    except Exception as vis_error:
+                        logger.warning(f"pop 喂帧失败: {vis_error}")
 
                 for event_item in events:
                     event_sec = round(event_item.get("localSec", timestamp), 2)
@@ -260,6 +283,8 @@ class BehaviorModule(BaseModule):
                     logger.info(f"[pop_view] {frame_count}/{total_frames}帧 {progress_pct}%")
 
             video_capture.release()
+            if self._vis_encoder is not None:
+                self._vis_encoder.finalize()
             logger.info(f"[pop_view] 完成，共 {frame_count} 帧")
 
         except Exception as pop_error:

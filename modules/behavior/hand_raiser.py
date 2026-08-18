@@ -69,6 +69,7 @@ class HandRaiser:
         consec_raise: int = 2,
         consec_idle: int = 3,
         cooldown_frames: int = 45,
+        frame_step: int = 3,
     ):
         """初始化举手检测器.
 
@@ -77,11 +78,15 @@ class HandRaiser:
             consec_raise (int): 判定举手所需的连续累加得分阈值，默认 2.
             consec_idle (int): 退出举手所需的连续静息得分阈值，默认 3.
             cooldown_frames (int): 触发举手后的冷却帧数（如 1.5s * 30fps = 45帧）.
+            frame_step (int): 姿态推理跳帧步长, 每 frame_step 帧推理一次, 其余帧复用
+                上次结果(对齐 behavior-v1); pose 变化慢 + EMA 平滑 + consec 累计, 稀疏不影响判定.
         """
         self._detector = detector
         self._consec_raise = consec_raise
         self._consec_idle = consec_idle
         self._cooldown_frames = cooldown_frames
+        self._frame_step = max(1, int(frame_step))
+        self._last_poses = None
 
         self._pose_filter = PoseEMAFilter(alpha=0.5, conf_thres=0.25)
         self._raise_state: Dict[int, Dict[str, Any]] = {}
@@ -108,8 +113,12 @@ class HandRaiser:
         if not tracks:
             return []
 
-        # 1. 姿态检测
-        poses = self._detector.detect_pose(frame)
+        # 1. 姿态检测: 每 frame_step 帧推理一次, 其余帧复用上次结果(对齐 behavior-v1)
+        if frame_count % self._frame_step == 0 or self._last_poses is None:
+            poses = self._detector.detect_pose(frame)
+            self._last_poses = poses
+        else:
+            poses = self._last_poses
         if not poses:
             return []
 
@@ -207,3 +216,4 @@ class HandRaiser:
         self._event_cooldown.clear()
         self._last_seen_frame.clear()
         self._pose_filter.clear()
+        self._last_poses = None
