@@ -47,7 +47,10 @@ def draw_tracks(
             2,
         )
 
-        display_label = identity if identity else f"ID:{track.track_id}"
+        if identity:
+            display_label = f"{identity}(ID:{track.track_id})"
+        else:
+            display_label = f"ID:{track.track_id}"
         cv2.putText(
             annotated_frame,
             display_label,
