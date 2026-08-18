@@ -91,7 +91,7 @@ class GazeModule:
         self._cached_results = []
         self._cached_has_heads = False
         self._cached_any_in_roi = False
-        self._gaze_interval = 10
+        self._gaze_interval = int(config.get("gaze_interval", 10)) if config else 10
 
         self._away_start_ts = None
         self._alerting = False
@@ -413,6 +413,23 @@ class GazeModule:
             cv2.circle(vis, (gx, gy), 6, color, 2)
 
         pass  # 前端/画面渲染 Attended 标签已完全移除
+
+    def get_visual_data(self) -> dict:
+        """获取结构化凝视可视化数据，供前端 Canvas 毫秒级绘制."""
+        with self._gaze_lock:
+            heads = []
+            for gr in self._cached_results:
+                heads.append({
+                    "box": [float(x) for x in gr["box"]],
+                    "center": [float(x) for x in gr["center"]],
+                    "gaze_pt": [float(x) for x in gr["gaze_pt"]],
+                    "status": gr["status"],
+                })
+            return {
+                "heads": heads,
+                "has_heads": self._cached_has_heads,
+                "any_in_roi": self._cached_any_in_roi,
+            }
 
     def get_events(self) -> list:
         """获取events."""

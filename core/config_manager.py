@@ -20,7 +20,10 @@ BASE_DIR = Path(__file__).parent.parent
 _DEFAULTS = {
     "app": {
         "gpu": "0",
+        "gpu_map": {"tracker": "0", "voice": "1", "behavior": "1", "evaluation": "1"},
+        "gpu_default": "0",
         "fps": 30.0,
+        "port": 5002,
     },
     "paths": {
         "data_root": "data",
@@ -38,7 +41,6 @@ _DEFAULTS = {
         "dist_near_px": 560,
         "consec_raise": 3,
         "consec_idle": 3,
-        "cooldown_frames": 300,
     },
     "event_bus": {
         "max_queue_size": 1024,
@@ -135,7 +137,17 @@ class ConfigManager:
     @property
     def gpu(self) -> str:
         """返回 GPU 设备编号."""
-        return self._data["app"]["gpu"]
+        return self._data["app"].get("gpu_default") or self._data["app"].get("gpu", "0")
+
+    @property
+    def gpu_map(self) -> dict:
+        """获取视角级 GPU 映射 {module_name: gpu_str}."""
+        return self._data["app"].get("gpu_map", {})
+
+    @property
+    def gpu_default(self) -> str:
+        """获取默认 GPU 编号(模块未在 gpu_map 时回退)."""
+        return self._data["app"].get("gpu_default") or self._data["app"].get("gpu", "0")
 
     @property
     def fps(self) -> float:

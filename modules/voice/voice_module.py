@@ -55,8 +55,7 @@ class VoiceModule(BaseModule):
                 model_path=voice_config.get("model_path"),
                 aligner_path=voice_config.get("aligner_path"),
                 sample_rate=voice_config.get("sample_rate", 16000),
-                device="cuda",
-                torch_dtype=voice_config.get("torch_dtype"),
+                        torch_dtype=voice_config.get("torch_dtype"),
             )
 
             # 初始化结果存储
@@ -144,6 +143,11 @@ class VoiceModule(BaseModule):
     def _extract_audio(self, video_path: str) -> str:
         """从视频提取音频."""
         import subprocess
+        from pathlib import Path
+        if not video_path:
+            video_path = str(self.paths.base_dir / self.config.get("videos", {}).get("front", "data/videos/camFRONT.mpg"))
+        elif not Path(video_path).is_absolute() and not Path(video_path).exists():
+            video_path = str(self.paths.base_dir / video_path)
 
         # 使用当前推理的 run_id，确保音频文件与其他结果位于同一 result_dir
         audio_path = str(self.paths.get_result_path(

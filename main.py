@@ -16,6 +16,24 @@ import sys
 import os
 import glob
 
+# 让 onnxruntime-gpu 的 CUDA EP 能找到 pip 装的 nvidia cu12 运行时库
+# (库在 site-packages/nvidia/*/lib, 不在系统标准路径, 动态链接器默认不搜;
+#  设进 LD_LIBRARY_PATH 后 spawn 的子进程继承之, gaze 的 ONNX 才上 GPU 而非 fallback CPU)
+try:
+    _nv_root = os.path.join(sys.prefix, "lib", "python%d.%d" % sys.version_info[:2], "site-packages", "nvidia")
+    if not os.path.isdir(_nv_root):
+        import site
+        for _p in site.getsitepackages():
+            _c = os.path.join(_p, "nvidia")
+            if os.path.isdir(_c):
+                _nv_root = _c; break
+    _nv_libs = glob.glob(os.path.join(_nv_root, "*", "lib"))
+    if _nv_libs:
+        _cur = os.environ.get("LD_LIBRARY_PATH", "")
+        os.environ["LD_LIBRARY_PATH"] = ":".join(_nv_libs) + (":" + _cur if _cur else "")
+except Exception:
+    pass
+
 import argparse
 import multiprocessing
 import time
@@ -28,7 +46,7 @@ parser.add_argument("--gpu", type=str, default="0", help="GPU 编号 (默认: 0)
 parser.add_argument("--config", type=str, default=None, help="配置文件路径")
 args = parser.parse_args()
 
-# 主进程和 Web 进程不限制 GPU 可见性；Qwen 评估子进程启动时动态选择空闲 GPU 运行
+# 视角级 GPU 分配: 业务子进程经 _run_module_process 按 module_name 取 gpu_map; 评估子进程经 eval_gpu 分配
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, BASE_DIR)
 # 切到项目根，使配置路径以相对形式表达（models/...、data/...）且不依赖启动位置
@@ -59,7 +77,8 @@ def _run_module_process(
 ):
     """业务模块进程的通用模板（单次推理，完成后自动退出释放 VRAM."""
     # 业务子模块仅可见指定的推理 GPU
-    os.environ["CUDA_VISIBLE_DEVICES"] = str(config_dict.get("gpu") or "0")
+    # 视角级GPU: gpu_map 按模块名取, 未配置则回退 gpu_default(已含CLI --gpu)
+    os.environ["CUDA_VISIBLE_DEVICES"] = str(config_dict.get("gpu_map", {}).get(module_name, config_dict.get("gpu_default", "0")))
     from pathlib import Path
     from core.event_bus import EventStream
     from core.inference_stream import InferenceStream
@@ -213,16 +232,18 @@ def run_web_process(config_dict, paths_dict, run_id=None):
     except Exception as e:
         logger.error(f"读取视频时长失败: {e}", exc_info=True)
 
+    # 供 WSHandler connect 补发状态快照(前端刷新即拿到总时长, 不依赖前端 video 加载)
+    config_dict["duration"] = video_duration
+
     inference_sync = InferenceSync(
         fps=config_dict.get("fps", 30),
         # per-source 粒度：每个 source 独立上报进度与结束信号，彻底解耦各模态产出长度不一致问题
         expected_sources={
-            "voice",  # 语音转录
-            "video_front",  # 主视频（tracker）
-            "tracking",  # 目标跟踪（tracker）
-            "video_pop",  # POP 视角视频（behavior，同时承担手指屏幕与手指文件检测）
-            "behavior",  # 行为事件（behavior）
-            "gaze",  # 凝视估计（gaze，由 tracker 代报进度与结束信号）
+            "voice",      # 语音转录
+            "tracking",   # 目标跟踪与在岗人数 (tracker)
+            "behavior",   # 行为事件 (behavior)
+            "gaze",       # 凝视估计 (gaze)
+            # vis_front/vis_pop 已改为画进帧 fMP4,不再走推理流,故不参与 done 判定
         },
         redis_host=REDIS_HOST,
         redis_port=REDIS_PORT,
@@ -302,6 +323,12 @@ def run_web_process(config_dict, paths_dict, run_id=None):
 
         if inference_sync:
             inference_sync.reset()
+        # 视频流:清空上轮 init 缓存,启动 fMP4 转发(与推理子进程同时起)
+        if app.state.ws_handler:
+            app.state.ws_handler.clear_vis_cache()
+        if getattr(app.state, "vis_forwarder", None):
+            app.state.vis_forwarder.stop()
+            app.state.vis_forwarder.start()
         flow_recorder.reset()
         flow_recorder.set_result_dir(active_result_dir)
         for rname, rreg in registry._rules.items():
@@ -315,11 +342,13 @@ def run_web_process(config_dict, paths_dict, run_id=None):
             flow_evaluator.set_result_dir(active_result_dir)
 
         # 按需启动推理子进程（完成后自动 exit(0) 退出释放 VRAM）
-        v_path = config_dict.get("video_path")
+        front_video = config_dict.get("videos", {}).get("front") or config_dict.get("video_path")
+        pop_video = config_dict.get("videos", {}).get("pop") or config_dict.get("video_path")
+
         if config_dict.get("modules", {}).get("voice"):
             p = multiprocessing.Process(
                 target=run_voice_process,
-                args=(config_dict, paths_dict, v_path, active_run_id),
+                args=(config_dict, paths_dict, front_video, active_run_id),
                 name="voice",
                 daemon=False,
             )
@@ -329,7 +358,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         if config_dict.get("modules", {}).get("tracker"):
             p = multiprocessing.Process(
                 target=run_tracker_process,
-                args=(config_dict, paths_dict, v_path, active_run_id),
+                args=(config_dict, paths_dict, front_video, active_run_id),
                 name="tracker",
                 daemon=False,
             )
@@ -339,7 +368,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         if config_dict.get("modules", {}).get("behavior"):
             p = multiprocessing.Process(
                 target=run_behavior_process,
-                args=(config_dict, paths_dict, v_path, active_run_id),
+                args=(config_dict, paths_dict, pop_video, active_run_id),
                 name="behavior",
                 daemon=False,
             )
@@ -360,6 +389,16 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         inference_sync=inference_sync,
     )
     app.state.stop_pipeline = stop_pipeline_processes
+
+    # 视频流转发器:消费 Redis 中的 fMP4 段,经 WS 二进制帧推给前端 MSE
+    from web.vis_forwarder import VisStreamForwarder
+    vis_forwarder = VisStreamForwarder(
+        app.state.ws_handler,
+        redis_host=REDIS_HOST,
+        redis_port=REDIS_PORT,
+        redis_db=REDIS_DB,
+    )
+    app.state.vis_forwarder = vis_forwarder
 
     # 大模型评估结果和流式推理文本：具备高实时性，不应随视频播放进度被拖延（对齐）
     # 直接推送函数：评估结果等高实时性事件绕过 batch 对齐，直接经 WebSocket 推送前端
@@ -382,6 +421,8 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         if inference_sync:
             inference_sync.push_display(event_type, data)
 
+    # 评估子进程 GPU: 由 config gpu_map[evaluation] 指定, web 进程注入环境变量供 FlowEvaluationManager 读取
+    os.environ["_EVAL_GPU"] = str(config_dict.get("gpu_map", {}).get("evaluation", config_dict.get("gpu_default", "1")))
     from evaluation.flow_evaluation_manager import FlowEvaluationManager
     flow_evaluator = FlowEvaluationManager(
         event_bus=event_bus,
@@ -417,7 +458,23 @@ def run_web_process(config_dict, paths_dict, run_id=None):
                     logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
                 # 回收退场子进程状态码，清除 ps aux 中的 <defunct> 僵尸进程条目
                 stop_pipeline_processes()
+                # 推理完成：清空本轮 Redis 推理数据，为下次「开始测试」准备干净状态
+                try:
+                    _r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+                    for _k in _r.scan_iter("inference:*"):
+                        _r.delete(_k)
+                    for _k in _r.scan_iter("module:*"):
+                        _r.delete(_k)
+                    for _k in _r.scan_iter("pipeline:*"):
+                        _r.delete(_k)
+                    _r.close()
+                    logger.info("推理完成后已清空 Redis 推理数据，等待下次开始测试")
+                except Exception as _e:
+                    logger.error(f"推理完成后清空 Redis 失败: {_e}")
                 logger.info("推理流与评估流程已全部完成，GPU 推理子进程与僵尸表项已 100% 清理，Web 保持运行")
+                # 推理结束:停止视频流转发(子进程已 finalize 编码器)
+                if getattr(app.state, "vis_forwarder", None):
+                    app.state.vis_forwarder.stop()
             app.state.ws_handler.push(event)
 
         inference_sync.set_push_callback(push_wrapper)
@@ -461,6 +518,8 @@ def main():
     config_dict = config.to_dict()
     config_dict["fps"] = fps
     config_dict["gpu"] = args.gpu
+    config_dict["gpu_map"] = config.gpu_map
+    config_dict["gpu_default"] = args.gpu or config.gpu_default
     # Redis 配置：优先从 config.yaml 的 redis 段读取，缺省回退到默认 localhost:6379/0
     _redis_cfg = config_dict.get("redis", {})
     config_dict["_redis_host"] = _redis_cfg.get("host", REDIS_HOST)

@@ -2,7 +2,13 @@
 # 此文件覆盖 config.py 中的默认值
 
 app:
-  gpu: "0"
+  # 视角级 GPU 分配: front(tracker+gaze)=0, voice/pop/evaluation=1
+  gpu_map:
+    tracker: "0"
+    voice: "1"
+    behavior: "1"
+    evaluation: "1"
+  gpu_default: "0"
   fps: 30.0
   port: 5002
 
@@ -28,6 +34,7 @@ supervision:
   consec_raise: 3
   consec_idle: 3
   cooldown_sec: 1.5
+  hand_frame_step: 3  # 举手检测姿态推理跳帧(每3帧1次+EMA复用)
 
 tracker:
   detection:
