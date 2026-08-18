@@ -11,8 +11,6 @@
 
 可视化风格：统一黄色半透明填充 + 实线闭合边框 + 质心标签（对齐 gaze_roi_app/visualizer）。
 """
-import os
-
 import cv2
 import numpy as np
 from typing import List, Optional, Tuple
