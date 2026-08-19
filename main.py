@@ -249,6 +249,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         redis_port=REDIS_PORT,
         redis_db=REDIS_DB,
         duration=video_duration,
+        event_bus=event_bus,
     )
     # 结果目录提前确定，供规则和评估器使用
     flow_result_dir = str(paths.get_result_dir(run_id)) if run_id else str(

@@ -36,15 +36,18 @@ class InferenceSync:
         redis_port: int = 6379,
         redis_db: int = 0,
         duration: float = 0.0,
+        event_bus=None,
     ):
         """初始化."""
         self.fps = fps
         self.duration = duration
+        self._event_bus = event_bus
 
         from core.redis_conn import get_redis_client
         self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
         self._redis.ping()
         logger.info("InferenceSync (推理同步中间件) Redis 连接成功")
+        self._subscribe_flow_events()
 
         # Redis keys
         self._KEY_PROGRESS = KEY_PROGRESS
@@ -155,6 +158,34 @@ class InferenceSync:
             logger.debug(f"事件写入Stream: {event_type}, localSec={ev['localSec']}")
         except Exception as e:
             logger.error(f"同步器写入事件失败: {event_type}, {e}")
+
+    def _on_flow_started(self, msg: dict) -> None:
+        """FLOW_STARTED → push_display flow_start 进 results:all(供前端事件流栏)."""
+        d = msg.get("data", msg)
+        ts = float(d.get("flow_start_sec", msg.get("ts", 0)))
+        self.push_display("flow_start", {
+            "localSec": ts, "tag": "flow_start",
+            "data": {"flow_id": d.get("flow_id"), "flow_type": d.get("flow_type"), "flow_start_sec": ts}
+        })
+
+    def _on_flow_ended(self, msg: dict) -> None:
+        """FLOW_ENDED → push_display flow_end 进 results:all."""
+        d = msg.get("data", msg)
+        ts = float(d.get("flow_end_sec", msg.get("ts", 0)))
+        self.push_display("flow_end", {
+            "localSec": ts, "tag": "flow_end",
+            "data": {"flow_id": d.get("flow_id"), "flow_type": d.get("flow_type"),
+                     "flow_end_sec": ts, "flow_continue_sec": d.get("flow_continue_sec", 0)}
+        })
+
+    def _subscribe_flow_events(self) -> None:
+        """订阅 event_bus FLOW_STARTED/FLOW_ENDED, 转推 results:all 供前端事件流栏."""
+        if not self._event_bus:
+            return
+        from core.event_bus import EventTopic
+        self._event_bus.subscribe(EventTopic.FLOW_STARTED, self._on_flow_started)
+        self._event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
+        logger.info("InferenceSync 已订阅 FLOW_STARTED/FLOW_ENDED → flow_start/flow_end 推送")
 
     def flush_remaining(self) -> None:
         """强制刷新 Stream 中所有剩余事件到前端（done 信号推送前调用，确保评估结果不丢）."""
