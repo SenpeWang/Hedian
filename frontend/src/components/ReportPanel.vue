@@ -58,15 +58,24 @@ function typewriterTick() {
     if (cur < full.length) {
       shownLen.value[card.flowId] = Math.min(cur + 1, full.length)
       needContinue = true
+    } else if (card.reportText) {
+      // 已逐字追赶到末尾 + 最终报告(segment_report)已到达 → 切完成态(显分数/进度条/完成图标)
+      card.streaming = false
     }
   }
   scrollToBottom()  // 逐字滚底跟随最新输出(同 VoicePanel watch 实时 text)
   if (!needContinue && timerId !== null) { clearInterval(timerId); timerId = null }
 }
 
+// streaming 卡片存在 → 启动打字机
 watch(() => props.segCards.some(c => c.streaming), (has) => {
   if (has && timerId === null) timerId = setInterval(typewriterTick, 60)
 }, { immediate: true })
+// segment_report 到达(reportText 变化)时若打字机已停但仍有 streaming 卡片 → 重启跑一次完成态切换
+// (streamBuffer 早追完已停, segment_report 后到, 需 tick 触发 streaming=false)
+watch(() => props.segCards.map(c => c.reportText).join('|'), () => {
+  if (timerId === null && props.segCards.some(c => c.streaming)) timerId = setInterval(typewriterTick, 60)
+})
 
 onBeforeUnmount(() => { if (timerId !== null) clearInterval(timerId) })
 
