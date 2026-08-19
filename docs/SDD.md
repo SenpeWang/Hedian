@@ -118,7 +118,10 @@
 |----|------|---------|
 | F-60 | 流程结束后须提取各模块 key_moments | 检查提取的 JSON 文件 |
 | F-61 | 流程结束后须调用 Qwen3-8B 生成评估报告 | 输出 qwen_response_*.json |
-| F-62 | 评估报告须推送到前端（经 `push_text` 直推，绕过对齐） | 前端显示评估内容 |
+| F-62 | 评估报告须推送到前端（经 `push_text` 直推，绕过对齐中间件） | 前端显示评估内容 |
+| F-63 | 提取 keymoment 前，须 `_wait_all_modules(end_sec, timeout=90)` 等所有推理模块进度 `min >= end_sec` | 日志可见等待完成或 90s 超时放行 |
+| F-64 | 推评估 chunk 前，须 `wait_playback_reached(end_sec-0.5, timeout=60)` 等前端可视化播放到流程结束（不剧透） | 流程结束前评估不出现，结束后才逐字 |
+| F-65 | 评估报告须逐 token 流式输出（`TextIteratorStreamer`→`segment_report_stream` chunk 累积→前端 typewriter 逐字）；`segment_report` 不覆盖 `streamBuffer`；typewriter 追完 + `reportText` 到达→切完成态显分数 | 前端逐字显示，完成后显分数/进度条 |
 
 ### 3.8 交互
 

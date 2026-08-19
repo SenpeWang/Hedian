@@ -76,7 +76,7 @@
 - **FR-37**：Qwen3-8B 子进程评估(TextIteratorStreamer 逐 token)。
 - **FR-38**：评估维度(按规程: 监护制5维/信息通报4维/自唱票3维, 10分制)。
 - **FR-39**：评估结果等前端可视化到流程结束才推(wait_playback_reached end_sec-0.5 超时60s)。
-- **FR-40**：评估报告逐 token 流式打字机(chunk 累积 streamBuffer, shownText 逐字, 无光标)。
+- **FR-40**：评估报告逐 token 流式打字机(chunk 累积 streamBuffer, shownText 逐字, 无光标); segment_report 不覆盖 streamBuffer; typewriter 追完 + reportText 到达 → 切 streaming=false 显分数/进度条/完成态。
 
 ### 3.7 数据对齐与运维（FR-41 ~ FR-45）
 - **FR-41**：后端 InferenceSync globalSec=min(各视角进度) 压住快视角超前事件。

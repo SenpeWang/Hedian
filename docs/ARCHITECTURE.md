@@ -151,7 +151,7 @@ batch.sourceTimes → useWS viewSecs{front,pop,voice}
 ### 决策5：setInterval 60ms 慢速逐字 vs token 实时
 - **选**：后端逐 chunk 推 → 前端 `streamBuffer += chunk` 累积 → `setInterval 60ms` 改 `shownLen` 逐字截取展示（~16 字/秒，模拟大模型）
 - **理由**：像大模型那样慢速逐字涌现，体验一致；前端收到完整数据后逐字展示
-- **权衡**：`segment_report`（完整）到达**不覆盖 streamBuffer、不设 streaming=false**（否则一次性全显示，中断流式）；typewriter 赶满后自然停；`typewriterTick` 调 `scrollToBottom` 滚底跟随；无光标
+- **权衡**：`segment_report`（完整）到达**不覆盖 streamBuffer**（否则一次性全显示，中断流式）；typewriter 追赶到末尾 + `reportText` 到达 → 置 `streaming=false` 切完成态（显分数/进度条/完成图标）；`typewriterTick` 调 `scrollToBottom` 滚底跟随；无光标
 
 ### 决策6：hand 稀疏 frame_step=3 vs 每帧
 - **选**：每3帧推理1次 pose + EMA 平滑

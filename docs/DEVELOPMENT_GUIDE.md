@@ -104,6 +104,7 @@
 3. **`InferenceSync.global_sec` 时钟逻辑与 `expected_sources` 不可破坏。** 改对齐逻辑前先读懂 `global_sec` 计算与 `_last_video_cache`（只缓存 `video_front`/`video_pop` 两路）。
 4. **`main.py` 启动 `r.flushdb()` 清空 Redis**：重启会清掉前次推理全部缓存；结果落盘靠 `key_moments.json` 文件，不依赖 Redis 跨重启保留。
 5. **视频帧协议字节序与字段顺序不可改**：`[1B version][4B globalSec f32 大端][1B view_count][重复:1B view_id+4B len 大端+JPEG][4B json_len 大端+JSON]`，前后端必须一致。
+6. **评估异步链路时序不可破坏**（见 §11.5）：`_wait_all_modules` 等模块齐到、`wait_playback_reached` 等前端播到、`push_direct` 直推绕对齐、逐 token 流式 + 完成态切换——四条红线改评估层前逐条核对。
 
 ## 8. 常见故障排查
 - **卡在"推理中"**：优先排查 spawn 子进程 import 崩溃（旧 detector 类名、类不存在）、`config.yaml` 视频路径不存在、Redis 未启动。
@@ -166,6 +167,7 @@
 - **⚠ 评估结果推送时机**：`wait_playback_reached` 等前端播放到 `end_sec-0.5` 才推（前端已可视化到流程结束才推评估，超时60s兜底）。**这是"前端到流程结束才推评估"的耦合点，勿删**。
 - **直推不走对齐**：push_direct → ws_handler.push_text（绕过 InferenceSync）。source=`segment_report_stream`/`segment_report`。
 - **逐 token**：TextIteratorStreamer 逐段产 → stream_callback → chunk 推送。
+- **完成态切换**：`segment_report`（完整）到达时**不覆盖 streamBuffer**（防中断流式）；前端 ReportPanel `typewriterTick` 追赶到 `streamBuffer` 末尾 + `reportText` 已到达 → 置 `streaming=false` 切完成态（显分数徽章/进度条/完成图标/[continueSec]s）；`reportText` 变化时若打字机已停则重启跑一次触发切换。
 - **GPU**：eval_gpu 从 config gpu_map["evaluation"]，_qwen_worker 设 CUDA_VISIBLE_DEVICES（gpu_manager.py 已删）。
 
 ### 11.6 InferenceSync（对齐推送）
