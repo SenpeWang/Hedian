@@ -60,17 +60,22 @@ function followTo(sec: number) {
   if (!videoRef.value) return
   const diff = videoRef.value.currentTime - sec  // 正=pop超前, 负=pop落后
   const base = props.playbackRate || 1.0
-  if (Math.abs(diff) > 1.0) {
-    // 严重失步兜底: 直接seek
-    try { videoRef.value.currentTime = sec } catch {}
-    videoRef.value.playbackRate = base
-  } else if (diff > 0.05) {
-    videoRef.value.playbackRate = Math.max(0.1, base * 0.85)  // pop超前, 减速等
-  } else if (diff < -0.05) {
-    videoRef.value.playbackRate = Math.min(2.0, base * 1.15)  // pop落后, 加速追
-  } else {
-    videoRef.value.playbackRate = base  // 同步, 同速
+  // 检查 front 时刻是否在 pop 已缓冲范围内(避免 seek 到未缓冲位置 → 乱跳帧)
+  const buf = videoRef.value.buffered
+  let inBuffer = false
+  for (let i = 0; i < buf.length; i++) {
+    if (sec >= buf.start(i) - 0.05 && sec <= buf.end(i) - 0.3) { inBuffer = true; break }
   }
+  if (!inBuffer) {
+    // front 时刻未缓冲(pop 段未到): 暂停等, 不 seek 不乱跳
+    videoRef.value.playbackRate = 0
+    return
+  }
+  // 严格对齐: 偏差>0.1 即 seek 到 front.currentTime(buffered 内安全), 不用 rate 追随避免累积偏差
+  if (Math.abs(diff) > 0.1) {
+    try { videoRef.value.currentTime = sec } catch {}
+  }
+  videoRef.value.playbackRate = base  // 同速率播放(与 front 同速)
 }
 
 defineExpose({ playVideo, pauseVideo, followTo, currentTime: () => videoRef.value?.currentTime ?? 0, duration: () => videoRef.value?.duration ?? 0 })

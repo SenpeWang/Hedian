@@ -184,6 +184,9 @@ export function useWS() {
 
   function initMSE() {
     console.log('[mse] initMSE start')
+    for (const ms of [frontMS, popMS]) { if (ms) { try { if (ms.readyState === 'open') ms.endOfStream() } catch {} } }
+    if (frontMediaUrl.value) { try { URL.revokeObjectURL(frontMediaUrl.value) } catch {} }
+    if (popMediaUrl.value) { try { URL.revokeObjectURL(popMediaUrl.value) } catch {} }
     // front:含音频轨;pop:仅视频
     frontMS = new MediaSource()
     frontMediaUrl.value = URL.createObjectURL(frontMS)

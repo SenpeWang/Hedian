@@ -115,7 +115,7 @@ function toggle(card: SegCard) {
           <div class="sc-head" @click="toggle(card)">
             <span>
               {{ card.streaming ? '🤖' : cardIcon(card.flowType) }}
-              {{ card.streaming ? '大模型评估推理中…' : cardLabel(card.flowType) + ' #' + card.flowId + ' [' + card.continueSec + 's]' }}
+              {{ cardLabel(card.flowType) }} #{{ card.flowId }}{{ card.streaming ? '' : ' [' + card.continueSec + 's]' }}
               <span class="sc-toggle-icon">{{ card.collapsed ? '▶' : '▼' }}</span>
             </span>
             <span v-if="!card.streaming" class="sc-score" :style="{ color: scoreColor(card.score) }">{{ card.score }}/10</span>

@@ -39,7 +39,7 @@ function handleStop() {
 // 同时锁步 pop(pop 跟随 front.currentTime,帧率不同按时间秒对齐)
 function handleFrontProgress(sec: number) {
   ws.reportPlaybackProgress(sec)
-  // pop 主从追随 front: 每帧调 followTo, 平滑调 playbackRate 追随, 不离散seek
+  // pop 追随 front.currentTime: 严格对齐(避免 pop 独立播超前 front)
   popPanelRef.value?.followTo(sec)
 }
 // front 视频自然结束:同步暂停 pop(front 641s < pop 644s,避免 pop 多播错位)
