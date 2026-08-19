@@ -1,4 +1,11 @@
 <script setup lang="ts">
+/**
+ * @fileoverview 视频展示面板组件 (VideoPanel).
+ *
+ * 实现了基于 MSE (MediaSource Extensions) 的 fMP4 视频流实时解码播放，
+ * 并针对多视角对齐场景提供了基于缓冲水位门控的时刻对齐主从同步控制。
+ */
+
 import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
 
 const props = withDefaults(defineProps<{
@@ -17,8 +24,12 @@ const props = withDefaults(defineProps<{
 const videoRef = ref<HTMLVideoElement | null>(null)
 let animationFrameId: number | null = null
 
-// 渲染循环:每帧上报当前播放时间(驱动主时钟 → 结构化面板按时刻取数 + 双流锁步)
-// 标注已画进帧(后端 fMP4),前端不再做 Canvas 叠加绘制
+/**
+ * 驱动前端主时钟的逐帧渲染循环.
+ *
+ * 通过 requestAnimationFrame 获取当前视频硬件解码时间戳，
+ * 向上层容器实时上报以驱动所有结构化面板与双流锁步。
+ */
 function stepRenderLoop() {
   if (videoRef.value && props.onProgressUpdate && !videoRef.value.paused) {
     props.onProgressUpdate(videoRef.value.currentTime)
@@ -26,12 +37,18 @@ function stepRenderLoop() {
   animationFrameId = requestAnimationFrame(stepRenderLoop)
 }
 
+/**
+ * 启动逐帧渲染循环.
+ */
 function startRenderLoop() {
   if (animationFrameId === null) {
     animationFrameId = requestAnimationFrame(stepRenderLoop)
   }
 }
 
+/**
+ * 停止逐帧渲染循环.
+ */
 function stopRenderLoop() {
   if (animationFrameId !== null) {
     cancelAnimationFrame(animationFrameId)
@@ -39,6 +56,9 @@ function stopRenderLoop() {
   }
 }
 
+/**
+ * 重置并开始播放当前视频.
+ */
 function playVideo() {
   if (videoRef.value) {
     videoRef.value.currentTime = 0
@@ -47,46 +67,94 @@ function playVideo() {
   }
 }
 
+/**
+ * 暂停当前视频播放.
+ */
 function pauseVideo() {
   if (videoRef.value) {
     videoRef.value.pause()
   }
 }
 
-/** 主从追随:根据与主时钟(front)的偏差, 平滑调 playbackRate 追随, 不离散seek.
- *  偏差小:同速; 落后:略加速; 超前:略减速; 严重失步:兜底seek.
- *  baseRate=props.playbackRate(最慢板块倍率), 追随在其基础上±微调. */
-function followTo(sec: number) {
-  if (!videoRef.value) return
-  const diff = videoRef.value.currentTime - sec  // 正=pop超前, 负=pop落后
-  const base = props.playbackRate || 1.0
-  // 检查 front 时刻是否在 pop 已缓冲范围内(避免 seek 到未缓冲位置 → 乱跳帧)
-  const buf = videoRef.value.buffered
-  let inBuffer = false
-  for (let i = 0; i < buf.length; i++) {
-    if (sec >= buf.start(i) - 0.05 && sec <= buf.end(i) - 0.3) { inBuffer = true; break }
-  }
-  if (!inBuffer) {
-    // front 时刻未缓冲(pop 段未到): 暂停等, 不 seek 不乱跳
-    videoRef.value.playbackRate = 0
+/**
+ * 主从时刻对齐 (buffered-seek time alignment).
+ *
+ * 工业多路 MSE 对齐: pop 与 front 同速 (共用 baseRate), 偏差只靠 buffered 内
+ * seek 对齐时刻修正, 不变速追随 (变速在离散 append 的 MSE buffer 上会累积漂移).
+ * 严重失步兜底 seek 优先落到 buffered 内, 否则回自己 buffer 末尾配合 front 减速收敛.
+ *
+ * Args:
+ *   masterSec: 主视角 (front) 当前视频播放时刻 (秒).
+ */
+function followTo(masterSec: number) {
+  const vid = videoRef.value
+  if (!vid) return
+
+  // stall 自恢复: pop 暂停但应播放, 缓冲恢复足够即唤醒
+  if (vid.paused && props.isPlaying) {
+    if (vid.buffered.length > 0) {
+      const bufEnd = vid.buffered.end(vid.buffered.length - 1)
+      if (bufEnd - vid.currentTime > 0.3) {
+        vid.play().catch(() => {})
+      }
+    }
     return
   }
-  // 严格对齐: 偏差>0.1 即 seek 到 front.currentTime(buffered 内安全), 不用 rate 追随避免累积偏差
-  if (Math.abs(diff) > 0.1) {
-    try { videoRef.value.currentTime = sec } catch {}
+
+  const diff = vid.currentTime - masterSec // 正: pop 超前, 负: pop 落后
+  const absDiff = Math.abs(diff)
+  if (absDiff < 0.15) return // 自然跟随, 不动
+
+  // 时刻是否落在 pop 已缓冲区间内 (避免 seek 到未缓冲区乱跳帧)
+  const inBuf = (t: number) => {
+    for (let i = 0; i < vid.buffered.length; i++) {
+      if (t >= vid.buffered.start(i) && t <= vid.buffered.end(i) - 0.1) return true
+    }
+    return false
   }
-  videoRef.value.playbackRate = base  // 同速率播放(与 front 同速)
+
+  if (absDiff < 1.0) {
+    // 中等偏差: buffered 内 seek 对齐, 否则不动等缓冲
+    if (inBuf(masterSec)) { try { vid.currentTime = masterSec } catch {} }
+    return
+  }
+
+  // 严重失步兜底: 优先 buffered 内对齐, 否则回自己 buffer 末尾
+  const target = inBuf(masterSec)
+    ? masterSec
+    : (vid.buffered.length > 0 ? Math.max(0, vid.buffered.end(vid.buffered.length - 1) - 0.1) : masterSec)
+  try { vid.currentTime = target } catch {}
 }
 
-defineExpose({ playVideo, pauseVideo, followTo, currentTime: () => videoRef.value?.currentTime ?? 0, duration: () => videoRef.value?.duration ?? 0 })
-
-watch(() => props.playbackRate, (rate) => {
-  if (videoRef.value && rate && rate > 0) {
-    try { (videoRef.value as any).preservesPitch = true } catch {}
-    videoRef.value.playbackRate = rate
+/**
+ * 标签页切前台自适应恢复处理.
+ */
+function handleVisibilityChange() {
+  if (document.visibilityState === 'visible' && props.isPlaying && videoRef.value) {
+    if (videoRef.value.paused) {
+      videoRef.value.play().catch(() => {})
+    }
   }
+}
+
+document.addEventListener('visibilitychange', handleVisibilityChange)
+
+defineExpose({
+  playVideo,
+  pauseVideo,
+  followTo,
+  currentTime: () => videoRef.value?.currentTime ?? 0,
+  duration: () => videoRef.value?.duration ?? 0,
+})
+
+// 监听全局播放倍率: front/pop 同速 (共用 baseRate), 不再有 pop 自行调速
+watch(() => props.playbackRate, (rate) => {
+  if (!videoRef.value || !rate || rate <= 0) return
+  try { (videoRef.value as any).preservesPitch = true } catch {}
+  videoRef.value.playbackRate = rate
 }, { immediate: true })
 
+// 监听播放状态切换
 watch(() => props.isPlaying, async (playing) => {
   await nextTick()
   if (!videoRef.value) return
@@ -101,6 +169,7 @@ startRenderLoop()
 
 onBeforeUnmount(() => {
   stopRenderLoop()
+  document.removeEventListener('visibilitychange', handleVisibilityChange)
 })
 </script>
 

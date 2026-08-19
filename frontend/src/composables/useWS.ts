@@ -124,7 +124,8 @@ export function useWS() {
   let _vsLast = { front: 0, pop: 0, voice: 0 }, _vsClockLast = 0
   const playbackRate = ref(1.0)
   // 统一速率引擎: 各视角整体速度 v=Δsec/Δwall, playbackRate=min(v_front,v_pop,v_voice,1.0)
-  // 视角整体速率(每帧串行链吞吐), 非模块拆分; 只降不升, 下限0.2防极慢, 上限1.0绝不超
+  // 视角整体速率(每帧串行链吞吐), 非模块拆分; min 是缓冲水位门控(主等从, 慢路拖累快路);
+  // EMA 平滑避免主时钟阶跃(pop 追跳变目标超调), 下限0.2, 上限1.0绝不超
   function _updateRate() {
     const now = performance.now()
     if (_vsClockLast === 0) { _vsClockLast = now; _vsLast = { ...viewSecs.value }; return }
@@ -138,8 +139,9 @@ export function useWS() {
     }
     _vsClockLast = now; _vsLast = { ...vs }
     if (speeds.length === 0) return
-    // 最慢视角决定整体: min(各视角速度, 1.0), 下限0.2
-    playbackRate.value = Math.min(1.0, Math.max(0.2, Math.min(...speeds)))
+    // 最慢视角决定整体: min(各视角速度, 1.0), 下限0.2; EMA 平滑防阶跃
+    const target = Math.min(1.0, Math.max(0.2, Math.min(...speeds)))
+    playbackRate.value = playbackRate.value * 0.6 + target * 0.4
   }
 
   // ── 时序数据池(结构化面板:人数/凝视)──
@@ -298,11 +300,11 @@ export function useWS() {
 
   // [事件流状态栏] 语音转录: filter 累积所有已发生转录
   const voiceEntries = computed(() =>
-    Object.values(rawVoiceMap).filter(v => v.sec <= currentPlaybackSec.value + 0.5).sort((a, b) => a.sec - b.sec)
+    Object.values(rawVoiceMap).filter(v => v.sec <= currentPlaybackSec.value + 3).sort((a, b) => a.sec - b.sec)
   )
   // [事件流状态栏] 流程事件: filter 累积所有已发生流程开始/结束
   const flowEvents = computed(() =>
-    rawFlowEvents.value.filter(e => e.sec <= currentPlaybackSec.value + 0.5)
+    rawFlowEvents.value.filter(e => e.sec <= currentPlaybackSec.value + 3)
   )
   // [状态量状态栏] 监控室人数: getLatestAt 取当前时刻最新可得人数, 持续显示
   const people = computed<PeopleState>(() => {
