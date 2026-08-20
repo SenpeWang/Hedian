@@ -258,7 +258,7 @@ export function useWS() {
     if (d.gaze && Array.isArray(d.gaze) && d.gaze[0]?.data) {
       const dt = d.gaze[0].data
       gazePool.insertSorted({
-        localSec: d.gaze[0].localSec ?? raw.globalSec ?? 0,
+        localSec: d.gaze[0].localSec ?? 0,
         state: { hasHeads: !!dt.has_heads, headsCount: dt.heads_count || 0, anyInRoi: !!dt.any_in_roi, awayDuration: dt.away_duration || 0 }
       })
     }
