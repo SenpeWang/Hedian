@@ -89,8 +89,8 @@ function handleFrontEnded() {
       :sup-n="ws.supN.value"
       :ticket-n="ws.ticketN.value"
       :notice-n="ws.noticeN.value"
-      :total="ws.totalCount()"
-      :avg="ws.avgScore()"
+      :total="ws.totalScore.value"
+      :avg="ws.avgScore.value"
       @toggle="ws.toggleCard"
     />
   </div>
