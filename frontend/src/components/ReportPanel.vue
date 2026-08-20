@@ -50,32 +50,26 @@ function shownText(card: SegCard, field: 'think' | 'report'): string {
 // 前端收到完整数据, 逐字慢速展示
 let timerId: ReturnType<typeof setInterval> | null = null
 function typewriterTick() {
-  let needContinue = false
   for (const card of props.segCards) {
     if (!card.streaming) continue
     const full = card.streamBuffer || card.reportText || ''
     const cur = shownLen.value[card.flowId] || 0
     if (cur < full.length) {
       shownLen.value[card.flowId] = Math.min(cur + 1, full.length)
-      needContinue = true
     } else if (card.reportText) {
-      // 已逐字追赶到末尾 + 最终报告(segment_report)已到达 → 切完成态(显分数/进度条/完成图标)
+      // 追赶到末尾 + 终态(segment_report)到达 → 切完成态(显分数/进度条/完成图标)
       card.streaming = false
     }
   }
-  scrollToBottom()  // 逐字滚底跟随最新输出(同 VoicePanel watch 实时 text)
-  if (!needContinue && timerId !== null) { clearInterval(timerId); timerId = null }
+  scrollToBottom()
+  // 所有卡片转完成态才停(防 chunk 续到时 timer 已停致卡死; 60ms 空转开销可忽略)
+  if (!props.segCards.some(c => c.streaming) && timerId !== null) { clearInterval(timerId); timerId = null }
 }
 
-// streaming 卡片存在 → 启动打字机
+// 有 streaming 卡片即启动打字机, 一直跑到全部完成(中途 chunk 续到不卡死)
 watch(() => props.segCards.some(c => c.streaming), (has) => {
   if (has && timerId === null) timerId = setInterval(typewriterTick, 60)
 }, { immediate: true })
-// segment_report 到达(reportText 变化)时若打字机已停但仍有 streaming 卡片 → 重启跑一次完成态切换
-// (streamBuffer 早追完已停, segment_report 后到, 需 tick 触发 streaming=false)
-watch(() => props.segCards.map(c => c.reportText).join('|'), () => {
-  if (timerId === null && props.segCards.some(c => c.streaming)) timerId = setInterval(typewriterTick, 60)
-})
 
 onBeforeUnmount(() => { if (timerId !== null) clearInterval(timerId) })
 

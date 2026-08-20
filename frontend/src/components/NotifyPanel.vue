@@ -84,7 +84,7 @@ function awayPct() {
     </div>
     <!-- [事件流状态栏] 流程事件列表: 累积显示已发生的流程开始/结束 -->
     <div class="flow-events" ref="flowEl">
-      <div v-for="(ev, i) in flowEvents" :key="i" class="flow-event" :style="{ borderLeftColor: ev.color }">
+      <div v-for="ev in flowEvents" :key="ev.flowType + ev.sec + ev.isStart" class="flow-event" :style="{ borderLeftColor: ev.color }">
         <span class="ts">[{{ fmt(ev.sec) }}]</span>
         <span :style="{ color: ev.color }">{{ ev.name }}{{ ev.isStart ? '开始' : '结束' }}</span>
       </div>

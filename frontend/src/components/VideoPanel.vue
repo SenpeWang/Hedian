@@ -1,15 +1,13 @@
 <script setup lang="ts">
-// VideoPanel: MSE fMP4 流式播放. front=主时钟(上报 currentTime); pop=从动(followTo 主时钟)
+// VideoPanel: MSE fMP4 流式播放. front=主时钟(emit currentTime); pop=从动(followTo 主时钟)
 
-import { ref, watch, onBeforeUnmount, nextTick } from 'vue'
+import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 
 const props = withDefaults(defineProps<{
   title: string
   mediaUrl?: string
   isMuted?: boolean
   viewType: 'front' | 'pop'
-  onProgressUpdate?: (sec: number) => void
-  onEnded?: () => void
   isPlaying: boolean
   playbackRate?: number
   playbackSec?: number
@@ -17,14 +15,19 @@ const props = withDefaults(defineProps<{
   isMuted: false,
 })
 
+const emit = defineEmits<{
+  progress: [sec: number]
+  ended: []
+}>()
+
 const videoRef = ref<HTMLVideoElement | null>(null)
 let animationFrameId: number | null = null
 
-// 逐帧循环: front 上报 currentTime(主时钟); pop 自驱动 followTo(主时钟)
+// 逐帧循环: front emit currentTime(主时钟); pop 自驱动 followTo(主时钟). 仅 isPlaying 时跑
 function stepRenderLoop() {
   if (videoRef.value) {
-    if (props.onProgressUpdate && !videoRef.value.paused) {
-      props.onProgressUpdate(videoRef.value.currentTime)
+    if (props.viewType === 'front' && !videoRef.value.paused) {
+      emit('progress', videoRef.value.currentTime)
     }
     if (props.viewType === 'pop' && props.playbackSec != null) {
       followTo(props.playbackSec)
@@ -41,9 +44,9 @@ function stopRenderLoop() {
   if (animationFrameId !== null) { cancelAnimationFrame(animationFrameId); animationFrameId = null }
 }
 
+// play() + 启动 RAF; 不重置 currentTime(isPlaying 抖动/恢复时不打回 0, 重建由 watch mediaUrl)
 function playVideo() {
   if (videoRef.value) {
-    videoRef.value.currentTime = 0
     videoRef.value.play().catch(e => console.warn(`[${props.title}] 播放提示:`, e))
     startRenderLoop()
   }
@@ -80,31 +83,35 @@ function followTo(masterSec: number) {
 // 标签页切回前台恢复播放
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible' && props.isPlaying && videoRef.value) {
-    if (videoRef.value.paused) {
-      videoRef.value.play().catch(() => {})
-    }
+    if (videoRef.value.paused) videoRef.value.play().catch(() => {})
   }
 }
-
-document.addEventListener('visibilitychange', handleVisibilityChange)
 
 defineExpose({ pauseVideo })
 
 // front/pop 同速共用 baseRate
 watch(() => props.playbackRate, (rate) => {
   if (!videoRef.value || !rate || rate <= 0) return
-  try { (videoRef.value as any).preservesPitch = true } catch {}
+  videoRef.value.preservesPitch = true
   videoRef.value.playbackRate = rate
-}, { immediate: true })
+})
 
+// mediaUrl 变化(重建流)时重置 currentTime=0 + 加载
+watch(() => props.mediaUrl, () => {
+  if (videoRef.value) videoRef.value.currentTime = 0
+})
+
+// isPlaying 门控: playing 启动 RAF+播放, 停止即停 RAF(空闲不空转)
 watch(() => props.isPlaying, async (playing) => {
   await nextTick()
   if (!videoRef.value) return
   if (playing) playVideo()
-  else pauseVideo()
-})
+  else { pauseVideo(); stopRenderLoop() }
+}, { immediate: true })
 
-startRenderLoop()
+onMounted(() => {
+  document.addEventListener('visibilitychange', handleVisibilityChange)
+})
 
 onBeforeUnmount(() => {
   stopRenderLoop()
@@ -123,7 +130,7 @@ onBeforeUnmount(() => {
         :muted="isMuted"
         playsinline
         preload="auto"
-        @ended="props.onEnded?.()"
+        @ended="emit('ended')"
       ></video>
     </div>
   </div>
