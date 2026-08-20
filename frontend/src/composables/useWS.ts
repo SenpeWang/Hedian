@@ -196,10 +196,18 @@ export function useWS() {
       if (totalDuration.value > 0) globalSec.value = totalDuration.value
       return
     }
-    if (msg.source === 'segment_report_stream' || msg.source === 'segment_report' || msg.type === 'report_stream' || msg.type === 'report' || msg.source === 'stream' || msg.source === 'report') {
-      handleReportEvent(msg); return
-    }
+    if (isReportMsg(msg)) { handleReportEvent(msg); return }
     handleBatchEvent(msg)
+  }
+
+  // 评估报告消息谓词(流式 chunk / 终态报告), 收口重复 OR 链
+  function isReportMsg(msg: any): boolean {
+    return msg.source === 'segment_report_stream' || msg.source === 'segment_report'
+      || msg.type === 'report_stream' || msg.type === 'report'
+      || msg.source === 'stream' || msg.source === 'report'
+  }
+  function isTerminalReport(msg: any): boolean {
+    return msg.source === 'segment_report' || msg.type === 'report' || msg.source === 'report'
   }
 
   function connect() {
@@ -331,23 +339,24 @@ export function useWS() {
     let card = segCards.value.find(c => c.flowId === flowId)
     // token 到达驱动: segment_report_stream 的 data.chunk 按到达累积进 streamBuffer
     const chunk = data.chunk || ''
+    const isStream = msg.source === 'segment_report_stream' || msg.type === 'report_stream' || msg.source === 'stream'
     if (!card) {
-      card = { flowId, flowType, score, reportText: reportText || chunk, continueSec, collapsed: false, streamBuffer: chunk || reportText, streaming: msg.source === 'segment_report_stream' || msg.type === 'report_stream' || msg.source === 'stream' }
+      // 流式态新建: reportText 留空(终态才写), 避免 streamBuffer 与 reportText 混淆
+      card = { flowId, flowType, score, reportText: isStream ? '' : reportText, continueSec, collapsed: false, streamBuffer: chunk || reportText, streaming: isStream }
       segCards.value.push(card)
     } else {
       if (score > 0) card.score = score
       if (continueSec) card.continueSec = continueSec
       // 流式 chunk 累积(按 token 到达逐字); 终态用完整 report_text 覆盖
-      if (chunk && (msg.source === 'segment_report_stream' || msg.type === 'report_stream')) {
+      if (chunk && isStream) {
         card.streamBuffer += chunk
       }
-      if (reportText && (msg.source === 'segment_report' || msg.type === 'report' || msg.source === 'report')) {
+      if (reportText && isTerminalReport(msg)) {
         card.reportText = reportText
         // 不覆盖 streamBuffer、不设 streaming=false: 让 typewriter 自然逐字到 streamBuffer 末尾再停
-        // (segment_report 到达时若覆盖会一次性全显示, 中断流式)
       }
     }
-    if ((msg.source === 'segment_report' || msg.type === 'report' || msg.source === 'report') && !completedFlows.has(flowId)) {
+    if (isTerminalReport(msg) && !completedFlows.has(flowId)) {
       completedFlows.add(flowId)
       if (score > 0) segScores.value.push(score)
       if (flowType === 'supervision') supN.value++
@@ -404,17 +413,16 @@ export function useWS() {
     if (popMediaUrl.value) { try { URL.revokeObjectURL(popMediaUrl.value) } catch {} }
   })
 
-  function totalCount() { return segScores.value.reduce((a, b) => a + b, 0) }
-  function avgScore() { return segScores.value.length > 0 ? (totalCount() / segScores.value.length).toFixed(1) : '-' }
+  const totalScore = computed(() => segScores.value.reduce((a, b) => a + b, 0))
+  const avgScore = computed(() => segScores.value.length > 0 ? (totalScore.value / segScores.value.length).toFixed(1) : '-')
 
-  initMSE()
-  connect()
+  connect()   // MSE 由 resetState(startPipeline)/onMounted reset 初始化, 不在此重复 initMSE
 
   return {
     status, isPlaying, startPipeline, stopPipeline, resetState, fmt,
     voiceEntries, people, gaze, flowEvents,
     segCards, supN, ticketN, noticeN,
-    progress, totalCount, avgScore, toggleCard,
+    progress, totalScore, avgScore, toggleCard,
     reportPlaybackProgress,
     frontMediaUrl, popMediaUrl,
     playbackRate, currentPlaybackSec,

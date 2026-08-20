@@ -2,7 +2,7 @@
 
 
 const props = defineProps<{
-  status: string
+  status: 'idle' | 'starting' | 'running' | 'done' | 'stopped'
   progress: number
 }>()
 
