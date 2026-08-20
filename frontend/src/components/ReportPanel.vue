@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { nextTick, watch, ref, onBeforeUnmount } from 'vue'
+import { ref, toRef } from 'vue'
 import type { SegCard } from '../types'
+import { useScrollBottom } from '../composables/useScrollBottom'
+import { useTypewriter } from '../composables/useTypewriter'
 
 const props = defineProps<{
   segCards: SegCard[]
@@ -11,92 +13,32 @@ const props = defineProps<{
   avg: string
 }>()
 
+const emit = defineEmits<{ toggle: [flowId: string] }>()
+
 const cardsEl = ref<HTMLElement | null>(null)
+// 滚底: 卡片数 + 流式内容变化
+useScrollBottom(cardsEl, () => props.segCards.length + '|' + props.segCards.map(c => (c.streamBuffer || '') + (c.reportText || '')).join('\n'))
 
-async function scrollToBottom() {
-  await nextTick()
-  if (cardsEl.value) cardsEl.value.scrollTop = cardsEl.value.scrollHeight
-}
-
-// 卡片新增: 初始化打字机长度 + 滚底
-watch(() => props.segCards.length, () => { scrollToBottom() })
-
-// 流式内容变化: 滚底(打字机由 rAF 驱动)
-watch(() => props.segCards.map(c => (c.streamBuffer || '') + (c.reportText || '')).join('\n'), () => {
-  scrollToBottom()
-})
-
-function parseReportContent(text: string) {
-  if (!text) return { think: '', report: '' }
-  const thinkMatch = text.match(/<think>([\s\S]*?)(?:<\/think>|$)/i)
-  let think = thinkMatch ? thinkMatch[1].trim() : ''
-  let report = text.replace(/<think>[\s\S]*?(?:<\/think>|$)/gi, '').trim()
-  return { think, report }
-}
-
-// 前端模拟流式逐字: streamBuffer 按 chunk 累积(后端到达), shownLen RAF 逐字追赶, 一字一字显示
-const shownLen = ref<Record<string, number>>({})
-
-function shownText(card: SegCard, field: 'think' | 'report'): string {
-  const raw = card.streamBuffer || card.reportText || ''
-  if (!raw) return ''
-  if (!card.streaming) return parseReportContent(raw)[field]  // 完成显示完整
-  // 先按 shownLen 截 streamBuffer(整体进度), 再 parse 出对应 field — think+report 都逐字
-  const len = shownLen.value[card.flowId] || 0
-  return parseReportContent(raw.slice(0, Math.min(len, raw.length)))[field]
-}
-
-// 慢速逐字打字机: setInterval 60ms/字(~16字/秒), 模拟大模型流式输出
-// 前端收到完整数据, 逐字慢速展示
-let timerId: ReturnType<typeof setInterval> | null = null
-function typewriterTick() {
-  for (const card of props.segCards) {
-    if (!card.streaming) continue
-    const full = card.streamBuffer || card.reportText || ''
-    const cur = shownLen.value[card.flowId] || 0
-    if (cur < full.length) {
-      shownLen.value[card.flowId] = Math.min(cur + 1, full.length)
-    } else if (card.reportText) {
-      // 追赶到末尾 + 终态(segment_report)到达 → 切完成态(显分数/进度条/完成图标)
-      card.streaming = false
-    }
-  }
-  scrollToBottom()
-  // 所有卡片转完成态才停(防 chunk 续到时 timer 已停致卡死; 60ms 空转开销可忽略)
-  if (!props.segCards.some(c => c.streaming) && timerId !== null) { clearInterval(timerId); timerId = null }
-}
-
-// 有 streaming 卡片即启动打字机, 一直跑到全部完成(中途 chunk 续到不卡死)
-watch(() => props.segCards.some(c => c.streaming), (has) => {
-  if (has && timerId === null) timerId = setInterval(typewriterTick, 60)
-}, { immediate: true })
-
-onBeforeUnmount(() => { if (timerId !== null) clearInterval(timerId) })
+// 打字机(shownText + shownLen), 完成态切换在 composable 内(card.streaming=false)
+const { shownText } = useTypewriter(toRef(props, 'segCards'))
 
 function scoreColor(score: number) {
   return score >= 8 ? '#00ff88' : score >= 5 ? '#ffaa00' : '#ff4d4d'
 }
-
 function borderColor(flowType: string) {
   if (flowType === 'supervision') return '#00d4ff'
   if (flowType === 'info_notice') return '#00ffcc'
   return '#ffaa00'
 }
-
 function cardIcon(flowType: string) {
   if (flowType === 'supervision') return '🛡️'
   if (flowType === 'info_notice') return '📢'
   return '🎫'
 }
-
 function cardLabel(flowType: string) {
   if (flowType === 'supervision') return '监护制'
   if (flowType === 'info_notice') return '信息通报'
   return '自唱票'
-}
-
-function toggle(card: SegCard) {
-  card.collapsed = !card.collapsed
 }
 </script>
 
@@ -115,7 +57,7 @@ function toggle(card: SegCard) {
         <div v-for="card in segCards" :key="card.flowId"
              class="seg-card" :class="{ collapsed: card.collapsed }"
              :style="{ borderLeftColor: card.streaming ? '#6b7a90' : borderColor(card.flowType) }">
-          <div class="sc-head" @click="toggle(card)">
+          <div class="sc-head" @click="emit('toggle', card.flowId)">
             <span>
               {{ card.streaming ? '🤖' : cardIcon(card.flowType) }}
               {{ cardLabel(card.flowType) }} #{{ card.flowId }}{{ card.streaming ? '' : ' [' + card.continueSec + 's]' }}
@@ -129,7 +71,7 @@ function toggle(card: SegCard) {
           </div>
 
           <!-- 🧠 大模型思考推理过程展示框 (打字中与打字完成全时段常驻显示) -->
-          <div v-if="parseReportContent(card.streamBuffer || card.reportText).think" class="think-block">
+          <div v-if="shownText(card, 'think')" class="think-block">
             <div class="think-title">🧠 思考推理过程</div>
             <div class="think-body">{{ shownText(card, 'think') }}</div>
           </div>

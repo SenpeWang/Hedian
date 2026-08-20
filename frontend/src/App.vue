@@ -91,6 +91,7 @@ function handleFrontEnded() {
       :notice-n="ws.noticeN.value"
       :total="ws.totalCount()"
       :avg="ws.avgScore()"
+      @toggle="ws.toggleCard"
     />
   </div>
 </template>
