@@ -4,13 +4,7 @@ import type {
 GazeState, PeopleState,
 } from '../types'
 
-// ─────────────────────────────────────────────────────────────
-// 时序数据池:按 localSec 升序维护,支持状态查询(不早于)
-// 结构化面板数据(人数/凝视)按 video.currentTime 随机访问
-// ─────────────────────────────────────────────────────────────
-// ── 时序数据池:按 localSec 升序维护,支持两种查询模式 ──
-//  1. 状态量状态栏(人数/凝视): getLatestAt(sec) 二分取 <=sec 最后一项, 持续显示最新可得状态
-//  2. 事件流状态栏(语音/流程): 外部用 filter(<=sec) 取所有已发生事件, 累积显示历史
+// 时序数据池: 按 localSec 升序. 状态量 getLatestAt(sec) 取<=sec 最后一项; 事件流外部 filter(<=sec) 累积
 class TimeSeriesPool<T extends { localSec: number }> {
   private items: T[] = []
 
@@ -44,9 +38,7 @@ class TimeSeriesPool<T extends { localSec: number }> {
   }
 }
 
-// ─────────────────────────────────────────────────────────────
-// MSE 视频流缓冲:串行 appendBuffer(等 updateend 再推下一段)
-// ─────────────────────────────────────────────────────────────
+// MSE 视频流缓冲: 串行 appendBuffer(等 updateend 再推下一段)
 interface VisBuffer {
   push: (data: ArrayBuffer) => void
   end: () => void
@@ -75,9 +67,7 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
     } catch (e) { console.error('[mse] addSourceBuffer 失败:', codec, e) }
   })
 
-  // 清理已播放过的旧数据,防止 SourceBuffer 配额溢出(QuotaExceededError)
-  // 保留主时钟(currentPlaybackSec)前 8s,移除更早的已播放区间
-  // 用主时钟而非各 video.currentTime: pop 失锁 currentTime 乱跑时 trim 基准不乱
+  // 清已播放旧数据防配额溢出: 按主时钟(非 video.currentTime)删前 8s, pop 失锁不乱
   function maybeTrim() {
     if (!sb || sb.updating) return
     const t = getClock()
@@ -115,32 +105,26 @@ export function useWS() {
   const isPlaying = computed(() => status.value === 'running' || status.value === 'starting')
 
   // 主时钟:当前视频播放时间(秒),所有 UI 展示跟随它
-  const currentPlaybackSec = ref(0)
-  // 总时长(秒), 从 front video.duration 取, 用于算播放进度
+  const currentPlaybackSec = ref(0) // 主时钟: 前端播放进度(front currentTime)
   const totalDuration = ref(0)
-  // globalSec: 后端全局推理进度(仅 gaze localSec 兜底用; 速率引擎已改用 viewSecs)
-  const globalSec = ref(0)
-  // 各视角整体进度(秒): front/pop/voice, 用于分别算视角实时速度取 min
+  const globalSec = ref(0) // 后端推理进度(进度条用, 超前播放)
   const viewSecs = ref({ front: 0, pop: 0, voice: 0 })
   let _vsLast = { front: 0, pop: 0, voice: 0 }, _vsClockLast = 0
   const playbackRate = ref(1.0)
-  // 统一速率引擎: 各视角整体速度 v=Δsec/Δwall, playbackRate=min(v_front,v_pop,v_voice,1.0)
-  // 视角整体速率(每帧串行链吞吐), 非模块拆分; min 是缓冲水位门控(主等从, 慢路拖累快路);
-  // EMA 平滑避免主时钟阶跃(pop 追跳变目标超调), 下限0.2, 上限1.0绝不超
+  // 速率引擎: playbackRate=min(各视角增速,1.0), 慢路拖累(主等从); EMA 平滑防阶跃, 下限0.2
   function _updateRate() {
     const now = performance.now()
     if (_vsClockLast === 0) { _vsClockLast = now; _vsLast = { ...viewSecs.value }; return }
     const dt = (now - _vsClockLast) / 1000
-    if (dt < 2) return  // 至少2s算一次, 避免抖动
+    if (dt < 2) return
     const vs = viewSecs.value
     const speeds: number[] = []
     for (const k of ['front', 'pop', 'voice'] as const) {
-      const d = (vs[k] - _vsLast[k]) / dt  // 视角整体 sec/sec 增速 = 实时倍率
+      const d = (vs[k] - _vsLast[k]) / dt
       if (d > 0) speeds.push(d)
     }
     _vsClockLast = now; _vsLast = { ...vs }
     if (speeds.length === 0) return
-    // 最慢视角决定整体: min(各视角速度, 1.0), 下限0.2; EMA 平滑防阶跃
     const target = Math.min(1.0, Math.max(0.2, Math.min(...speeds)))
     playbackRate.value = playbackRate.value * 0.6 + target * 0.4
   }
@@ -166,10 +150,9 @@ export function useWS() {
   let popMS: MediaSource | null = null
   let frontBuf: VisBuffer | null = null
   let popBuf: VisBuffer | null = null
-  // 各视角 video.currentTime 取值函数(由 App 注入,用于 SourceBuffer trim 清理已播放数据)
+  // clock 注入已废弃(trim 改用 currentPlaybackSec); 保留 setClockFns 兼容 App 调用
   let frontClockFn: () => number = () => 0
   let popClockFn: () => number = () => 0
-  // totalDuration 现由后端 batch 带(self.duration, 稳定), 不再依赖前端 video.duration
   function setClockFns(front: () => number, pop: () => number) {
     frontClockFn = front; popClockFn = pop
   }
@@ -284,7 +267,7 @@ export function useWS() {
     }
   }
 
-  // ── 播放进度上报(驱动主时钟 + 通知后端评估时机)──
+  // 设主时钟 + 上报后端(供评估 wait_playback_reached)
   function reportPlaybackProgress(currentSec: number) {
     currentPlaybackSec.value = currentSec
     const now = performance.now()
@@ -296,28 +279,22 @@ export function useWS() {
     }
   }
 
-  // ── computed: 所有 UI 严格跟随 currentPlaybackSec(前端播放时刻) ──
-  //  分两类: 状态量状态栏(getLatestAt 最新值) / 事件流状态栏(filter 已发生全部)
-
-  // [事件流状态栏] 语音转录: filter 累积所有已发生转录
+  // computed 跟随主时钟 currentPlaybackSec: 状态量 getLatestAt(最新可得); 事件流 filter(已发生)
   const voiceEntries = computed(() =>
     Object.values(rawVoiceMap).filter(v => v.sec <= currentPlaybackSec.value + 3).sort((a, b) => a.sec - b.sec)
   )
-  // [事件流状态栏] 流程事件: filter 累积所有已发生流程开始/结束
   const flowEvents = computed(() =>
     rawFlowEvents.value.filter(e => e.sec <= currentPlaybackSec.value + 3)
   )
-  // [状态量状态栏] 监控室人数: getLatestAt 取当前时刻最新可得人数, 持续显示
   const people = computed<PeopleState>(() => {
     const item = peoplePool.getLatestAt(currentPlaybackSec.value)
     return item ? item.state : { count: '--', alert: '就绪', alertColor: '#8899aa' }
   })
-  // [状态量状态栏] 凝视状态: getLatestAt 取当前时刻最新可得凝视, 持续显示
   const gaze = computed<GazeState>(() => {
     const item = gazePool.getLatestAt(currentPlaybackSec.value)
     return item ? item.state : { hasHeads: false, headsCount: 0, anyInRoi: false, awayDuration: 0 }
   })
-  // 推理进度: 后端 globalSec(各视角min进度)/总时长, 不依赖前端播放, 持续更新; 完成时(done)直接 100%
+  // 进度条 = globalSec/totalDuration(推理进度, 超前播放)
   const progress = computed(() => status.value === 'done' ? 100 : (totalDuration.value > 0 ? Math.min(100, globalSec.value / totalDuration.value * 100) : 0))
 
   function fmt(s?: number): string {

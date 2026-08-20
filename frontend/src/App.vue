@@ -35,12 +35,11 @@ function handleStop() {
   ws.stopPipeline()
 }
 
-// front 为主时钟(视频流自带音频,音画天然同步):上报进度驱动结构化面板按时刻取数,
-// currentPlaybackSec 供 pop 自驱动跟随(pop stepRenderLoop 内 followTo,不依赖此处调用)
+// front 主时钟: 上报设 currentPlaybackSec(pop 自驱动跟随, 不在此调)
 function handleFrontProgress(sec: number) {
   ws.reportPlaybackProgress(sec)
 }
-// front 视频自然结束:同步暂停 pop(front 641s < pop 644s,避免 pop 多播错位)
+// front 结束暂停 pop(641<644 防错位)
 function handleFrontEnded() {
   popPanelRef.value?.pauseVideo()
 }
