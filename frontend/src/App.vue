@@ -30,11 +30,11 @@ function handleStop() {
   ws.stopPipeline()
 }
 
-// front 主时钟: 上报设 currentPlaybackSec(pop 自驱动跟随, 不在此调)
+// front 主时钟: emit progress 设 currentPlaybackSec(pop 自驱动跟随, 不在此调)
 function handleFrontProgress(sec: number) {
   ws.reportPlaybackProgress(sec)
 }
-// front 结束暂停 pop(641<644 防错位)
+// front 结束暂停 pop(主从锁步, 不依赖硬编码时长)
 function handleFrontEnded() {
   popPanelRef.value?.pauseVideo()
 }
@@ -56,10 +56,10 @@ function handleFrontEnded() {
         :media-url="ws.frontMediaUrl.value"
         :is-muted="false"
         view-type="front"
-        :on-progress-update="handleFrontProgress"
-        :on-ended="handleFrontEnded"
         :is-playing="ws.isPlaying.value"
         :playback-rate="ws.playbackRate.value"
+        @progress="handleFrontProgress"
+        @ended="handleFrontEnded"
       />
     </div>
     <div class="video-col">

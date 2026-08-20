@@ -1,14 +1,14 @@
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import type {
   VoiceEntry, FlowEvent, SegCard,
 GazeState, PeopleState,
 } from '../types'
 
-// 时序数据池: 按 localSec 升序. 状态量 getLatestAt(sec) 取<=sec 最后一项; 事件流外部 filter(<=sec) 累积
+// 时序数据池: 按 localSec 升序. items 用 reactive, insertSorted 触发依赖 computed 重算(front 暂停时仍更新)
 class TimeSeriesPool<T extends { localSec: number }> {
-  private items: T[] = []
+  private items: T[] = reactive([]) as unknown as T[]
 
-  clear() { this.items = [] }
+  clear() { this.items.splice(0, this.items.length) }
   get length() { return this.items.length }
 
   insertSorted(item: T) {
@@ -25,7 +25,7 @@ class TimeSeriesPool<T extends { localSec: number }> {
     this.items.splice(lo, 0, item)
   }
 
-  /** 状态量状态栏查询: 二分找 localSec<=sec 的最后一项(人数/凝视等持续显示的最新状态) */
+  // 二分找 localSec<=sec 的最后一项; 查无(时刻早于所有数据)返回 null 不返回未来项
   getLatestAt(sec: number): T | null {
     if (this.items.length === 0) return null
     let lo = 0, hi = this.items.length - 1, ans = -1
@@ -34,7 +34,7 @@ class TimeSeriesPool<T extends { localSec: number }> {
       if (this.items[mid].localSec <= sec) { ans = mid; lo = mid + 1 }
       else hi = mid - 1
     }
-    return ans >= 0 ? this.items[ans] : this.items[0]
+    return ans >= 0 ? this.items[ans] : null
   }
 }
 
@@ -49,7 +49,9 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
   const queue: ArrayBuffer[] = []
   let pending = false
   let ended = false
+  let endedWanted = false
   let trimming = false
+  let failCount = 0
 
   ms.addEventListener('sourceopen', () => {
     try {
@@ -61,6 +63,11 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
         if (trimming) { trimming = false; pump(); return }
         maybeTrim()
         pump()
+        // 队列排空后若已请求结束, 再 endOfStream(防末段丢失)
+        if (endedWanted && !ended && queue.length === 0 && !pending && sb && !sb.updating) {
+          ended = true
+          try { if (ms.readyState === 'open') ms.endOfStream() } catch { /* 忽略 */ }
+        }
       })
       sb.addEventListener('error', (e: any) => console.error('[mse] SourceBuffer error', e))
       pump()
@@ -83,24 +90,37 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
 
   function pump() {
     if (pending || !sb || queue.length === 0) return
+    const buf = queue[0]
     pending = true
-    const buf = queue.shift()!
-    try { sb.appendBuffer(buf) }
-    catch (e) { pending = false; console.warn('appendBuffer 失败:', e) }
+    try {
+      sb.appendBuffer(buf)
+      queue.shift()          // 成功调用后才出队(失败留队重试, 不丢帧)
+      failCount = 0
+    } catch (e) {
+      pending = false
+      failCount++
+      console.warn('appendBuffer 失败:', e)
+      if (failCount > 3) { queue.shift(); failCount = 0; console.error('appendBuffer 重试超限, 丢弃该帧') }
+    }
   }
 
   return {
     push: (data: ArrayBuffer) => { queue.push(data); pump() },
     end: () => {
-      if (ended) return
-      ended = true
-      try { if (ms.readyState === 'open') ms.endOfStream() } catch { /* 忽略 */ }
+      if (ended || endedWanted) return
+      // 队列空且非 pending 才立即 endOfStream, 否则等 pump 排空后 updateend 触发
+      if (queue.length === 0 && !pending && sb && !sb.updating) {
+        ended = true
+        try { if (ms.readyState === 'open') ms.endOfStream() } catch { /* 忽略 */ }
+      } else {
+        endedWanted = true
+      }
     },
   }
 }
 
 export function useWS() {
-  const status = ref<'idle' | 'starting' | 'running' | 'done'>('idle')
+  const status = ref<'idle' | 'starting' | 'running' | 'done' | 'stopped'>('idle')
   const isPlaying = computed(() => status.value === 'running' || status.value === 'starting')
 
   const currentPlaybackSec = ref(0) // 主时钟: 前端播放进度(front currentTime)
@@ -110,6 +130,7 @@ export function useWS() {
   let _vsLast = { front: 0, pop: 0, voice: 0 }, _vsClockLast = 0
   const playbackRate = ref(1.0)
   // 速率引擎: playbackRate=min(各视角增速,1.0), 慢路拖累(主等从); EMA 平滑防阶跃, 下限0.2
+  // 停滞视角(d<=0)用 0 参与 min(真正拖累), 不跳过
   function _updateRate() {
     const now = performance.now()
     if (_vsClockLast === 0) { _vsClockLast = now; _vsLast = { ...viewSecs.value }; return }
@@ -119,10 +140,9 @@ export function useWS() {
     const speeds: number[] = []
     for (const k of ['front', 'pop', 'voice'] as const) {
       const d = (vs[k] - _vsLast[k]) / dt
-      if (d > 0) speeds.push(d)
+      speeds.push(Math.max(0, d))   // 停滞 0 参与 min, 不跳过(慢路真正拖累)
     }
     _vsClockLast = now; _vsLast = { ...vs }
-    if (speeds.length === 0) return
     const target = Math.min(1.0, Math.max(0.2, Math.min(...speeds)))
     playbackRate.value = playbackRate.value * 0.6 + target * 0.4
   }
@@ -152,8 +172,10 @@ export function useWS() {
   // ── WebSocket ──
   let socket: WebSocket | null = null
   let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let reconnectAttempts = 0
   let lastReportSec = 0
   let lastReportReal = 0
+  const pendingReports: number[] = []   // WS 非 OPEN 时暂存上报, onopen flush(防 wait_playback_reached 死锁)
 
   function getWsUrl(): string {
     const proto = location.protocol === 'https:' ? 'wss:' : 'ws:'
@@ -180,6 +202,7 @@ export function useWS() {
     if (u8.length < 2) return
     const channel = u8[0]      // 0=front, 1=pop
     const type = u8[1]         // 0=init, 1=media, 2=end
+    if (channel !== 0 && channel !== 1) return   // 显式校验, 非法 channel 丢弃
     const data = u8.subarray(2).slice().buffer
     const view = channel === 0 ? 'front' : 'pop'
     const buf = channel === 0 ? frontBuf : popBuf
@@ -218,7 +241,14 @@ export function useWS() {
     socket.binaryType = 'arraybuffer'
 
     socket.onopen = () => {
+      reconnectAttempts = 0
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+      // flush 重连期间暂存的上报
+      while (pendingReports.length && socket) {
+        const s = pendingReports.shift()!
+        try { socket.send(JSON.stringify({ type: 'playback_progress', current_sec: Number(s.toFixed(2)) })) }
+        catch { pendingReports.unshift(s); break }
+      }
     }
     socket.onmessage = (evt) => {
       try {
@@ -235,7 +265,9 @@ export function useWS() {
 
   function scheduleReconnect() {
     if (reconnectTimer) return
-    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, 2000)
+    reconnectAttempts++
+    const delay = Math.min(30000, 1000 * 2 ** Math.min(reconnectAttempts, 5))   // 指数退避, 上限 30s
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect() }, delay)
   }
 
   // ws batch 中的低频事件(评估/flow/progress/语音/人数/凝视)
@@ -257,15 +289,18 @@ export function useWS() {
     }
   }
 
-  // 设主时钟 + 上报后端(供评估 wait_playback_reached)
+  // 设主时钟 + 上报后端(供评估 wait_playback_reached); WS 非 OPEN 时暂存待 flush
   function reportPlaybackProgress(currentSec: number) {
     currentPlaybackSec.value = currentSec
     const now = performance.now()
     if (Math.abs(currentSec - lastReportSec) < 0.5 && now - lastReportReal < 500) return
     lastReportSec = currentSec; lastReportReal = now
+    const payload = JSON.stringify({ type: 'playback_progress', current_sec: Number(currentSec.toFixed(2)) })
     if (socket && socket.readyState === WebSocket.OPEN) {
-      try { socket.send(JSON.stringify({ type: 'playback_progress', current_sec: Number(currentSec.toFixed(2)) })) }
-      catch (err) { console.warn('上报播放进度失败:', err) }
+      try { socket.send(payload) }
+      catch { pendingReports.push(currentSec) }
+    } else {
+      pendingReports.push(currentSec)
     }
   }
 
@@ -284,7 +319,7 @@ export function useWS() {
     const item = gazePool.getLatestAt(currentPlaybackSec.value)
     return item ? item.state : { hasHeads: false, headsCount: 0, anyInRoi: false, awayDuration: 0 }
   })
-  // 进度条 = globalSec/totalDuration(推理进度, 超前播放)
+  // 进度条 = globalSec/totalDuration(推理进度, 超前播放); 仅 done 强制 100, stopped 保真实比值不跳 100
   const progress = computed(() => status.value === 'done' ? 100 : (totalDuration.value > 0 ? Math.min(100, globalSec.value / totalDuration.value * 100) : 0))
 
   function fmt(s?: number): string {
@@ -363,6 +398,9 @@ export function useWS() {
     for (const k in rawVoiceMap) delete rawVoiceMap[Number(k)]
     rawFlowEvents.value = []; segCards.value = []; segScores.value = []
     supN.value = 0; ticketN.value = 0; noticeN.value = 0; completedFlows.clear()
+    _visCount.front = 0; _visCount.pop = 0
+    lastReportSec = 0; lastReportReal = 0
+    pendingReports.length = 0
     // 重建 MSE(新 objectURL,清空 buffer)
     frontMediaUrl.value = ''; popMediaUrl.value = ''
     initMSE()
@@ -381,8 +419,17 @@ export function useWS() {
 
   async function stopPipeline() {
     try { await fetch('/stop', { method: 'POST' }) } catch (e) { console.error('停止请求失败:', e) }
-    status.value = 'done'
+    status.value = 'stopped'   // 用户停止不等于推理完成, 不跳 100%
   }
+
+  // 组件卸载时清理资源(socket/MediaSource/blob URL), 防 HMR 累积泄漏
+  onBeforeUnmount(() => {
+    if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
+    if (socket) { socket.onclose = null; socket.onerror = null; socket.close(); socket = null }
+    for (const ms of [frontMS, popMS]) { if (ms) { try { if (ms.readyState === 'open') ms.endOfStream() } catch { /* 忽略 */ } } }
+    if (frontMediaUrl.value) { try { URL.revokeObjectURL(frontMediaUrl.value) } catch {} }
+    if (popMediaUrl.value) { try { URL.revokeObjectURL(popMediaUrl.value) } catch {} }
+  })
 
   function totalCount() { return segScores.value.reduce((a, b) => a + b, 0) }
   function avgScore() { return segScores.value.length > 0 ? (totalCount() / segScores.value.length).toFixed(1) : '-' }
