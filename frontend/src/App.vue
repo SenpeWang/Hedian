@@ -36,11 +36,9 @@ function handleStop() {
 }
 
 // front 为主时钟(视频流自带音频,音画天然同步):上报进度驱动结构化面板按时刻取数,
-// 同时锁步 pop(pop 跟随 front.currentTime,帧率不同按时间秒对齐)
+// currentPlaybackSec 供 pop 自驱动跟随(pop stepRenderLoop 内 followTo,不依赖此处调用)
 function handleFrontProgress(sec: number) {
   ws.reportPlaybackProgress(sec)
-  // pop 时刻对齐: buffered 内 seek 到 front.currentTime, 不变速追随
-  popPanelRef.value?.followTo(sec)
 }
 // front 视频自然结束:同步暂停 pop(front 641s < pop 644s,避免 pop 多播错位)
 function handleFrontEnded() {
@@ -79,6 +77,7 @@ function handleFrontEnded() {
         view-type="pop"
         :is-playing="ws.isPlaying.value"
         :playback-rate="ws.playbackRate.value"
+        :playback-sec="ws.currentPlaybackSec.value"
       />
     </div>
   </div>

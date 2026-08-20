@@ -17,6 +17,7 @@ const props = withDefaults(defineProps<{
   onEnded?: () => void
   isPlaying: boolean
   playbackRate?: number
+  playbackSec?: number
 }>(), {
   isMuted: false,
 })
@@ -31,8 +32,15 @@ let animationFrameId: number | null = null
  * 向上层容器实时上报以驱动所有结构化面板与双流锁步。
  */
 function stepRenderLoop() {
-  if (videoRef.value && props.onProgressUpdate && !videoRef.value.paused) {
-    props.onProgressUpdate(videoRef.value.currentTime)
+  if (videoRef.value) {
+    if (props.onProgressUpdate && !videoRef.value.paused) {
+      props.onProgressUpdate(videoRef.value.currentTime)
+    }
+    // pop 自驱动跟随主时钟: front underrun paused 时 currentPlaybackSec 冻结,
+    // pop 仍每帧 followTo(主时钟) seek 回, 不超前不跑末尾(不依赖 handleFrontProgress 上报)
+    if (props.viewType === 'pop' && props.playbackSec != null) {
+      followTo(props.playbackSec)
+    }
   }
   animationFrameId = requestAnimationFrame(stepRenderLoop)
 }
@@ -119,11 +127,8 @@ function followTo(masterSec: number) {
     return
   }
 
-  // 严重失步兜底: 优先 buffered 内对齐, 否则回自己 buffer 末尾
-  const target = inBuf(masterSec)
-    ? masterSec
-    : (vid.buffered.length > 0 ? Math.max(0, vid.buffered.end(vid.buffered.length - 1) - 0.1) : masterSec)
-  try { vid.currentTime = target } catch {}
+  // 严重失步兜底: masterSec 在 buffered 内则 seek 对齐, 否则保持不动(绝不上推末尾致卡死)
+  if (inBuf(masterSec)) { try { vid.currentTime = masterSec } catch {} }
 }
 
 /**
