@@ -1,9 +1,4 @@
-export interface BatchEvent {
-  localSec: number
-  tag: string
-  data: Record<string, any>
-  source?: string
-}
+export type FlowType = 'supervision' | 'self_ticket' | 'info_notice'
 
 export interface VoiceEntry {
   sec: number
@@ -13,7 +8,7 @@ export interface VoiceEntry {
 
 export interface FlowEvent {
   sec: number
-  flowType: string
+  flowType: FlowType
   name: string
   color: string
   isStart: boolean
@@ -21,20 +16,13 @@ export interface FlowEvent {
 
 export interface SegCard {
   flowId: string
-  flowType: string
+  flowType: FlowType
   score: number
   reportText: string
   continueSec: number | string
   collapsed: boolean
   streamBuffer: string
   streaming: boolean
-}
-
-export interface ProgressState {
-  voice: number
-  front: number
-  pop: number
-  detail: string
 }
 
 export interface GazeState {
