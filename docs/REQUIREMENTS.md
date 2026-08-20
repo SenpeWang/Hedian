@@ -1,4 +1,4 @@
-# REQUIREMENTS.md — 验收标准
+# REQUIREMENTS.md — 验收标准（按代码模块组织）
 
 ## 1. 核心业务目标
 
@@ -16,74 +16,72 @@
 | 系统运维 | 部署推理，查日志/Redis 排查 |
 | 合规审查 | 回看 data/results/ 评估报告事后追溯 |
 
-## 3. 功能需求清单
+## 3. 功能需求清单（按代码模块）
 
-### 3.1 三类规程识别（FR-01 ~ FR-15）
+### 3.1 tracker 模块（`modules/tracker/`，front 视角，GPU0）
+- **TR-01**：front 视频检测(yolo11l)+跟踪(DeepSORT)+角色分配(LEADER/ROAD1/ROAD2)，画标注(draw_tracks/距离线)进帧。
+- **TR-02**：举手检测(yolo26s-pose 稀疏 frame_step=3+EMA)，产出 `behavior.hand_raised` 事件。
+- **TR-03**：监控室人数(PEOPLE_COUNT_UPDATE，<1告警/1提醒/>=3正常)。
+- **TR-04**：fps 从 `CAP_PROP_FPS` 读源真实帧率(30)，读不到 raise 不兜底。
+- **TR-05**：GPU 分配 tracker→GPU0。
 
-#### 监护制 supervision（FR-01 ~ FR-05）
-- **FR-01**：流程启动识别——操作人喊"请求监护"（语音）+ 举手（视觉，5秒时间窗口内配合）。**红线：单独举手不启动流程，必须配合语音**。
-- **FR-02**：全程监护识别——监护人移动至操作人身旁，全程不离开（跟踪事件"监护员已到位监护ROAD1"）。
-- **FR-03**：指令复述识别——操作人读出9字码 + 左手指向程序指令(有程序分支关键特征) + 监护人复述9字码 + 下达"可以执行"(含"执行"二字即可)。
-- **FR-04**：执行与核对识别——执行操作 + 双方检查设备状态一致("核对"关键字)。
-- **FR-05**：监护结束识别——监护人离开操作人，流程结束。
+### 3.2 gaze 模块（`modules/gaze/`，凝视，GPU0/ONNX）
+- **GZ-01**：头部检测(ONNX head_detector)+注视估计(gazelle，异步后台线程)。
+- **GZ-02**：判断视线在 ROI 内(has_heads/any_in_roi/awayDuration，离开>60s 告警)。
+- **GZ-03**：gaze ONNX 上 GPU(main.py 设 LD_LIBRARY_PATH 指向 nvidia cu12 pip 库, cufft 错误=0)。
+- **GZ-04**：画 head/gaze 标注进帧。
 
-#### 信息通报 info_notice（FR-06 ~ FR-10）
-- **FR-06**：启动识别——信息发起者举手 + 高声喊"信息通报"或"信息通告"。**红线：单独举手不启动，必须配合语音**。
-- **FR-07**：团队接受识别——主控室其他成员听到后立刻停下工作，关注发起人（视线/注视点变化判定）。
-- **FR-08**：信息传递识别——发起者确认团队关注后进行信息传递。
-- **FR-09**：结束识别——信息传递结束喊"通报完毕"或"通告完毕"，**即时闭环不等待"收到"**。
-- **FR-10**：回应识别——值长回答"收到"（作为评估依据，不阻塞流程关闭）。
+### 3.3 voice 模块（`modules/voice/`，语音转录，GPU1）
+- **VC-01**：从 camFRONT 音频提取语音(Qwen3-ASR-0.6B + ForcedAligner 词级对齐)，`push_display("voice", {localSec, text, keys})` 走推理流对齐。
+- **VC-02**：识别关键字(请求监护/设备码/执行/核对/信息通报/通报完毕/收到)，拼音匹配容错。
+- **VC-03**：9字码格式 `([1-9]?[A-Z]{2,3}\d{3}[A-Z]{2}|1EAS\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)`。
+- **VC-04**：GPU 分配 voice→GPU1。
 
-#### 自唱票 self_ticket（FR-11 ~ FR-13）
-- **FR-11**：启动识别——**前端 GUI 控件点击信号触发**（非语音启动，红线规则）。系统事件作生命周期唯一启动触发器。
-- **FR-12**：唱票识别——操作人读出设备9字码（唯一 keymoment，正则 `[1-9]?[A-Z]{2,3}\d{3}[A-Z]{2}`）；有程序分支检测左手指向程序指令动作。
-- **FR-13**：结束识别——下一个自唱票开始 或 监护制开始时自动收尾。
+### 3.4 behavior 模块（`modules/behavior/`，pop 视角，GPU1）
+- **BH-01**：pop 共享一次 YOLO(behavior_yolo.pt 每5帧 `model.track`)，结果串行分发给 FingerScreenDetector+FingerFileDetector(纯判定器不持模型)。
+- **BH-02**：手指指向屏幕检测(`behavior.finger_screen`)。
+- **BH-03**：手指指向文件检测(`behavior.finger_file`)。
+- **BH-04**：画 ROI+检测框进帧。
+- **BH-05**：GPU 分配 behavior→GPU1。
 
-#### 通用识别（FR-14 ~ FR-15）
-- **FR-14**：9字码格式 `([1-9]?[A-Z]{2,3}\d{3}[A-Z]{2}|1EAS\w+|T\d*RPA\w+|LCO[\w\.]+|RPA\w+|SM3)`，允许省略前4位(系统内部)或必须完整(跨系统)；非控制关键字且非空视为设备码。
-- **FR-15**：人员状态监控——2人中至少1人监控机组(两人视线同时离开盘台>1min 提醒)；主控室<1人持续10s 记录告警。
+### 3.5 rules 模块（`rules/`，规程状态机）
+- **RL-01**：监护制——"请求监护"+5s内举手启动(FLOW_STARTED)/全程监护/9字码复述+执行+核对/监护人离开结束(FLOW_ENDED)。
+- **RL-02**：信息通报——举手+"信息通报"启动/团队关注/信息传递/"通报完毕"即时闭环(不等"收到")/值长"收到"不阻塞。
+- **RL-03**：自唱票——**前端 GUI 控件触发启动(红线，不依赖语音)**/9字码唱票/下一流程自动收尾。
+- **RL-04**：沟通规范——岗位名称+"请讲"/"收到"/电话 OVER 法/三段式"请复述"。
+- **RL-05**：红线——单独举手不启动流程；自唱票不依赖语音启动。
 
-### 3.2 人员状态监控（FR-16 ~ FR-17）
-- **FR-16**：监控室人数（tracking PEOPLE_COUNT_UPDATE，<1人告警/1人提醒/>=3正常）
-- **FR-17**：凝视状态（gaze has_heads/any_in_roi/awayDuration，离开ROI>60s告警）
+### 3.6 evaluation 模块（`evaluation/`，Qwen3-8B，GPU1）
+- **EV-01**：异步事件驱动(FLOW_ENDED→`_process_flow_pipeline`)。
+- **EV-02**：`_wait_all_modules(end_sec, timeout=90)` 等所有模块推理到流程结束。
+- **EV-03**：Qwen3-8B 子进程评估(TextIteratorStreamer 逐 token)。
+- **EV-04**：评估维度(监护制5维/信息通报4维/自唱票3维, 10分制)。
+- **EV-05**：`wait_playback_reached(end_sec-0.5, timeout=60)` 等前端播到流程结束才推。
+- **EV-06**：`push_direct` 直推绕对齐中间件(segment_report_stream/segment_report)。
+- **EV-07**：逐 token 流式 + 完成态切换(streamBuffer 累积/typewriter 60ms/追完+reportText→streaming=false 显分数)。
+- **EV-08**：GPU 分配 evaluation→GPU1。
 
-### 3.3 沟通规范（FR-18 ~ FR-19）
-- **FR-18**：沟通前喊岗位名称，待答"请讲"后开始，获取信息答"收到"。
-- **FR-19**：电话交流 OVER 法（以"OVER"结束，双方答"OVER"后挂机）+ 三段式沟通识别（"请复述"请求判定）。
+### 3.7 infra 模块（`web/`+`core/`，基础设施）
+- **IN-01**：InferenceSync `globalSec=min(各视角进度含停滞0)` 对齐推送(`_push_events_up_to localSec<=globalSec`)。
+- **IN-02**：速率引擎前端 `playbackRate=min(v_front,v_pop,v_voice,1.0)` EMA 平滑 下限0.2(慢路拖累主等从)。
+- **IN-03**：VisEncoder fMP4 编码(ffmpeg libx264 ultrafast baseline +frag_keyframe, PTS=帧序/fps, front 带音频/pop 静音)。
+- **IN-04**：VisStreamForwarder 两路独立消费 vis_stream→ws send_bytes。
+- **IN-05**：`/reset` kill 子进程+flushdb 清缓存, `/start` `/stop` 控制。
+- **IN-06**：关键帧/评估报告落盘 `data/results/<run_id>/`。
+- **IN-07**：600s 死锁兜底(无推进强制收尾)。
+- **IN-08**：Redis Stream 短期流(results:all/vis_stream, 不持久; 结构化结果落盘 json)。
 
-### 3.4 视频推理与标注（FR-20 ~ FR-25）
-- **FR-20**：front 视角检测(yolo11l)+跟踪(DeepSORT)+举手(yolo26s-pose 稀疏 frame_step=3+EMA)+凝视(ONNX head+gazelle 异步后台线程)，画标注进帧(draw_tracks/距离线/举手标签/ROI/head/gaze)。
-- **FR-21**：pop 视角共享一次 YOLO 推理(每5帧1次 infer_every_n_frames=5)，结果喂手指屏幕+手指文件检测器复用，画 ROI+检测框+触发进帧。
-- **FR-22**：标注帧+原音频编码 fMP4(ffmpeg libx264 ultrafast baseline, +frag_keyframe, front 带音频/pop 静音)。
-- **FR-23**：fps 从 CAP_PROP_FPS 读源视频真实帧率(30/25)，读不到 raise 不兜底；PTS=帧序/fps=localSec。
-- **FR-24**：视角级 GPU 分配(config gpu_map: tracker→GPU0, voice/pop/eval→GPU1)。
-- **FR-25**：gaze ONNX 上 GPU(main.py 设 LD_LIBRARY_PATH 指向 nvidia cu12 pip 库, cufft 错误=0)。
-
-### 3.5 前端可视化与同步（FR-26 ~ FR-34）
-- **FR-26**：双路视频 MSE 流式播放(front 带音频1x主时钟, pop 静音锁步跟随)。
-- **FR-27**：统一速率引擎 playbackRate=min(v_front,v_pop,v_voice,1.0)(最慢视角决定, 只降不升, 下限0.2)。
-- **FR-28**：pop 严格对齐 followTo(buffered 内偏差>0.1 seek 到 front.currentTime, 未缓冲 playbackRate=0 暂停等待)。
-- **FR-29**：四面板强锁步(front/pop/语音/通知按同一 currentPlaybackSec 取数)。
-- **FR-30**：状态量状态栏(人数/凝视 getLatestAt 最新值持续显示)。
-- **FR-31**：事件流状态栏(语音转录/流程事件 filter 累积, 只增不减)。
-- **FR-32**：进度条显示前端播放进度(currentPlaybackSec/totalDuration, 非后端推理进度)。
-- **FR-33**：MSE SourceBuffer trim(清播放点前8s 防 QuotaExceededError)。
-- **FR-34**：异步不限速推理, 推理慢时前端变速慢放不超前不卡。
-
-### 3.6 评估（FR-35 ~ FR-40）
-- **FR-35**：评估异步事件驱动(FLOW_ENDED 触发 _process_flow_pipeline)。
-- **FR-36**：提取 keymoment 前等所有模块推理到流程结束(_wait_all_modules end_sec timeout=90)。
-- **FR-37**：Qwen3-8B 子进程评估(TextIteratorStreamer 逐 token)。
-- **FR-38**：评估维度(按规程: 监护制5维/信息通报4维/自唱票3维, 10分制)。
-- **FR-39**：评估结果等前端可视化到流程结束才推(wait_playback_reached end_sec-0.5 超时60s)。
-- **FR-40**：评估报告逐 token 流式打字机(chunk 累积 streamBuffer, shownText 逐字, 无光标); segment_report 不覆盖 streamBuffer; typewriter 追完 + reportText 到达 → 切 streaming=false 显分数/进度条/完成态。
-
-### 3.7 数据对齐与运维（FR-41 ~ FR-45）
-- **FR-41**：后端 InferenceSync globalSec=min(各视角进度) 压住快视角超前事件。
-- **FR-42**：评估直推不走对齐(push_direct), 其他结构化结果走 InferenceSync 对齐。
-- **FR-43**：刷新页面 /reset kill 子进程+清缓存, 点开始重新推理。
-- **FR-44**：关键帧/评估报告落盘 data/results/<run_id>/。
-- **FR-45**：600s 死锁兜底(无推进强制收尾)。
+### 3.8 frontend 模块（`frontend/`，Vue3 可视化）
+- **FE-01**：双路 MSE fMP4 流式播放(front 带音频主时钟/pop 静音)。
+- **FE-02**：主时钟 `currentPlaybackSec=front.currentTime`，所有面板按此取数。
+- **FE-03**：pop 自驱动 RAF `followTo(currentPlaybackSec)` buffered-seek 对齐(偏差>0.15s seek, 兜底不推末尾)。
+- **FE-04**：MSE SourceBuffer `maybeTrim` 按主时钟删前8s(可视化过删, pop 失锁不乱删)。
+- **FE-05**：状态量状态栏(人数/凝视 `getLatestAt(currentPlaybackSec)` 持续显示, TimeSeriesPool reactive front 暂停仍更新)。
+- **FE-06**：事件流状态栏(语音/流程 `filter sec<=currentPlaybackSec+3` 累积)。
+- **FE-07**：评估逐字 typewriter(60ms/字, 完成态切换显分数/进度条/完成图标)。
+- **FE-08**：进度条 `globalSec/totalDuration`(推理进度超前播放, stopped 不跳100 done 才100)。
+- **FE-09**：刷新 `/reset` 重置, WebSocket 重连指数退避+上报待发队列+生命周期清理(socket/MediaSource/blob URL)。
+- **FE-10**：不超前/不卡顿(变速慢放+MSE trim)。
 
 ## 4. 非功能需求
 

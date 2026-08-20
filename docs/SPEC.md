@@ -59,7 +59,7 @@
 
 ## 3. Functional Requirements
 
-### 3.1 视频处理
+### 3.1 infra: 视频编码与转发 (fMP4)
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -67,7 +67,7 @@
 | F-02 | 系统须以 ≥2 FPS 处理视频帧 | 日志记录帧率 |
 | F-03 | 视频帧编码为 JPEG quality ≤ 40（front Q35 / pop Q40），统一缩放到 960×540 | 检查编码参数 |
 
-### 3.2 人员检测与跟踪
+### 3.2 tracker: 人员检测与跟踪
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -76,7 +76,7 @@
 | F-12 | 系统须计算人员间距离，阈值可配置 | config.yaml 验证 |
 | F-13 | 系统须检测举手动作（由 Tracker 的 HandRaiser 产出 `behavior.hand_raised`） | 输出 HAND_RAISED 事件 |
 
-### 3.3 语音识别
+### 3.3 voice: 语音识别
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -84,7 +84,7 @@
 | F-21 | 系统须识别以下关键字：请求监护、设备码（九字码）、执行、核对、信息通报、通报完毕、收到 | 输出 key_moment 事件 |
 | F-22 | 系统须使用拼音匹配处理 ASR 识别误差 | 测试 "请求监护" vs "请结束" |
 
-### 3.4 凝视检测
+### 3.4 gaze: 凝视检测
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -93,7 +93,7 @@
 | F-32 | 脱盘持续 ≥ 60 秒须触发 GAZE_ALERT 事件 | 输出 GAZE_ALERT |
 | F-33 | 凝视异常数据须记录持续时间 | `gaze_key_moments.json` 格式校验 |
 
-### 3.5 行为检测
+### 3.5 behavior: 行为检测
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -102,7 +102,7 @@
 
 > 行为检测特殊性：`BehaviorModule` 在 camPOP 上共享一次 YOLO（`behavior_yolo.pt`）推理，每 5 帧 `model.track` 一次，把 `results` 串行分发给 `FingerScreenDetector.detect(...)` 与 `FingerFileDetector.detect(...)` 两个纯判定器。**判定器不持有模型。**
 
-### 3.6 规则检测
+### 3.6 rules: 规程状态机
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -112,7 +112,7 @@
 | F-53 | 自唱票：设备码重复 → 触发流程 | 输出 FLOW_STARTED |
 | F-54 | 信息通报：举手 + "信息通报" → 触发流程 | 输出 FLOW_STARTED |
 
-### 3.7 评估
+### 3.7 evaluation: 评估
 
 | ID | 需求 | 验证方式 |
 |----|------|---------|
@@ -123,7 +123,7 @@
 | F-64 | 推评估 chunk 前，须 `wait_playback_reached(end_sec-0.5, timeout=60)` 等前端可视化播放到流程结束（不剧透） | 流程结束前评估不出现，结束后才逐字 |
 | F-65 | 评估报告须逐 token 流式输出（`TextIteratorStreamer`→`segment_report_stream` chunk 累积→前端 typewriter 逐字）；`segment_report` 不覆盖 `streamBuffer`；typewriter 追完 + `reportText` 到达→切完成态显分数 | 前端逐字显示，完成后显分数/进度条 |
 
-### 3.8 交互
+### 3.8 frontend: 可视化与交互
 
 | 需求 | 验证方式 |
 |------|---------|
