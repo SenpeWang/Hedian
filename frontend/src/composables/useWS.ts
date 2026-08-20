@@ -3,40 +3,7 @@ import type {
   VoiceEntry, FlowEvent, SegCard,
 GazeState, PeopleState,
 } from '../types'
-
-// 时序数据池: 按 localSec 升序. items 用 reactive, insertSorted 触发依赖 computed 重算(front 暂停时仍更新)
-class TimeSeriesPool<T extends { localSec: number }> {
-  private items: T[] = reactive([]) as unknown as T[]
-
-  clear() { this.items.splice(0, this.items.length) }
-  get length() { return this.items.length }
-
-  insertSorted(item: T) {
-    const s = item.localSec
-    if (this.items.length === 0 || s >= this.items[this.items.length - 1].localSec) {
-      this.items.push(item); return
-    }
-    let lo = 0, hi = this.items.length - 1
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1
-      if (this.items[mid].localSec < s) lo = mid + 1
-      else hi = mid - 1
-    }
-    this.items.splice(lo, 0, item)
-  }
-
-  // 二分找 localSec<=sec 的最后一项; 查无(时刻早于所有数据)返回 null 不返回未来项
-  getLatestAt(sec: number): T | null {
-    if (this.items.length === 0) return null
-    let lo = 0, hi = this.items.length - 1, ans = -1
-    while (lo <= hi) {
-      const mid = (lo + hi) >> 1
-      if (this.items[mid].localSec <= sec) { ans = mid; lo = mid + 1 }
-      else hi = mid - 1
-    }
-    return ans >= 0 ? this.items[ans] : null
-  }
-}
+import { TimeSeriesPool } from './useTimeSeriesPool'
 
 // MSE 视频流缓冲: 串行 appendBuffer(等 updateend 再推下一段)
 interface VisBuffer {
@@ -389,6 +356,12 @@ export function useWS() {
     }
   }
 
+  // SegCard 展示态收口: collapsed 折叠由 useWS 持有修改权, 组件 emit 调用(不直改 prop)
+  function toggleCard(flowId: string) {
+    const card = segCards.value.find(c => c.flowId === flowId)
+    if (card) card.collapsed = !card.collapsed
+  }
+
   // ── 生命周期 ──
   function resetState() {
     peoplePool.clear(); gazePool.clear()
@@ -441,7 +414,7 @@ export function useWS() {
     status, isPlaying, startPipeline, stopPipeline, resetState, fmt,
     voiceEntries, people, gaze, flowEvents,
     segCards, supN, ticketN, noticeN,
-    progress, totalCount, avgScore,
+    progress, totalCount, avgScore, toggleCard,
     reportPlaybackProgress,
     frontMediaUrl, popMediaUrl,
     playbackRate, currentPlaybackSec,
