@@ -101,10 +101,8 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
 
 export function useWS() {
   const status = ref<'idle' | 'starting' | 'running' | 'done'>('idle')
-  const statusText = ref('就绪')
   const isPlaying = computed(() => status.value === 'running' || status.value === 'starting')
 
-  // 主时钟:当前视频播放时间(秒),所有 UI 展示跟随它
   const currentPlaybackSec = ref(0) // 主时钟: 前端播放进度(front currentTime)
   const totalDuration = ref(0)
   const globalSec = ref(0) // 后端推理进度(进度条用, 超前播放)
@@ -199,12 +197,11 @@ export function useWS() {
     if (msg.source === 'status') {
       if (msg.totalDuration && msg.totalDuration > 0) totalDuration.value = msg.totalDuration
       if (msg.globalSec != null && msg.globalSec > 0) globalSec.value = msg.globalSec
-      if (msg.status) { status.value = msg.status; if (msg.status === 'done') statusText.value = '✅ 推理完成' }
+      if (msg.status) { status.value = msg.status }
       return
     }
     if (msg.source === 'done' || (msg.meta && msg.meta.source === 'done')) {
       status.value = 'done'
-      statusText.value = '✅ 推理完成'
       // 推理完成: 进度满(不依赖最后 batch 的 globalSec 是否到 total)
       if (totalDuration.value > 0) globalSec.value = totalDuration.value
       return
@@ -222,7 +219,6 @@ export function useWS() {
 
     socket.onopen = () => {
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null }
-      if (status.value === 'idle') statusText.value = '就绪 (已连接)'
     }
     socket.onmessage = (evt) => {
       try {
@@ -375,22 +371,17 @@ export function useWS() {
   function startPipeline() {
     resetState()
     status.value = 'starting'
-    statusText.value = '⚡ 正在启动...'
     fetch('/start', { method: 'POST' }).then(() => {
       status.value = 'running'
-      statusText.value = '▶ 推理运行中'
     }).catch(err => {
       console.error('启动失败:', err)
       status.value = 'idle'
-      statusText.value = '❌ 启动失败'
     })
   }
 
   async function stopPipeline() {
-    statusText.value = '⏳ 正在停止...'
     try { await fetch('/stop', { method: 'POST' }) } catch (e) { console.error('停止请求失败:', e) }
     status.value = 'done'
-    statusText.value = '🛑 已停止'
   }
 
   function totalCount() { return segScores.value.reduce((a, b) => a + b, 0) }
@@ -400,13 +391,12 @@ export function useWS() {
   connect()
 
   return {
-    status, statusText, isPlaying, startPipeline, stopPipeline, resetState, fmt,
+    status, isPlaying, startPipeline, stopPipeline, resetState, fmt,
     voiceEntries, people, gaze, flowEvents,
-    segCards, segScores, supN, ticketN, noticeN,
+    segCards, supN, ticketN, noticeN,
     progress, totalCount, avgScore,
     reportPlaybackProgress,
     frontMediaUrl, popMediaUrl,
-    initMSE,
-    playbackRate, globalSec, viewSecs, totalDuration, currentPlaybackSec,
+    playbackRate, currentPlaybackSec,
   }
 }

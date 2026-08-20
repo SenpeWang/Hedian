@@ -53,7 +53,7 @@ function pauseVideo() {
   if (videoRef.value) videoRef.value.pause()
 }
 
-// pop 时刻对齐主时钟: 偏差 buffered 内 seek 修正, 不变速追随
+// pop 时刻对齐主时钟: 正常同速 diff≈0 不动; 失锁(>0.15s) buffered 内 seek 修正, 不变速追随
 function followTo(masterSec: number) {
   const vid = videoRef.value
   if (!vid) return
@@ -62,33 +62,19 @@ function followTo(masterSec: number) {
   if (vid.paused && props.isPlaying) {
     if (vid.buffered.length > 0) {
       const bufEnd = vid.buffered.end(vid.buffered.length - 1)
-      if (bufEnd - vid.currentTime > 0.3) {
-        vid.play().catch(() => {})
-      }
+      if (bufEnd - vid.currentTime > 0.3) vid.play().catch(() => {})
     }
     return
   }
 
-  const diff = vid.currentTime - masterSec // 正: pop 超前, 负: pop 落后
-  const absDiff = Math.abs(diff)
-  if (absDiff < 0.15) return // 自然跟随, 不动
-
-  // 时刻是否落在 pop 已缓冲区间内 (避免 seek 到未缓冲区乱跳帧)
-  const inBuf = (t: number) => {
-    for (let i = 0; i < vid.buffered.length; i++) {
-      if (t >= vid.buffered.start(i) && t <= vid.buffered.end(i) - 0.1) return true
+  if (Math.abs(vid.currentTime - masterSec) < 0.15) return
+  // 偏差超 0.15s: masterSec 在 buffered 内则 seek 对齐, 否则不动(不上推末尾致卡死)
+  for (let i = 0; i < vid.buffered.length; i++) {
+    if (masterSec >= vid.buffered.start(i) && masterSec <= vid.buffered.end(i) - 0.1) {
+      try { vid.currentTime = masterSec } catch {}
+      return
     }
-    return false
   }
-
-  if (absDiff < 1.0) {
-    // 中等偏差: buffered 内 seek 对齐, 否则不动等缓冲
-    if (inBuf(masterSec)) { try { vid.currentTime = masterSec } catch {} }
-    return
-  }
-
-  // 严重失步兜底: masterSec 在 buffered 内则 seek 对齐, 否则保持不动(绝不上推末尾致卡死)
-  if (inBuf(masterSec)) { try { vid.currentTime = masterSec } catch {} }
 }
 
 // 标签页切回前台恢复播放
@@ -102,13 +88,7 @@ function handleVisibilityChange() {
 
 document.addEventListener('visibilitychange', handleVisibilityChange)
 
-defineExpose({
-  playVideo,
-  pauseVideo,
-  followTo,
-  currentTime: () => videoRef.value?.currentTime ?? 0,
-  duration: () => videoRef.value?.duration ?? 0,
-})
+defineExpose({ pauseVideo })
 
 // front/pop 同速共用 baseRate
 watch(() => props.playbackRate, (rate) => {
