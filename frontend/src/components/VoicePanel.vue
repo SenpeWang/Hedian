@@ -1,6 +1,7 @@
 <script setup lang="ts">
-import { nextTick, watch, ref } from 'vue'
+import { ref } from 'vue'
 import type { VoiceEntry } from '../types'
+import { useScrollBottom } from '../composables/useScrollBottom'
 
 const props = defineProps<{
   entries: VoiceEntry[]
@@ -8,23 +9,8 @@ const props = defineProps<{
 }>()
 
 const scrollEl = ref<HTMLElement | null>(null)
-
-async function scrollToBottom() {
-  await nextTick()
-  if (scrollEl.value) {
-    scrollEl.value.scrollTop = scrollEl.value.scrollHeight
-  }
-}
-
-// 监听对话行数变动
-watch(() => props.entries.length, () => {
-  scrollToBottom()
-})
-
-// 监听单句文本实时流式增长
-watch(() => props.entries.map(e => e.text).join('\n'), () => {
-  scrollToBottom()
-})
+// 滚底: 行数 + 单句文本实时增长
+useScrollBottom(scrollEl, () => props.entries.length + '|' + props.entries.map(e => e.text).join('\n'))
 
 function escapeHtml(s: string) {
   return s.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]!))

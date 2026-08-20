@@ -1,6 +1,6 @@
 import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import type {
-  VoiceEntry, FlowEvent, SegCard,
+  VoiceEntry, FlowEvent, SegCard, FlowType,
 GazeState, PeopleState,
 } from '../types'
 import { TimeSeriesPool } from './useTimeSeriesPool'
@@ -310,12 +310,12 @@ export function useWS() {
       state: { count: dt.count ?? '--', alert: dt.state_alert ? '⚠️ ' + dt.state_alert : '✅ 当前人数正常', alertColor: dt.state_alert ? '#ff4d4d' : '#00ff88' }
     })
   }
-  const flowTypeMap: Record<string, [string, string]> = { supervision: ['#00d4ff', '监护制'], info_notice: ['#00ffcc', '信息通报'] }
+  const flowTypeMap: Record<FlowType, [string, string]> = { supervision: ['#00d4ff', '监护制'], self_ticket: ['#ffaa00', '自唱票'], info_notice: ['#00ffcc', '信息通报'] }
   function addFlow(d: any, isStart: boolean) {
     const dt = d.data || d
     const sec = Number(isStart ? (dt.flow_start_sec || d.localSec || d.sec || 0) : (dt.flow_end_sec || d.localSec || d.sec || 0))
-    const flowType = dt.flow_type || d.flowType || 'supervision'
-    const [color, name] = flowTypeMap[flowType] || ['#ffaa00', '自唱票']
+    const flowType = (dt.flow_type || d.flowType || 'supervision') as FlowType
+    const [color, name] = flowTypeMap[flowType]
     if (!rawFlowEvents.value.find(e => e.flowType === flowType && Math.abs(e.sec - sec) < 0.1 && e.isStart === isStart)) {
       rawFlowEvents.value.push({ sec: Number(sec.toFixed(2)), flowType, name, color, isStart })
     }
@@ -323,7 +323,7 @@ export function useWS() {
   function handleReportEvent(msg: any) {
     const data = msg.data || {}
     const flowId = String(data.flow_id || msg.flow_id || '')
-    const flowType = data.flow_type || msg.flow_type || 'supervision'
+    const flowType = (data.flow_type || msg.flow_type || 'supervision') as FlowType
     const reportText = data.report_text || data.text || msg.text || ''
     const score = Number(data.score !== undefined ? data.score : 0)
     const continueSec = data.continue_sec || data.duration || 0

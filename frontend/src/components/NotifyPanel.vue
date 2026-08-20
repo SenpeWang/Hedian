@@ -2,8 +2,9 @@
      · 状态量状态栏(监控室人数/凝视状态): getLatestAt 取最新可得值, 持续显示
      · 事件流状态栏(流程事件列表): filter 累积已发生事件, 只增不减 -->
 <script setup lang="ts">
-import { nextTick, watch, ref } from 'vue'
+import { ref } from 'vue'
 import type { PeopleState, GazeState, FlowEvent } from '../types'
+import { useScrollBottom } from '../composables/useScrollBottom'
 
 const props = defineProps<{
   people: PeopleState
@@ -13,10 +14,7 @@ const props = defineProps<{
 }>()
 
 const flowEl = ref<HTMLElement | null>(null)
-watch(() => props.flowEvents.length, async () => {
-  await nextTick()
-  if (flowEl.value) flowEl.value.scrollTop = flowEl.value.scrollHeight
-})
+useScrollBottom(flowEl, () => props.flowEvents.length)
 
 // 监控室人数颜色：>=3人绿色，1-2人黄色，0人红色
 function peopleColor(): string {
