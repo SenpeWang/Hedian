@@ -109,3 +109,17 @@
 - **不改后端评估协议**: _wait_all_modules + wait_playback_reached + push_direct 时序保持
 - **自唱票启动不依赖语音**: 前端 GUI 弹窗信号触发(红线)
 - **信息通报即时闭环**: 喊"通报完毕"即结束, 不等"收到"
+
+## 6. 时间戳命名规范（前后端统一）
+
+以下时间戳**值同（源视频秒）**，但语义角色不同：
+
+| 命名 | 语义 |
+|---|---|
+| `localSec` | 模块内推理进度（per-source，frame_count/fps，update_module_time 写） |
+| `globalSec` | 结构化数据经 InferenceSync 对齐后推送的全局时间（=对齐闸门 min 各视角，同一概念，不冲突） |
+| `PTS` | 视频流 fMP4 帧时间戳（=帧序/fps，ffmpeg -r fps 生成，前端 sequence 模式隐式 ≈ PTS） |
+| `currentPlaybackSec` | 前端播放进度（front.currentTime，主时钟，可 seek/变速） |
+
+模块内 `localSec` 经 InferenceSync 对齐推送后即 `globalSec`（值不变，对齐只筛选 `localSec<=闸门 globalSec` 推送）。视频流 `PTS` 走独立 `vis_stream` 通道（不经 InferenceSync）。结构化数据 `globalSec` 与对齐闸门 `globalSec` 是同一概念，不冲突。
+

@@ -31,6 +31,19 @@
 | source | 推理流数据来源标识（voice/tracking/video_front/gaze/video_pop/behavior 等） |
 | view_id | WebSocket 二进制协议中的视角标识：0=front, 1=pop（硬约束，不可改） |
 
+### 1.4 时间戳命名规范（前后端统一）
+
+以下时间戳**值同（源视频秒）**，但语义角色不同：
+
+| 命名 | 语义 | 出处 |
+|---|---|---|
+| `localSec` | 模块内推理进度（per-source，`frame_count/fps`，`update_module_time` 写） | 各模块循环内 |
+| `globalSec` | 结构化数据经 InferenceSync 对齐后推送的全局时间（=对齐闸门 `min(各视角进度)`，同一概念，不冲突） | `inference_sync` 对齐推送 + batch 字段 |
+| `PTS` | 视频流 fMP4 帧时间戳（`=帧序/fps`，ffmpeg `-r fps` 生成，前端 sequence 模式隐式 ≈ PTS） | `vis_encoder` |
+| `currentPlaybackSec` | 前端播放进度（`front.currentTime`，主时钟，可 seek/变速） | `useWS` + `VideoPanel` |
+
+模块内 `localSec` 经 InferenceSync 对齐推送后即 `globalSec`（值不变，对齐只筛选 `localSec<=闸门 globalSec` 推送）。视频流 `PTS` 走独立 `vis_stream` 通道（不经 InferenceSync）。结构化数据 `globalSec` 与对齐闸门 `globalSec` 是同一概念（对齐后的全局时间），不冲突。
+
 ---
 
 ## 2. Goals & Non-Goals

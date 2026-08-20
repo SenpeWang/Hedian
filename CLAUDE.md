@@ -96,3 +96,19 @@ ssh wangshengping@10.152.88.66   # conda env: sp_hedian, 端口5002, Redis local
 - **评估异步链路时序**：§6 四条红线不可破坏（`_wait_all_modules` 时序、`wait_playback_reached` 等待、`push_direct` 绕对齐、逐 token 流式）。详见 `docs/DEVELOPMENT_GUIDE.md` §11.5。
 - **核电前端可视化样式**：严禁修改前端可视化样式（CSS/布局/配色），只处理逻辑/链路问题。
 - **fMP4 PTS**：`PTS=帧序/fps`，`sb.mode='sequence'` 忽略 PTS 按 append 顺序造时戳，勿改编码时戳逻辑。
+
+## 8. 时间戳命名规范（前后端统一）
+
+以下时间戳**值同（源视频秒）**，但语义角色不同，前后端须统一认知：
+
+| 命名 | 语义 | 出处 |
+|---|---|---|
+| `localSec` | 模块内推理进度（per-source，`frame_count/fps`，`update_module_time` 写） | 各模块循环内 |
+| `globalSec` | 结构化数据经 InferenceSync 对齐后推送的全局时间（=对齐闸门 `min(各视角进度)`，**同一概念**，不冲突） | `inference_sync` 对齐推送 + batch 字段 |
+| `PTS` | 视频流 fMP4 帧时间戳（`=帧序/fps`，ffmpeg `-r fps` 生成） | `vis_encoder` |
+| `currentPlaybackSec` | 前端播放进度（`front.currentTime`，主时钟） | `useWS` + `VideoPanel` |
+
+- **模块内 `localSec`** 经 InferenceSync 对齐推送后即 **`globalSec`**（值不变，对齐只筛选 `localSec <= 闸门 globalSec` 推送，不改值）
+- **视频流 `PTS`** 独立通道（`vis_stream`，不经 InferenceSync），前端 MSE `sequence` 模式按 append 顺序造时戳（隐式 ≈ PTS）
+- 结构化数据 `globalSec` 与对齐闸门 `globalSec` 本来就是一个意思（对齐后的全局时间），**不冲突**
+
