@@ -29,9 +29,6 @@ body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helv
 .panel-body { flex: 1; overflow-y: auto; padding: 6px; position: relative }
 
 .stream-video { width: 100%; height: 100%; object-fit: contain; display: block }
-.overlay-canvas { position: absolute; top: 0; left: 0; width: 100%; height: 100%; pointer-events: none }
-
-.stream-img { width: 100%; height: 100%; object-fit: contain; display: block }
 .video-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; color: #6b7a90; gap: 8px }
 .video-placeholder .icon { font-size: 32px }
 .video-placeholder .text { font-size: 14px }
