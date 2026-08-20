@@ -112,3 +112,8 @@ ssh wangshengping@10.152.88.66   # conda env: sp_hedian, 端口5002, Redis local
 - **视频流 `PTS`** 独立通道（`vis_stream`，不经 InferenceSync），前端 MSE `sequence` 模式按 append 顺序造时戳（隐式 ≈ PTS）
 - 结构化数据 `globalSec` 与对齐闸门 `globalSec` 本来就是一个意思（对齐后的全局时间），**不冲突**
 
+### 数据流范式（三类数据，时间戳值同源视频秒，通道/对齐不同）
+1. **视频流(front/pop)→PTS**：fMP4 独立 `vis_stream` 通道，不经 InferenceSync；前端 MSE `sequence` 按 append 顺序播放（隐式 ≈ PTS）。标注画进帧，前端纯 `<video>` 无 Canvas。
+2. **结构化数据(语音/通知/人数/凝视/流程)→globalSec 对齐前端**：InferenceSync `globalSec` 闸门推送（`localSec<=闸门` 才推，快视角压 pending）+ 前端按 `currentPlaybackSec` 取数（状态量 `getLatestAt` / 事件流 `filter`）。
+3. **流程评价→独立**：`push_direct` 直推绕对齐中间件 + `wait_playback_reached` 等前端播到流程结束 + 逐 token 流式（`useTypewriter`）。flow_start/flow_end 仍走 InferenceSync 对齐，仅评估报告文本直推。
+
