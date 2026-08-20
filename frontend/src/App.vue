@@ -15,11 +15,6 @@ const popPanelRef = ref<InstanceType<typeof VideoPanel> | null>(null)
 // 页面加载/刷新即重置:kill 推理子进程 + 清空状态,保证每次从干净状态开始
 onMounted(() => {
   fetch('/reset', { method: 'POST' }).then(() => { ws.resetState() }).catch(() => { ws.resetState() })
-  // 注入各视角 video.currentTime,供 MSE SourceBuffer trim 清理已播放数据(防 QuotaExceededError)
-  ws.setClockFns(
-    () => frontPanelRef.value?.currentTime() ?? 0,
-    () => popPanelRef.value?.currentTime() ?? 0,
-  )
 })
 
 function handleStart() {

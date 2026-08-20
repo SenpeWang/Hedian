@@ -150,12 +150,6 @@ export function useWS() {
   let popMS: MediaSource | null = null
   let frontBuf: VisBuffer | null = null
   let popBuf: VisBuffer | null = null
-  // clock 注入已废弃(trim 改用 currentPlaybackSec); 保留 setClockFns 兼容 App 调用
-  let frontClockFn: () => number = () => 0
-  let popClockFn: () => number = () => 0
-  function setClockFns(front: () => number, pop: () => number) {
-    frontClockFn = front; popClockFn = pop
-  }
 
   // ── WebSocket ──
   let socket: WebSocket | null = null
@@ -412,7 +406,7 @@ export function useWS() {
     progress, totalCount, avgScore,
     reportPlaybackProgress,
     frontMediaUrl, popMediaUrl,
-    setClockFns, initMSE,
+    initMSE,
     playbackRate, globalSec, viewSecs, totalDuration, currentPlaybackSec,
   }
 }
