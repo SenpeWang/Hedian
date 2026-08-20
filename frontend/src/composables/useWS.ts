@@ -76,7 +76,8 @@ function createVisBuffer(ms: MediaSource, codec: string, getClock: () => number)
   })
 
   // 清理已播放过的旧数据,防止 SourceBuffer 配额溢出(QuotaExceededError)
-  // 保留当前播放点前 8s,移除更早的已播放区间
+  // 保留主时钟(currentPlaybackSec)前 8s,移除更早的已播放区间
+  // 用主时钟而非各 video.currentTime: pop 失锁 currentTime 乱跑时 trim 基准不乱
   function maybeTrim() {
     if (!sb || sb.updating) return
     const t = getClock()
@@ -192,11 +193,11 @@ export function useWS() {
     // front:含音频轨;pop:仅视频
     frontMS = new MediaSource()
     frontMediaUrl.value = URL.createObjectURL(frontMS)
-    frontBuf = createVisBuffer(frontMS, 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"', frontClockFn)
+    frontBuf = createVisBuffer(frontMS, 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"', () => currentPlaybackSec.value)
 
     popMS = new MediaSource()
     popMediaUrl.value = URL.createObjectURL(popMS)
-    popBuf = createVisBuffer(popMS, 'video/mp4; codecs="avc1.42E01E"', popClockFn)
+    popBuf = createVisBuffer(popMS, 'video/mp4; codecs="avc1.42E01E"', () => currentPlaybackSec.value)
   }
 
   const _visCount = { front: 0, pop: 0 }
@@ -435,6 +436,6 @@ export function useWS() {
     reportPlaybackProgress,
     frontMediaUrl, popMediaUrl,
     setClockFns, initMSE,
-    playbackRate, globalSec, viewSecs, totalDuration,
+    playbackRate, globalSec, viewSecs, totalDuration, currentPlaybackSec,
   }
 }
