@@ -9,12 +9,6 @@ import logging
 import time
 from pathlib import Path
 
-import redis as _redis
-
-REDIS_HOST = "localhost"
-REDIS_PORT = 6379
-REDIS_DB = 0
-
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -37,7 +31,16 @@ def create_app(
     ws_handler = WSHandler()
 
     # 流水线状态
-    pipeline_state = {"status": "idle", "thread": None}
+    pipeline_state = {"status": "idle"}
+
+    def _r():
+        """新建 Redis 连接（连接参数从 config 注入）."""
+        from core.redis_conn import get_redis_client
+        return get_redis_client(
+            host=config.get("_redis_host", "localhost"),
+            port=config.get("_redis_port", 6379),
+            db=config.get("_redis_db", 0),
+        )
 
     # 保存到 app.state 供外部访问
     app.state.ws_handler = ws_handler
@@ -46,17 +49,6 @@ def create_app(
     # 注入总时长/状态/同步器, 供 WSHandler connect 补发状态快照(前端刷新即恢复进度)
     ws_handler.set_state_refs(config.get("duration", 0.0), pipeline_state, inference_sync)
 
-    @app.get("/")
-    async def index():
-        """首页 — 由 StaticFiles 兜底，此处仅为显式声明."""
-        dist = Path(__file__).parent.parent / "frontend" / "dist"
-        resp = FileResponse(str(dist / "index.html"))
-        # index.html 禁缓存: 确保 rebuild 后刷新引用最新 bundle(旧 bundle 不含 status 处理→progress 恒 0)
-        resp.headers["Cache-Control"] = "no-cache, no-store, must-revalidate"
-        resp.headers["Pragma"] = "no-cache"
-        resp.headers["Expires"] = "0"
-        return resp
-
     @app.post("/start")
     async def start(request: Request):
         """启动流水线（幂等：已在运行时拒绝重复启动."""
@@ -64,13 +56,8 @@ def create_app(
             logger.warning("拒绝重复启动：流水线已在运行")
             return {"status": "already_running"}
 
-        from core.redis_conn import get_redis_client
-        r = get_redis_client(
-            host=config.get("_redis_host", "localhost"),
-            port=config.get("_redis_port", 6379),
-            db=config.get("_redis_db", 0),
-        )
         # 一次性清理所有推理流/事件/进度 key（scan_iter 遍历时删除安全）
+        r = _r()
         r.flushdb()
         ws_handler.reset()
         logger.info("已执行 r.flushdb() 彻底清空 Redis 历史残留数据")
@@ -101,12 +88,7 @@ def create_app(
         if stop_fn:
             stopped_count = stop_fn()
 
-        from core.redis_conn import get_redis_client
-        r = get_redis_client(
-            host=config.get("_redis_host", "localhost"),
-            port=config.get("_redis_port", 6379),
-            db=config.get("_redis_db", 0),
-        )
+        r = _r()
         for key in r.scan_iter("inference:*"):
             r.delete(key)
         for key in r.scan_iter("module:*"):
@@ -133,13 +115,8 @@ def create_app(
         """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存,回到干净 idle."""
         stop_fn = getattr(app.state, "stop_pipeline", None)
         stopped_count = stop_fn() if stop_fn else 0
-        from core.redis_conn import get_redis_client
-        r = get_redis_client(
-            host=config.get("_redis_host", "localhost"),
-            port=config.get("_redis_port", 6379),
-            db=config.get("_redis_db", 0),
-        )
         # 彻底清空所有 Redis 残留(与 /start 一致), 不遗漏非前缀 key
+        r = _r()
         r.flushdb()
         if inference_sync:
             inference_sync.reset()
@@ -170,52 +147,31 @@ def create_app(
             logger.debug(f"WebSocket 非预期断开: {e}")
             ws_handler.disconnect(websocket)
 
+    async def _video_response(prefix: str, name: str):
+        """流式提供视角视频文件（支持 HTTP Range 206 硬解与原生声音）."""
+        base_dir = Path(__file__).resolve().parent.parent
+        for ext in ("mp4", "mpg"):
+            candidate = base_dir / "data/videos" / f"{name}.{ext}"
+            if candidate.is_file():
+                return FileResponse(str(candidate), media_type="video/mp4")
+        return JSONResponse({"error": f"{prefix} video not found"},
+                            status_code=404)
+
     @app.get("/api/video/front")
     async def get_video_front():
-        """流式提供前置视角视频流（支持 HTTP Range 206 硬解与原生声音）."""
-        base_dir = Path(__file__).resolve().parent.parent
-        candidates = [
-            base_dir / "data/videos/camFRONT.mp4",
-            base_dir / "data/videos/camFRONT.mpg",
-            Path("/home/wangshengping/Hedian/A_DemoSrc/data/videos/camFRONT.mp4"),
-        ]
-        for c in candidates:
-            if c.is_file():
-                return FileResponse(str(c), media_type="video/mp4")
-        return JSONResponse({"error": "front video not found"}, status_code=404)
+        """流式提供前置视角视频流."""
+        return await _video_response("front", "camFRONT")
 
     @app.get("/api/video/pop")
     async def get_video_pop():
-        """流式提供俯视视角视频流（支持 HTTP Range 206 硬解）."""
-        base_dir = Path(__file__).resolve().parent.parent
-        candidates = [
-            base_dir / "data/videos/camPOP.mp4",
-            base_dir / "data/videos/camPOP.mpg",
-            Path("/home/wangshengping/Hedian/A_DemoSrc/data/videos/camPOP.mp4"),
-        ]
-        for c in candidates:
-            if c.is_file():
-                return FileResponse(str(c), media_type="video/mp4")
-        return JSONResponse({"error": "pop video not found"}, status_code=404)
+        """流式提供俯视视角视频流."""
+        return await _video_response("pop", "camPOP")
 
     @app.get("/status")
     async def status():
         """状态."""
-        from core.redis_conn import get_redis_client
-        r = get_redis_client(
-            host=config.get("_redis_host", "localhost"),
-            port=config.get("_redis_port", 6379),
-            db=config.get("_redis_db", 0),
-        )
-        redis_status = r.get("pipeline:status")
-
-        status_val = pipeline_state["status"]
-        if redis_status == "done":
-            status_val = "idle"
-            pipeline_state["status"] = "idle"
-
         return {
-            "pipeline": status_val,
+            "pipeline": pipeline_state["status"],
             "ws_clients": ws_handler.get_client_count(),
         }
 
