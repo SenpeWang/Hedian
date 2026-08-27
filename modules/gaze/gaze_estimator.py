@@ -3,29 +3,8 @@
 
 使用 Gazelle ONNX 模型推断注视方向。
 """
-import os
-import sys
-import ctypes
-
-# 预加载 cuDNN 库（LD_LIBRARY_PATH 在运行中修改对 dlopen 不生效）
-# nvidia 库路径按当前 Python 环境动态解析，避免硬编码 conda 环境绝对路径
-_nvidia_base = os.path.join(
-    sys.prefix, "lib", f"python{sys.version_info.major}.{sys.version_info.minor}",
-    "site-packages", "nvidia",
-)
-_cudnn_lib = f"{_nvidia_base}/cudnn/lib"
-_cuda_runtime_lib = f"{_nvidia_base}/cuda_runtime/lib"
-_cublas_lib = f"{_nvidia_base}/cublas/lib"
-
-for _lib_dir in [_cudnn_lib, _cuda_runtime_lib, _cublas_lib]:
-    for _f in sorted(os.listdir(_lib_dir)) if os.path.isdir(_lib_dir) else []:
-        if _f.endswith(".so") or ".so." in _f:
-            try:
-                ctypes.CDLL(os.path.join(_lib_dir, _f))
-            except OSError:
-                pass
-
 import logging
+import os
 from typing import List, Optional, Tuple
 
 import numpy as np
@@ -59,6 +38,8 @@ class GazeEstimator:
             raise FileNotFoundError(f"Gazelle 模型不存在: {model_path}")
 
         import onnxruntime
+        # 官方 API: 从 pip nvidia 包预加载 CUDA/cuDNN 库，供下方 CUDA EP 使用
+        onnxruntime.preload_dlls()
         if providers is None:
             providers = ["CUDAExecutionProvider"]
 
@@ -71,6 +52,12 @@ class GazeEstimator:
         self._session = onnxruntime.InferenceSession(
             model_path, sess_options=sess_opts, providers=providers
         )
+        # 硬性要求: 仅允许 GPU 推理; CUDA EP 未生效说明已静默回退 CPU, 立即失败
+        if "CUDAExecutionProvider" not in self._session.get_providers():
+            raise RuntimeError(
+                f"Gazelle 模型 CUDAExecutionProvider 未生效(实际: {self._session.get_providers()}), "
+                "按约定禁止 CPU 回退, 拒绝启动"
+            )
         self._input_names = [i.name for i in self._session.get_inputs()]
         self._output_names = [o.name for o in self._session.get_outputs()]
 

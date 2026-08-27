@@ -36,7 +36,6 @@ except Exception:
 
 import argparse
 import multiprocessing
-import time
 import redis
 import cv2
 from datetime import datetime
@@ -62,7 +61,16 @@ REDIS_DB = 0
 
 logger = setup_logger("main")
 
-START_SIGNAL_KEY = "pipeline:start_signal"
+
+def _paths_from_dict(paths_dict: dict) -> "PathManager":
+    """从可序列化的 paths_dict 重建 PathManager（跨进程传递用）."""
+    from pathlib import Path
+    return PathManager(
+        base_dir=Path(paths_dict["base_dir"]),
+        data_root=Path(paths_dict["data_root"]),
+        model_root=Path(paths_dict["model_root"]),
+        result_root=Path(paths_dict["result_root"]),
+    )
 
 
 def _run_module_process(
@@ -79,6 +87,14 @@ def _run_module_process(
     # 业务子模块仅可见指定的推理 GPU
     # 视角级GPU: gpu_map 按模块名取, 未配置则回退 gpu_default(已含CLI --gpu)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(config_dict.get("gpu_map", {}).get(module_name, config_dict.get("gpu_default", "0")))
+    # 硬性要求: 仅允许 GPU 推理; CUDA 初始化失败立即快速失败, 严禁静默回退 CPU
+    import torch
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            f"[{module_name}] CUDA 初始化失败(CUDA_VISIBLE_DEVICES="
+            f"{os.environ['CUDA_VISIBLE_DEVICES']}), "
+            "按约定禁止 CPU 回退, 拒绝启动"
+        )
     from pathlib import Path
     from core.event_bus import EventStream
     from core.inference_stream import InferenceStream
@@ -136,14 +152,7 @@ def _run_module_process(
 def run_voice_process(config_dict, paths_dict, video_path, run_id):
     """运行语音处理."""
     from modules.voice import VoiceModule
-    _run_module_process(
-        "voice",
-        lambda *a: VoiceModule(*a),
-        config_dict,
-        paths_dict,
-        video_path,
-        run_id,
-    )
+    _run_module_process("voice", VoiceModule, config_dict, paths_dict, video_path, run_id)
 
 
 def run_tracker_process(config_dict, paths_dict, video_path, run_id):
@@ -155,28 +164,15 @@ def run_tracker_process(config_dict, paths_dict, video_path, run_id):
             del os.environ["LD_LIBRARY_PATH"]
 
     from modules.tracker import TrackerModule
-    _run_module_process(
-        "tracker",
-        lambda *a: TrackerModule(*a),
-        config_dict,
-        paths_dict,
-        video_path,
-        run_id,
-        env_setup=_env_setup,
-    )
+    _run_module_process("tracker", TrackerModule, config_dict, paths_dict,
+                        video_path, run_id, env_setup=_env_setup)
 
 
 def run_behavior_process(config_dict, paths_dict, video_path, run_id):
     """运行行为处理."""
     from modules.behavior import BehaviorModule
-    _run_module_process(
-        "behavior",
-        lambda *a: BehaviorModule(*a),
-        config_dict,
-        paths_dict,
-        video_path,
-        run_id,
-    )
+    _run_module_process("behavior", BehaviorModule, config_dict, paths_dict,
+                        video_path, run_id)
 
 
 def run_web_process(config_dict, paths_dict, run_id=None):
@@ -280,7 +276,6 @@ def run_web_process(config_dict, paths_dict, run_id=None):
 
     def stop_pipeline_processes() -> int:
         """停止pipelineprocesses."""
-        nonlocal active_worker_processes
         count = 0
         for name, p in list(active_worker_processes):
             if p.is_alive():
@@ -297,7 +292,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
 
     def on_pipeline_start(msg):
         """处理pipeline启动."""
-        nonlocal flow_result_dir, active_worker_processes
+        nonlocal flow_result_dir
         data = msg.get("data", {})
         active_run_id = data.get("run_id")
         if not active_run_id:
@@ -322,8 +317,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         except Exception as e:
             logger.error(f"清理 Redis 失败: {e}")
 
-        if inference_sync:
-            inference_sync.reset()
+        inference_sync.reset()
         # 视频流:清空上轮 init 缓存,启动 fMP4 转发(与推理子进程同时起)
         if app.state.ws_handler:
             app.state.ws_handler.clear_vis_cache()
@@ -414,13 +408,11 @@ def run_web_process(config_dict, paths_dict, run_id=None):
                 "data": data.get("data"),
             })
         else:
-            if inference_sync:
-                inference_sync.push_display(event_type, data)
+            inference_sync.push_display(event_type, data)
 
     def push_sync(event_type: str, data: dict):
         """系统通知推送：经过对齐中间件打包入 Batch meta，与视频帧物理时间点同帧出屏."""
-        if inference_sync:
-            inference_sync.push_display(event_type, data)
+        inference_sync.push_display(event_type, data)
 
     # 评估子进程 GPU: 由 config gpu_map[evaluation] 指定, web 进程注入环境变量供 FlowEvaluationManager 读取
     os.environ["_EVAL_GPU"] = str(config_dict.get("gpu_map", {}).get("evaluation", config_dict.get("gpu_default", "1")))
@@ -435,51 +427,49 @@ def run_web_process(config_dict, paths_dict, run_id=None):
     )
     logger.info(f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}")
 
-    if inference_sync:
+    def push_wrapper(event):
+        """推送wrapper."""
+        # 推理流结束信号：InferenceSync 推送 None 表示流水线完成
+        if event is None or (isinstance(event, dict)
+                             and event.get("source") == "done"):
+            app.state.pipeline_state["status"] = "idle"
+            logger.info("检测到流水线运行结束信号，已将 Web 状态置为 idle")
+            # finalize 关闭未触发 FLOW_ENDED 的活跃流程（触发 FLOW_ENDED + 保存制度事件）
+            if flow_result_dir:
+                registry.save_all_results(flow_result_dir)
+            try:
+                flow_evaluator.finalize()
+            except Exception as e:
+                logger.error(f"FlowEvaluationManager finalize 失败: {e}",
+                             exc_info=True)
+            # 刷新剩余事件（评估结果等）到前端，确保 done 之前不丢数据
+            try:
+                inference_sync.flush_remaining()
+            except Exception as e:
+                logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
+            # 回收退场子进程状态码，清除 ps aux 中的 <defunct> 僵尸进程条目
+            stop_pipeline_processes()
+            # 推理完成：清空本轮 Redis 推理数据，为下次「开始测试」准备干净状态
+            try:
+                _r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
+                for _k in _r.scan_iter("inference:*"):
+                    _r.delete(_k)
+                for _k in _r.scan_iter("module:*"):
+                    _r.delete(_k)
+                for _k in _r.scan_iter("pipeline:*"):
+                    _r.delete(_k)
+                _r.close()
+                logger.info("推理完成后已清空 Redis 推理数据，等待下次开始测试")
+            except Exception as _e:
+                logger.error(f"推理完成后清空 Redis 失败: {_e}")
+            logger.info("推理流与评估流程已全部完成，GPU 推理子进程与僵尸表项已 100% 清理，Web 保持运行")
+            # 推理结束:停止视频流转发(子进程已 finalize 编码器)
+            if getattr(app.state, "vis_forwarder", None):
+                app.state.vis_forwarder.stop()
+        app.state.ws_handler.push(event)
 
-        def push_wrapper(event):
-            """推送wrapper."""
-            # 推理流结束信号：InferenceSync 推送 None 表示流水线完成
-            if event is None or (isinstance(event, dict)
-                                 and event.get("source") == "done"):
-                app.state.pipeline_state["status"] = "idle"
-                logger.info("检测到流水线运行结束信号，已将 Web 状态置为 idle")
-                # finalize 关闭未触发 FLOW_ENDED 的活跃流程（触发 FLOW_ENDED + 保存制度事件）
-                if flow_result_dir:
-                    registry.save_all_results(flow_result_dir)
-                try:
-                    flow_evaluator.finalize()
-                except Exception as e:
-                    logger.error(f"FlowEvaluationManager finalize 失败: {e}",
-                                 exc_info=True)
-                # 刷新剩余事件（评估结果等）到前端，确保 done 之前不丢数据
-                try:
-                    inference_sync.flush_remaining()
-                except Exception as e:
-                    logger.error(f"刷新剩余事件失败: {e}", exc_info=True)
-                # 回收退场子进程状态码，清除 ps aux 中的 <defunct> 僵尸进程条目
-                stop_pipeline_processes()
-                # 推理完成：清空本轮 Redis 推理数据，为下次「开始测试」准备干净状态
-                try:
-                    _r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB, decode_responses=True)
-                    for _k in _r.scan_iter("inference:*"):
-                        _r.delete(_k)
-                    for _k in _r.scan_iter("module:*"):
-                        _r.delete(_k)
-                    for _k in _r.scan_iter("pipeline:*"):
-                        _r.delete(_k)
-                    _r.close()
-                    logger.info("推理完成后已清空 Redis 推理数据，等待下次开始测试")
-                except Exception as _e:
-                    logger.error(f"推理完成后清空 Redis 失败: {_e}")
-                logger.info("推理流与评估流程已全部完成，GPU 推理子进程与僵尸表项已 100% 清理，Web 保持运行")
-                # 推理结束:停止视频流转发(子进程已 finalize 编码器)
-                if getattr(app.state, "vis_forwarder", None):
-                    app.state.vis_forwarder.stop()
-            app.state.ws_handler.push(event)
-
-        inference_sync.set_push_callback(push_wrapper)
-        inference_sync.start()
+    inference_sync.set_push_callback(push_wrapper)
+    inference_sync.start()
 
     logger.info("启动 FastAPI 服务器")
     import uvicorn
@@ -538,27 +528,6 @@ def main():
     r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=REDIS_DB)
     r.flushdb()
     r.close()
-
-    r2 = redis.Redis(host=REDIS_HOST,
-                     port=REDIS_PORT,
-                     db=REDIS_DB,
-                     decode_responses=True)
-    r2.delete(START_SIGNAL_KEY)
-    r2.close()
-
-    r3 = redis.Redis(host=REDIS_HOST,
-                     port=REDIS_PORT,
-                     db=REDIS_DB,
-                     decode_responses=True)
-    for key in r3.scan_iter("gaze:*"):
-        r3.delete(key)
-    for key in r3.scan_iter("inference:*"):
-        r3.delete(key)
-    for key in r3.scan_iter("module:*"):
-        r3.delete(key)
-    for key in r3.scan_iter("pipeline:*"):
-        r3.delete(key)
-    r3.close()
     logger.info("已清理 Redis 缓存，准备启动 Web 服务进程")
 
     run_web_process(config_dict, paths_dict, run_id)
