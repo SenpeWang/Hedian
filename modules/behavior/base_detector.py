@@ -2,10 +2,7 @@
 
 封装行为检测公共能力：冷却期帧数控制与标准化事件结构封装。
 """
-import logging
 from typing import Any, Dict
-
-logger = logging.getLogger("module.behavior.base_detector")
 
 
 class BaseDetector:

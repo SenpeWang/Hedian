@@ -44,20 +44,6 @@ class SelfTicketRule(BaseRule):
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
 
-    def get_current_flow(self) -> dict:
-        """获取当前流程."""
-        if not self._active:
-            return None
-        return {
-            "flow_id": self._flow_id,
-            "flow_type": "self_ticket",
-            "flow_start_sec": self._flow_start_sec,
-            "device_code": self._device_code,
-            "code_read": self._code_read,
-            "operation_executed": self._operation_executed,
-            "confirm_closed": self._confirm_closed,
-        }
-
     def _start_flow(self, ts: float, device_code: str) -> None:
         """启动流程."""
         # 关闭上一个自唱票
@@ -116,7 +102,6 @@ class SelfTicketRule(BaseRule):
     def _on_voice_intent(self, msg: dict) -> None:
         """处理语音事件."""
         data = msg.get("data", {})
-        ts = data.get("localSec", msg.get("ts", 0.0))
         key_moment = data.get("key_moment", "")
         if not key_moment:
             return

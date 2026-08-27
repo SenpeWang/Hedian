@@ -13,18 +13,12 @@
   触发绑定，保存为 key_moment。
   距离本身不是 key_moment，仅作为绑定触发条件。
 """
-import os
 import logging
 
 from core.event_bus import EventStream, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.supervision")
-
-
-def _loop_name_from_operator(operator: str) -> str:
-    """返回操作员身份英文代号；身份为空返回空串."""
-    return operator or ""
 
 
 class SupervisionRule(BaseRule):
@@ -82,19 +76,6 @@ class SupervisionRule(BaseRule):
         event_bus.subscribe(EventTopic.BEHAVIOR_FINGER_FILE,
                             self._on_finger_file)
         event_bus.subscribe(EventTopic.TRACKER_PROXIMITY, self._on_mot_status)
-
-    def get_current_flow(self) -> dict:
-        """获取当前活跃流程."""
-        if not self._active:
-            return None
-        return {
-            "flow_id": self._flow_id,
-            "flow_type": "supervision",
-            "flow_start_sec": self._flow_start_sec,
-            "start_source": self._flow_start_source,
-            "target_role": self._target_role,
-            "content_checklist": dict(self._checklist),
-        }
 
     def _start_flow(self,
                     ts: float,
@@ -282,7 +263,7 @@ class SupervisionRule(BaseRule):
                     self._sm_state = "BOUND"
                     self._ever_bound = True
                     self._far_start_ts = -1.0
-                    loop_name = _loop_name_from_operator(self._target_role)
+                    loop_name = self._target_role or ""
                     logger.info(
                         f"状态转移: REQUESTING → BOUND @{ts:.1f}s, 监护对象={self._target_role}({loop_name})"
                     )
@@ -307,7 +288,7 @@ class SupervisionRule(BaseRule):
                     self._far_start_ts = ts
                 elif ts - self._far_start_ts >= self._unbind_hold_sec:
                     self._sm_state = "IDLE"
-                    loop_name = _loop_name_from_operator(self._target_role)
+                    loop_name = self._target_role or ""
                     logger.info(
                         f"状态转移: BOUND → IDLE @{ts:.1f}s (人员离开超{self._unbind_hold_sec:.0f}秒)"
                     )

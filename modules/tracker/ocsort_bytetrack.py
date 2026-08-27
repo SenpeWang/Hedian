@@ -904,18 +904,3 @@ class OCSORTByteTracker:
                         unmatched_b.remove(c)
 
         return matches, unmatched_a, unmatched_b
-
-    def get_statistics(self) -> Dict:
-        """获取跟踪器的实时运行统计指标字典.
-
-        Returns:
-            Dict[str, Any]: 包含活跃数、丢失数、确认数等统计指标的字典.
-        """
-        return {
-            'active_tracks': len(self.tracked_stracks),
-            'lost_tracks': len(self.lost_stracks),
-            'removed_tracks': len(self.removed_stracks),
-            'tentative_tracks': len(self.tentative_stracks),
-            'next_id': self.track_id + 1,
-            'max_id_generated': self.track_id
-        }

@@ -33,11 +33,6 @@ class BaseRule(ABC):
         """当前是否有活跃流程."""
         return getattr(self, "_active", False)
 
-    @abstractmethod
-    def get_current_flow(self) -> Optional[dict]:
-        """获取当前活跃流程."""
-        pass
-
     def finalize(self) -> Optional[dict]:
         """视频结束时关闭流程."""
         if not self.is_active():
@@ -100,12 +95,6 @@ class RuleRegistry:
     def all(self) -> List[BaseRule]:
         """全部."""
         return list(self._rules.values())
-
-    def subscribe_all(self, event_bus: EventStream) -> None:
-        """订阅全部."""
-        for reg in self._rules.values():
-            reg.subscribe_events(event_bus)
-            logger.info(f"制度 {reg.name()} 已订阅事件")
 
     def save_all_results(self, result_dir: str) -> None:
         """保存全部results."""

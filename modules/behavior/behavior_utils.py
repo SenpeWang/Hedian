@@ -8,12 +8,9 @@
 所有函数均为无副作用纯函数，供 screen_detect / file_detector / hand_raiser /
 object_detector 等模块复用。
 """
-import logging
-from typing import List, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
-
-logger = logging.getLogger("module.behavior.behavior_utils")
 
 
 # 几何工具（移植自 behavior-v1/finger_screen_pop.py，模块级纯函数）

@@ -15,7 +15,7 @@ from core.config_manager import ConfigManager
 from core.inference_stream import InferenceStream
 from core.inference_sync import InferenceSync
 from core.base_module import BaseModule
-from core.logger import setup_logger, get_module_logger, add_root_file_handler
+from core.logger import setup_logger, add_root_file_handler
 from core.path_manager import PathManager
 
 __all__ = [
@@ -26,7 +26,6 @@ __all__ = [
     "InferenceSync",
     "BaseModule",
     "setup_logger",
-    "get_module_logger",
     "add_root_file_handler",
     "PathManager",
 ]

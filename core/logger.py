@@ -7,24 +7,16 @@ import os
 import logging
 import sys
 from pathlib import Path
-from typing import Optional
+
+_FMT = "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s"
+_DATEFMT = "%H:%M:%S"
 
 _root_configured = False
 
 
-def setup_logger(
-    name: str = None,
-    log_file: Optional[str] = None,
-    level: int = logging.INFO,
-    format_str: str = None,
-) -> logging.Logger:
+def setup_logger(name: str = None, level: int = logging.INFO) -> logging.Logger:
     """配置并返回 logger."""
     global _root_configured
-
-    if format_str is None:
-        format_str = "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s"
-
-    formatter = logging.Formatter(format_str, datefmt="%H:%M:%S")
 
     if not _root_configured:
         root = logging.getLogger()
@@ -32,44 +24,20 @@ def setup_logger(
         if not root.handlers:
             console = logging.StreamHandler(sys.stdout)
             console.setLevel(level)
-            console.setFormatter(formatter)
+            console.setFormatter(logging.Formatter(_FMT, datefmt=_DATEFMT))
             root.addHandler(console)
         _root_configured = True
 
-    logger = logging.getLogger(name)
-
-    if log_file:
-        log_path = Path(log_file)
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file, encoding="utf-8")
-        file_handler.setLevel(level)
-        file_handler.setFormatter(formatter)
-        logger.addHandler(file_handler)
-
-    return logger
-
-
-def get_module_logger(module_name: str,
-                      result_dir: str = None) -> logging.Logger:
-    """返回按模块命名的 logger."""
-    log_file = None
-    if result_dir:
-        log_file = str(Path(result_dir) / f"{module_name}.log")
-
-    return setup_logger(f"module.{module_name}", log_file=log_file)
+    return logging.getLogger(name)
 
 
 def add_root_file_handler(log_file: str, level: int = logging.INFO) -> None:
     """向 root logger 添加文件 handler，用于多进程场景."""
-    formatter = logging.Formatter(
-        "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
     file_handler = logging.FileHandler(log_file, encoding="utf-8")
     file_handler.setLevel(level)
-    file_handler.setFormatter(formatter)
+    file_handler.setFormatter(logging.Formatter(_FMT, datefmt=_DATEFMT))
     logging.getLogger().addHandler(file_handler)
 
 
@@ -84,8 +52,5 @@ def redirect_file_logger(new_log_file_path: str) -> None:
     if new_log_file_path:
         os.makedirs(os.path.dirname(new_log_file_path), exist_ok=True)
         handler = logging.FileHandler(new_log_file_path, encoding="utf-8")
-        formatter = logging.Formatter(
-            "[%(asctime)s] [%(name)s] %(levelname)s: %(message)s",
-            datefmt="%H:%M:%S")
-        handler.setFormatter(formatter)
+        handler.setFormatter(logging.Formatter(_FMT, datefmt=_DATEFMT))
         root_logger.addHandler(handler)

@@ -47,10 +47,6 @@ def apply_corrections(text: str) -> str:
     return re.sub(r'[。，]{3,}', '。', corrected)
 
 
-# 已移除无用的 ASR 幻觉去重函数
-
-
-
 # ======================== Qwen3-ASR 辅助函数 ========================
 def _read_attr_or_key(item, *names, default=None):
     """读取attrorkey."""
@@ -135,7 +131,6 @@ class SpeechTranscriber:
         self,
         model_path: Optional[str] = None,
         aligner_path: Optional[str] = None,
-        asr_engine: str = "qwen3",
         sample_rate: int = 16000,
         device: str = "cuda",
         torch_dtype: Optional[str] = None,
@@ -143,7 +138,6 @@ class SpeechTranscriber:
         """初始化."""
         self.model_path = model_path
         self.aligner_path = aligner_path
-        self.asr_engine = asr_engine
         self.sample_rate = sample_rate
         self.device = device
         self.torch_dtype = torch_dtype
@@ -291,15 +285,17 @@ class SpeechTranscriber:
                 )
                 normalized = normalize_qwen_results(results, duration_seconds=len(seg_audio)/sr)
 
+                try:
+                    from opencc import OpenCC
+                    cc = OpenCC("t2s")
+                except ImportError:
+                    cc = None
+
                 seg_words = []
                 for seg in normalized:
                     txt = seg.get("text", "").strip()
-                    try:
-                        from opencc import OpenCC
-                        cc = OpenCC("t2s")
+                    if cc is not None:
                         txt = cc.convert(txt)
-                    except ImportError:
-                        pass
                     if txt:
                         if "words" in seg and seg["words"]:
                             for w in seg["words"]:

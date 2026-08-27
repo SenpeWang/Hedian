@@ -61,15 +61,12 @@ class GazeModule:
         self._info_notice_active = False
 
         if self._event_bus is not None:
-            try:
-                from core.event_bus import EventTopic
-                self._event_bus.subscribe(EventTopic.FLOW_STARTED,
-                                          self._on_flow_started)
-                self._event_bus.subscribe(EventTopic.FLOW_ENDED,
-                                          self._on_flow_ended)
-                logger.info("GazeModule 已订阅 FLOW_STARTED/FLOW_ENDED 事件")
-            except Exception as e:
-                logger.warning(f"GazeModule 订阅流程事件失败: {e}")
+            from core.event_bus import EventTopic
+            self._event_bus.subscribe(EventTopic.FLOW_STARTED,
+                                      self._on_flow_started)
+            self._event_bus.subscribe(EventTopic.FLOW_ENDED,
+                                      self._on_flow_ended)
+            logger.info("GazeModule 已订阅 FLOW_STARTED/FLOW_ENDED 事件")
 
         self._head_detector = HeadDetector(
             model_path=head_model_path,
@@ -411,25 +408,6 @@ class GazeModule:
             cv2.line(vis, (cx, cy), (gx, gy), color, 2, cv2.LINE_AA)
             cv2.circle(vis, (gx, gy), 4, color, -1)
             cv2.circle(vis, (gx, gy), 6, color, 2)
-
-        pass  # 前端/画面渲染 Attended 标签已完全移除
-
-    def get_visual_data(self) -> dict:
-        """获取结构化凝视可视化数据，供前端 Canvas 毫秒级绘制."""
-        with self._gaze_lock:
-            heads = []
-            for gr in self._cached_results:
-                heads.append({
-                    "box": [float(x) for x in gr["box"]],
-                    "center": [float(x) for x in gr["center"]],
-                    "gaze_pt": [float(x) for x in gr["gaze_pt"]],
-                    "status": gr["status"],
-                })
-            return {
-                "heads": heads,
-                "has_heads": self._cached_has_heads,
-                "any_in_roi": self._cached_any_in_roi,
-            }
 
     def get_events(self) -> list:
         """获取events."""

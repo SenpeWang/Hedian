@@ -114,8 +114,3 @@ class FlowEventRecorder:
             logger.info(f"保存 {len(flows)} 个流程事件到 {path}")
         except Exception as e:
             logger.error(f"保存流程事件失败: {e}", exc_info=True)
-
-    def get_completed_flows(self) -> List[dict]:
-        """获取completedflows."""
-        with self._lock:
-            return list(self._completed_flows)

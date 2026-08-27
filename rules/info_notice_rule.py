@@ -33,7 +33,6 @@ class InfoNoticeRule(BaseRule):
 
         # 时间记录，用于判定 5 秒内 举手 + 声音 进入流程
         self._last_hand_raise_ts = -999.0
-        self._last_voice_shout_ts = -999.0
 
         # 内容检查清单
         self._checklist = {
@@ -55,17 +54,6 @@ class InfoNoticeRule(BaseRule):
         event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED,
                             self._on_hand_raised)
         event_bus.subscribe(EventTopic.GAZE_ATTENTION, self._on_gaze_status)
-
-    def get_current_flow(self) -> dict:
-        """获取当前流程."""
-        if not self._active:
-            return None
-        return {
-            "flow_id": self._flow_id,
-            "flow_type": "info_notice",
-            "flow_start_sec": self._flow_start_sec,
-            "content_checklist": self._checklist.copy(),
-        }
 
     def _start_flow(self, ts: float, source: str) -> None:
         """启动流程."""
@@ -121,7 +109,6 @@ class InfoNoticeRule(BaseRule):
         self._active = False
         self._flow_id = 0
         self._last_hand_raise_ts = -999.0
-        self._last_voice_shout_ts = -999.0
 
         return flow
 
@@ -149,7 +136,6 @@ class InfoNoticeRule(BaseRule):
             return
 
         if key_moment in ["信息通报", "信息通告"]:
-            self._last_voice_shout_ts = ts
             logger.debug(f"信息通报: 收到信息通报语音事件 @{ts:.1f}s，开始流程")
             self._start_flow(ts, source="voice")
         elif key_moment in ["通报完毕", "通告完毕"]:
@@ -186,7 +172,6 @@ class InfoNoticeRule(BaseRule):
             "received_acknowledged": False,
         }
         self._last_hand_raise_ts = -999.0
-        self._last_voice_shout_ts = -999.0
 
 
 def register():

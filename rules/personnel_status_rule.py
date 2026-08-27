@@ -45,14 +45,6 @@ class PersonnelStatusRule(BaseRule):
         """人员状态监控始终是激活状态."""
         return True
 
-    def get_current_flow(self) -> Optional[dict]:
-        """获取当前流程."""
-        return {
-            "type": "personnel_status_monitoring",
-            "current_people_count": self._current_people_count,
-            "violations_count": len(self._violations),
-        }
-
     def finalize(self) -> Optional[dict]:
         """finalize."""
         # 视频收尾时，检查是否仍有未结束的无人值守状态且时长已超过 10 秒
@@ -145,10 +137,6 @@ class PersonnelStatusRule(BaseRule):
         self._current_people_count = -1
         self._no_people_start_ts = None
         self._last_ts = 0.0
-
-    def get_violations(self) -> list:
-        """获取violations."""
-        return list(self._violations)
 
 
 def register():

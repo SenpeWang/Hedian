@@ -7,7 +7,6 @@
 import os
 import logging
 from pathlib import Path
-from typing import Any, Optional
 
 import yaml
 
@@ -41,9 +40,6 @@ _DEFAULTS = {
         "dist_near_px": 560,
         "consec_raise": 3,
         "consec_idle": 3,
-    },
-    "event_bus": {
-        "max_queue_size": 1024,
     },
     "voice": {
         "sample_rate": 16000,
@@ -101,13 +97,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 
 
 class ConfigManager:
-    """
-    全局配置管理器（单例）.
-
-    从 config.yaml 加载配置，提供统一访问接口。
-    """
-
-    _instance: Optional["ConfigManager"] = None
+    """全局配置管理器：从 config.yaml 加载配置，提供统一访问接口."""
 
     def __init__(self, config_path: str = None):
         """初始化."""
@@ -122,21 +112,9 @@ class ConfigManager:
         else:
             logger.warning(f"配置文件不存在: {yaml_path}，使用默认配置")
 
-    @classmethod
-    def load(cls, config_path: str = None) -> "ConfigManager":
-        """加载."""
-        if cls._instance is None:
-            cls._instance = cls(config_path)
-        return cls._instance
-
-    @classmethod
-    def reset(cls) -> None:
-        """重置."""
-        cls._instance = None
-
     @property
     def gpu(self) -> str:
-        """返回 GPU 设备编号."""
+        """返回默认 GPU 编号."""
         return self._data["app"].get("gpu_default") or self._data["app"].get("gpu", "0")
 
     @property
@@ -145,86 +123,14 @@ class ConfigManager:
         return self._data["app"].get("gpu_map", {})
 
     @property
-    def gpu_default(self) -> str:
-        """获取默认 GPU 编号(模块未在 gpu_map 时回退)."""
-        return self._data["app"].get("gpu_default") or self._data["app"].get("gpu", "0")
-
-    @property
     def fps(self) -> float:
         """返回推理帧率."""
         return self._data["app"]["fps"]
 
     @property
-    def data_root(self) -> str:
-        """返回数据根目录."""
-        return self._data["paths"]["data_root"]
-
-    @property
-    def model_root(self) -> str:
-        """返回模型根目录."""
-        return self._data["paths"]["model_root"]
-
-    @property
-    def result_root(self) -> str:
-        """返回结果根目录."""
-        return self._data["paths"]["result_root"]
-
-    @property
     def video_path(self) -> str:
         """返回默认视频路径."""
         return self._data["videos"]["front"]
-
-    @property
-    def supervision(self) -> dict:
-        """返回监护相关配置."""
-        return self._data["supervision"]
-
-    @property
-    def event_bus(self) -> dict:
-        """返回事件总线配置."""
-        return self._data["event_bus"]
-
-    @property
-    def voice(self) -> dict:
-        """返回语音相关配置."""
-        return self._data["voice"]
-
-    @property
-    def gaze(self) -> dict:
-        """返回注视相关配置."""
-        return self._data["gaze"]
-
-    @property
-    def behavior(self) -> dict:
-        """返回行为相关配置."""
-        return self._data["behavior"]
-
-    @property
-    def videos(self) -> dict:
-        """返回视频路径配置."""
-        return self._data["videos"]
-
-    @property
-    def modules(self) -> dict:
-        """返回各模块启用开关."""
-        return self._data["modules"]
-
-    @property
-    def rules(self) -> dict:
-        """返回各制度启用开关."""
-        return self._data["rules"]
-
-    def get(self, key: str, default: Any = None) -> Any:
-        """获取."""
-        # key 支持点号分隔，如 'app.gpu'
-        keys = key.split(".")
-        value = self._data
-        for k in keys:
-            if isinstance(value, dict) and k in value:
-                value = value[k]
-            else:
-                return default
-        return value
 
     def to_dict(self) -> dict:
         """转换为dict."""

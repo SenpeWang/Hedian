@@ -285,14 +285,13 @@ class TrackerModule(BaseModule):
                     for track_id, identity in raised_targets:
                         tr = next((t for t in tracks if t.track_id == track_id), None)
                         if tr is not None:
-                            bx = tr.bbox if hasattr(tr, "bbox") else (tr.tlbr if hasattr(tr, "tlbr") else None)
-                            if bx is not None:
-                                cv2.putText(vis, "举手",
+                            bx = tr.bbox
+                            cv2.putText(vis, "举手",
                                             (int(bx[0]), max(20, int(bx[1]) - 10)),
                                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
                     # 喂入编码器(惰性启动,首帧确定分辨率)
                     if self._vis_encoder is not None:
-                        self._vis_encoder.feed_frame(vis, timestamp)
+                        self._vis_encoder.feed_frame(vis)
                 except Exception as vis_error:
                     logger.warning(f"视觉帧叠加失败: {vis_error}")
 

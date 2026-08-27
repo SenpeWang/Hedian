@@ -1,5 +1,4 @@
 """Tracker 结果存储：统一管理与原子落盘多目标跟踪的关键事件、角色分配与关键帧."""
-import json
 import logging
 import os
 from pathlib import Path
@@ -31,64 +30,6 @@ class TrackerStorage(BaseStorage):
             paths (PathManager): 路径管理器实例.
         """
         super().__init__(paths, "tracker")
-
-    def _read_json_safe(self, filename: str, run_id: str) -> Any:
-        """安全读取指定的结果 JSON 文件.
-
-        Args:
-            filename (str): 文件名称.
-            run_id (str): 本次运行唯一标识.
-
-        Returns:
-            Any: 解析后的数据对象；文件不存在或读取失败时返回 None.
-        """
-        target_path = self._paths.get_result_path(run_id, "tracker", filename)
-        if not os.path.exists(target_path):
-            return None
-        try:
-            with open(target_path, "r", encoding="utf-8") as file_obj:
-                return json.load(file_obj)
-        except (json.JSONDecodeError, OSError) as read_error:
-            logger.warning(f"读取 {target_path} 失败: {read_error}")
-            return None
-
-    def read_key_moments(self, run_id: str) -> List[Dict[str, Any]]:
-        """读取已有跟踪关键事件列表.
-
-        Args:
-            run_id (str): 本次运行标识.
-
-        Returns:
-            List[Dict[str, Any]]: 关键事件列表；若不存在则返回空列表.
-        """
-        loaded_data = self._read_json_safe(KEY_MOMENTS_FILENAME, run_id)
-        return loaded_data if isinstance(loaded_data, list) else []
-
-    def add_key_moment(
-        self,
-        run_id: str,
-        key_moment: str,
-        timestamp: float,
-        roles_details: Optional[Dict[str, int]] = None,
-    ) -> None:
-        """原子追加单条跟踪关键时刻事件.
-
-        Args:
-            run_id (str): 本次运行标识.
-            key_moment (str): 关键时刻描述文本.
-            timestamp (float): 事件发生的时间戳（秒）.
-            roles_details (Optional[Dict[str, int]]): 当时的角色分配映射字典，可选.
-        """
-        events_list = self.read_key_moments(run_id)
-        event_dict: Dict[str, Any] = {
-            "localSec": round(timestamp, 2),
-            "key_moment": key_moment,
-            "source": "tracker",
-        }
-        if roles_details:
-            event_dict["roles_details"] = roles_details
-        events_list.append(event_dict)
-        self._save_json_atomic(KEY_MOMENTS_FILENAME, run_id, events_list)
 
     def save_key_moments(
         self, run_id: str, events: List[Dict[str, Any]]
@@ -124,24 +65,6 @@ class TrackerStorage(BaseStorage):
         self._save_json_atomic(
             ROLE_INFO_FILENAME, run_id, {"roles": valid_identity_map}
         )
-
-    def read_role_info(self, run_id: str) -> Dict[str, int]:
-        """读取角色分配映射信息.
-
-        Args:
-            run_id (str): 本次运行标识.
-
-        Returns:
-            Dict[str, int]: 角色到 track_id 的映射字典；若不存在则返回空字典.
-        """
-        loaded_data = self._read_json_safe(ROLE_INFO_FILENAME, run_id)
-        if (
-            isinstance(loaded_data, dict)
-            and "roles" in loaded_data
-            and isinstance(loaded_data["roles"], dict)
-        ):
-            return loaded_data["roles"]
-        return {}
 
     def get_key_frames_dir(self, run_id: str) -> Path:
         """获取并自动创建关键帧存储目录.

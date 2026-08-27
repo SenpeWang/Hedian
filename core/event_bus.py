@@ -15,7 +15,6 @@ import json
 import threading
 import logging
 import time
-from concurrent.futures import ThreadPoolExecutor
 from typing import Callable, Dict, List, Optional
 
 import redis
@@ -60,7 +59,6 @@ class EventStream:
                  redis_host: str = "localhost",
                  redis_port: int = 6379,
                  redis_db: int = 0,
-                 max_workers: int = 4,
                  consumer_name: str = None,
                  **kwargs):
         """初始化."""
@@ -76,7 +74,6 @@ class EventStream:
         self._listener: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
         self._running = False
-        self._executor = ThreadPoolExecutor(max_workers=max_workers)
         self._message_count = 0
 
         try:
@@ -136,15 +133,6 @@ class EventStream:
             logger.info(f"延迟启动 listener: {msg_type}")
 
         logger.debug(f"订阅消息: {msg_type}")
-
-    def unsubscribe(self, msg_type: str, callback: Callable) -> None:
-        """unsubscribe."""
-        with self._lock:
-            if msg_type in self._subscribers:
-                self._subscribers[msg_type] = [
-                    cb for cb in self._subscribers[msg_type] if cb != callback
-                ]
-        logger.debug(f"取消订阅: {msg_type}")
 
     def start(self) -> None:
         """启动."""
@@ -255,31 +243,4 @@ class EventStream:
 
         if self._listener and self._listener.is_alive():
             self._listener.join(timeout=3.0)
-        self._executor.shutdown(wait=False)
         logger.info(f"消息总线停止，共处理 {self._message_count} 条消息")
-
-    def get_stats(self) -> dict:
-        """获取统计信息."""
-        with self._lock:
-            sub_info = {k: len(v) for k, v in self._subscribers.items()}
-
-        stream_info = {}
-        for msg_type in self._subscribers.keys():
-            stream_key = self._get_stream_key(msg_type)
-            try:
-                info = self._redis.xinfo_stream(stream_key)
-                stream_info[msg_type] = {
-                    "length": info.get("length", 0),
-                    "first_entry": info.get("first-entry"),
-                    "last_entry": info.get("last-entry"),
-                }
-            except Exception:
-                stream_info[msg_type] = {"length": 0}
-
-        return {
-            "running": self._running,
-            "subscribers": sub_info,
-            "streams": stream_info,
-            "message_count": self._message_count,
-            "consumer_name": self._consumer_name,
-        }

@@ -3,7 +3,7 @@ import os
 import logging
 import multiprocessing as mp
 import queue
-from typing import Any, Dict, Optional, Tuple
+from typing import Any, Dict, Optional
 
 
 logger = logging.getLogger("evaluation.qwen")

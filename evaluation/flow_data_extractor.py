@@ -78,18 +78,18 @@ class FlowDataExtractor:
             # 等 progress 后额外 sleep 等各模块 key_moments 文件写完(progress 是帧处理进度, 事件写盘滞后)
             time.sleep(2.0)
 
-        voice_events = self._extract_voice_events(start_sec, end_sec)
-        tracker_events = self._extract_tracker_events(start_sec, end_sec)
-        gaze_events = self._extract_gaze_events(start_sec, end_sec)
-        behavior_events = self._extract_behavior_events(start_sec, end_sec)
+        events = {
+            source: self._extract_events_from_json(source, start_sec, end_sec)
+            for source in ("voice", "tracker", "gaze", "behavior")
+        }
 
         logger.info(
-            f"提取事件完成: voice={len(voice_events)}条, tracker={len(tracker_events)}条, "
-            f"gaze={len(gaze_events)}条, behavior={len(behavior_events)}条, "
+            f"提取事件完成: voice={len(events['voice'])}条, tracker={len(events['tracker'])}条, "
+            f"gaze={len(events['gaze'])}条, behavior={len(events['behavior'])}条, "
             f"时间范围={start_sec:.2f}s ~ {end_sec:.2f}s"
         )
 
-        return voice_events, tracker_events, gaze_events, behavior_events
+        return tuple(events.values())
 
     def save_extracted_data(self, flow_data: dict) -> None:
         """保存到 evaluation/extracted_{flow_type}_{flow_id}.json."""
@@ -179,139 +179,35 @@ class FlowDataExtractor:
                 continue
         return progress
 
-    def _extract_voice_events(self, start_sec: float, end_sec: float) -> List[Dict]:
+    def _extract_events_from_json(self, source: str, start_sec: float, end_sec: float) -> List[Dict]:
         """
-        从 voice_key_moments.json 提取语音事件.
+        从 {source}/{source}_key_moments.json 提取时间范围内的事件.
 
         Args:
+            source: 模块名（voice/tracker/gaze/behavior）
             start_sec: 开始时间
             end_sec: 结束时间
 
         Returns:
-            语音事件列表
+            事件列表
         """
-        vkm_path = os.path.join(self._result_dir, "voice", "voice_key_moments.json")
+        path = os.path.join(self._result_dir, source, f"{source}_key_moments.json")
 
-        if not os.path.exists(vkm_path):
-            logger.warning(f"语音事件文件不存在: {vkm_path}")
+        if not os.path.exists(path):
+            logger.warning(f"{source}事件文件不存在: {path}")
             return []
 
         try:
-            with open(vkm_path, encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 all_events = json.load(f)
 
             # 按时间范围过滤
-            filtered_events = []
-            for ev in all_events:
-                ts = ev.get("localSec") or 0
-                if start_sec <= ts <= end_sec:
-                    filtered_events.append(ev)
-
-            return filtered_events
+            return [
+                ev for ev in all_events
+                if start_sec <= (ev.get("localSec") or 0) <= end_sec
+            ]
 
         except Exception as e:
-            logger.error(f"加载语音事件失败: {e}")
-            return []
-
-    def _extract_tracker_events(self, start_sec: float, end_sec: float) -> List[Dict]:
-        """
-        从 tracker_key_moments.json 提取 Tracker 事件.
-
-        Args:
-            start_sec: 开始时间
-            end_sec: 结束时间
-
-        Returns:
-            Tracker 事件列表
-        """
-        mkm_path = os.path.join(self._result_dir, "tracker", "tracker_key_moments.json")
-
-        if not os.path.exists(mkm_path):
-            logger.warning(f"Tracker事件文件不存在: {mkm_path}")
-            return []
-
-        try:
-            with open(mkm_path, encoding="utf-8") as f:
-                all_events = json.load(f)
-
-            # 按时间范围过滤
-            filtered_events = []
-            for ev in all_events:
-                ts = ev.get("localSec") or 0
-                if start_sec <= ts <= end_sec:
-                    filtered_events.append(ev)
-
-            return filtered_events
-
-        except Exception as e:
-            logger.error(f"加载Tracker事件失败: {e}")
-            return []
-
-    def _extract_gaze_events(self, start_sec: float, end_sec: float) -> List[Dict]:
-        """
-        从 gaze_key_moments.json 提取 Gaze 事件.
-
-        Args:
-            start_sec: 开始时间
-            end_sec: 结束时间
-
-        Returns:
-            Gaze 事件列表
-        """
-        gkm_path = os.path.join(self._result_dir, "gaze", "gaze_key_moments.json")
-
-        if not os.path.exists(gkm_path):
-            logger.warning(f"Gaze事件文件不存在: {gkm_path}")
-            return []
-
-        try:
-            with open(gkm_path, encoding="utf-8") as f:
-                all_events = json.load(f)
-
-            # 按时间范围过滤
-            filtered_events = []
-            for ev in all_events:
-                ts = ev.get("localSec") or 0
-                if start_sec <= ts <= end_sec:
-                    filtered_events.append(ev)
-
-            return filtered_events
-
-        except Exception as e:
-            logger.error(f"加载Gaze事件失败: {e}")
-            return []
-
-    def _extract_behavior_events(self, start_sec: float, end_sec: float) -> List[Dict]:
-        """
-        从 behavior_key_moments.json 提取 Behavior 事件（举手、手指屏幕等.
-
-        Args:
-            start_sec: 开始时间
-            end_sec: 结束时间
-
-        Returns:
-            Behavior 事件列表
-        """
-        bkm_path = os.path.join(self._result_dir, "behavior", "behavior_key_moments.json")
-
-        if not os.path.exists(bkm_path):
-            logger.warning(f"Behavior事件文件不存在: {bkm_path}")
-            return []
-
-        try:
-            with open(bkm_path, encoding="utf-8") as f:
-                all_events = json.load(f)
-
-            # 按时间范围过滤
-            filtered_events = []
-            for ev in all_events:
-                ts = ev.get("localSec") or 0
-                if start_sec <= ts <= end_sec:
-                    filtered_events.append(ev)
-
-            return filtered_events
-
-        except Exception as e:
-            logger.error(f"加载Behavior事件失败: {e}")
+            logger.error(f"加载{source}事件失败: {e}")
             return []
 

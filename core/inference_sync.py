@@ -79,6 +79,8 @@ class InferenceSync:
         self._cycle_done: bool = False
         # 死锁兜底：记录最后一次 global_sec 推进时间
         self._last_progress_ts: float = time.time()
+        # 死锁兜底：最近一次观察到的 global_sec（用于识别真实推进）
+        self._last_progress_sec: float = 0.0
 
 
     # ── 对外接口 ────────────────────────────────────────────────
@@ -106,6 +108,7 @@ class InferenceSync:
         self._event_counter = 0
         self._cycle_done = False
         self._last_progress_ts = time.time()
+        self._last_progress_sec = 0.0
         logger.info("InferenceSync 对齐基准时间与状态已重置为 0.0 秒")
 
     def start(self) -> None:
@@ -283,6 +286,7 @@ class InferenceSync:
         except redis.RedisError as e:
             logger.warning(f"_reset_cycle 清理 Redis key 失败（不影响下一轮）: {e}")
         self._last_progress_ts = time.time()
+        self._last_progress_sec = 0.0
         logger.info("InferenceSync 已重置本轮状态，等待下一次推理触发")
 
     def _is_deadlocked(self) -> bool:
@@ -330,7 +334,6 @@ class InferenceSync:
         # 各视角整体进度(供前端速率引擎)
         try:
             all_prog = self._redis.hgetall(self._KEY_PROGRESS)
-            from core.inference_stream import _fine_source, _SOURCE_CATEGORY
             view_secs = {}
             for fld, val in all_prog.items():
                 try:
@@ -386,6 +389,11 @@ class InferenceSync:
         # 实时推送当前 Stream 中的所有事件到前端
         effective_sec = global_sec if global_sec != float("inf") else 999999.0
         self._push_events_up_to(effective_sec)
+
+        # 死锁兜底口径: global_sec 真实增长才算推进(推理慢于实时属正常异步, 不应被强杀)
+        if global_sec != float("inf") and global_sec > self._last_progress_sec:
+            self._last_progress_sec = global_sec
+            self._last_progress_ts = time.time()
 
         all_done = self._all_sources_done()
 

@@ -37,7 +37,6 @@ class VoiceModule(BaseModule):
         """初始化."""
         super().__init__(event_bus, config, paths, inference_stream)
         self._transcriber = None
-        self._intent_classifier = None
         self._result_storage = None
         self._events = []
 

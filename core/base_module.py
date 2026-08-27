@@ -10,12 +10,9 @@ import logging
 import time
 
 from core.event_bus import EventStream, EventTopic
-from core.inference_stream import InferenceStream, KEY_PROGRESS, _fine_source
+from core.inference_stream import InferenceStream
 from core.inference_sync import InferenceSync
 from core.path_manager import PathManager
-
-
-# 单次对齐等待最长秒数
 
 
 class BaseModule(ABC):

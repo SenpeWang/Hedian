@@ -143,17 +143,7 @@ class WSHandler:
                     logger.error(f"推送 WebSocket done 消息失败: {send_error}")
             return
 
-        try:
-            message_text = json.dumps(event, ensure_ascii=False)
-            for connection in list(self._active_connections):
-                try:
-                    asyncio.run_coroutine_threadsafe(
-                        connection.send_text(message_text), self._loop
-                    )
-                except Exception as send_error:
-                    logger.error(f"推送 WebSocket 消息失败: {send_error}")
-        except Exception as json_error:
-            logger.error(f"序列化 WebSocket 事件失败: {json_error}")
+        self.push_text(event)
 
     def push_text(self, event: Dict[str, Any]) -> None:
         """推送纯文本 JSON 事件到所有客户端（用于评估报告流式直推等高实时事件）.

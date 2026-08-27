@@ -1,7 +1,7 @@
 """推理总线 — 供各业务算法模块进程使用，只负责向 Redis 写入进度和推理结果."""
 import json
 import logging
-from typing import Any, Dict, Optional, Set
+from typing import Any, Dict, Set
 
 
 logger = logging.getLogger("core.inference_stream")
@@ -191,22 +191,7 @@ class InferenceStream:
         """只写模式下的启动占位."""
         logger.info("InferenceStream 启动")
 
-    def stop(self, source_map: Optional[Dict[str, float]] = None) -> None:
+    def stop(self) -> None:
         """停止并上报结束信号（兜底，主路径靠 BaseModule 退出时主动 mark）."""
-        if source_map is not None:
-            self.mark_sources_done(source_map)
-        else:
-            self.mark_all_sources_done()
+        self.mark_all_sources_done()
         logger.info("InferenceStream 停止")
-
-    def push_sentinel(self) -> None:
-        """推送终止占位."""
-        pass
-
-    def get_stats(self) -> Dict[str, Any]:
-        """获取统计状态."""
-        return {"writer_mode": True, "fps": self.fps}
-
-    def clear(self) -> None:
-        """清理数据."""
-        pass

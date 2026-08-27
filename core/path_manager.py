@@ -59,14 +59,3 @@ class PathManager:
             path = self.result_root / run_id
         path.mkdir(parents=True, exist_ok=True)
         return path
-
-    def ensure_dirs(self) -> None:
-        """ensuredirs."""
-        self.data_root.mkdir(parents=True, exist_ok=True)
-        self.model_root.mkdir(parents=True, exist_ok=True)
-        self.result_root.mkdir(parents=True, exist_ok=True)
-
-        for category in ("detection", "gaze", "behavior", "evaluation"):
-            (self.model_root / category).mkdir(parents=True, exist_ok=True)
-
-        (self.data_root / "videos").mkdir(parents=True, exist_ok=True)

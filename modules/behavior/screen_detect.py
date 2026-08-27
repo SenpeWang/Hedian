@@ -3,7 +3,7 @@
 基于 YOLO 目标检测输出的 pointing_hand 框与预标注屏幕/机箱多边形区域的重叠比及最短距离判定。
 """
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List
 
 import numpy as np
 
@@ -23,10 +23,6 @@ from modules.behavior.behavior_vis import (
 logger = logging.getLogger("module.behavior.screen_detect")
 
 # 类别索引（与 behavior_yolo.pt 训练一致）
-CLS_HAND: int = 0
-CLS_FILE: int = 1
-CLS_SCREEN: int = 2
-CLS_PERSON: int = 3
 CLS_POINTING_HAND: int = 4
 
 # 机箱多边形轮廓数组

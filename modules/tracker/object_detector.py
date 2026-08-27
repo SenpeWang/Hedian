@@ -57,45 +57,6 @@ class ObjectDetector:
             self.pose_model = YOLO(pose_model_path)
             logger.info(f"加载姿态估计模型: {os.path.basename(pose_model_path)}")
 
-    def detect(self, frame: np.ndarray) -> List[Dict[str, Any]]:
-        """检测输入视频帧中的人员目标.
-
-        Args:
-            frame (np.ndarray): 输入的原始视频帧 (BGR 格式).
-
-        Returns:
-            List[Dict[str, Any]]: 检测结果列表，每个元素包含 'box', 'confidence', 'class', 'class_id'.
-        """
-        results = self.model(
-            frame,
-            conf=self.conf_threshold,
-            iou=self.nms_threshold,
-            imgsz=self.img_size,
-            half=True,
-            verbose=False,
-            save=False,
-        )
-
-        detections: List[Dict[str, Any]] = []
-        for result in results:
-            boxes = result.boxes
-            if boxes is None:
-                continue
-            for box in boxes:
-                x_min, y_min, x_max, y_max = box.xyxy[0].cpu().numpy()
-                confidence = float(box.conf[0].cpu().numpy())
-                class_id = int(box.cls[0].cpu().numpy())
-
-                if class_id == 0:  # 类别 0 为 person
-                    detections.append({
-                        "box": [float(x_min), float(y_min), float(x_max), float(y_max)],
-                        "confidence": confidence,
-                        "class": "person",
-                        "class_id": class_id,
-                    })
-
-        return detections
-
     def detect_two_thresholds(
         self, frame: np.ndarray
     ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:

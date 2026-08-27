@@ -70,11 +70,6 @@ class STrack:
             (self.bbox[1] + self.bbox[3]) / 2.0,
         ])
 
-    @property
-    def center(self) -> np.ndarray:
-        """目标中心点坐标属性."""
-        return self.get_center()
-
     def to_dict(self) -> Dict[str, Any]:
         """将实体序列化为标准化字典结构.
 
@@ -223,11 +218,3 @@ class MultiObjectTracker:
         if track_id is None:
             return None
         return self._track_map.get(track_id)
-
-    def reset(self) -> None:
-        """重置跟踪器所有内部状态与映射缓存."""
-        self.frame_id = 0
-        self.identities_assigned = False
-        self.identity_map.clear()
-        self._track_map.clear()
-        self.initialized = False
