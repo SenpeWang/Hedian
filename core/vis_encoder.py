@@ -138,7 +138,7 @@ class VisEncoder:
             f"{self.width}x{self.height}@{self.fps}fps audio={self.with_audio}"
         )
 
-    def feed_frame(self, frame: np.ndarray, timestamp: Optional[float] = None) -> None:
+    def feed_frame(self, frame: np.ndarray) -> None:
         """喂入一帧(已带标注),惰性启动编码器(首帧时据 shape 确定分辨率).
 
         编码失败不应拖垮推理:写失败时置 _stopped,推理继续但该视角无流.
@@ -191,11 +191,19 @@ class VisEncoder:
         except Exception as e:
             logger.error(f"VisEncoder[{self.view}] 读取循环异常: {e}")
         finally:
-            try:
-                rc = self._proc.wait(timeout=2)
+            # end 段必须等 ffmpeg 真正退出后才写入(有界等待):
+            # reader 提前退出而 ffmpeg 仍在产出时立即写 end, 会令转发器误判供给终止
+            rc = None
+            for _ in range(15):
+                try:
+                    rc = self._proc.wait(timeout=1)
+                    break
+                except Exception:
+                    continue
+            if rc is not None:
                 logger.info(f"VisEncoder[{self.view}] ffmpeg 退出 rc={rc}, 共喂 {self._frame_count} 帧")
-            except Exception:
-                pass
+            else:
+                logger.warning(f"VisEncoder[{self.view}] ffmpeg 15s 未退出, 强制收尾写 end")
             self._xadd("end", b"")
 
     def _xadd(self, seg_type: str, data: bytes) -> None:
@@ -222,8 +230,11 @@ class VisEncoder:
             pass
 
     def finalize(self) -> None:
-        """收尾:关 stdin 让 ffmpeg 输出剩余段,等待读取线程结束."""
-        self._stopped = True
+        """收尾: 先关 stdin 让 ffmpeg flush 剩余段, 由读取线程读到 EOF 自然收尾后再终止.
+
+        严禁在关闭 stdin 前置 _stopped: reader 线程的 while 条件会立即退出,
+        ffmpeg 尚未 flush 的最后几段 media 永远留在管道里无人转发(前端尾部断档).
+        """
         try:
             if self._proc and self._proc.stdin:
                 self._proc.stdin.close()
@@ -231,12 +242,18 @@ class VisEncoder:
             pass
         if self._reader:
             self._reader.join(timeout=15)
+        if self._reader and self._reader.is_alive():
+            # reader 卡住(ffmpeg 未产出 EOF)才强制杀进程逼出 end
+            logger.warning(f"VisEncoder[{self.view}] 读取线程 15s 未结束, 强制终止 ffmpeg")
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+            self._reader.join(timeout=5)
+        self._stopped = True   # 此后 feed_frame 幂等短路(reader 已完成收尾)
         if self._proc:
             try:
                 self._proc.wait(timeout=15)
             except Exception:
-                try:
-                    self._proc.kill()
-                except Exception:
-                    pass
+                pass
         logger.info(f"VisEncoder[{self.view}] 结束,共喂 {self._frame_count} 帧")

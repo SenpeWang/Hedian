@@ -11,9 +11,9 @@ import logging
 import threading
 import time
 
-logger = logging.getLogger("web.vis_forwarder")
+from core.vis_encoder import KEY_PREFIX
 
-KEY_PREFIX = "inference:vis_stream:"
+logger = logging.getLogger("web.vis_forwarder")
 
 
 class VisStreamForwarder:
@@ -62,8 +62,12 @@ class VisStreamForwarder:
                         seg_type = fields.get(b"type", b"").decode()
                         data = fields.get(b"data", b"")
                         if seg_type == "end":
+                            # 转发 end 后继续消费(不 return 退出):
+                            # 实测出现过 end 提前落流的间歇现象(触发源未定位), 线程退出会导致
+                            # 其后全部 media 段无人转发→前端该视角断供失步; 继续读则即便 end
+                            # 提前出现, 后续 media 仍能送达前端(前端 EOS 有宽限期兜底)
                             self._ws.send_vis_chunk(view, "end", b"")
-                            return
+                            continue
                         self._ws.send_vis_chunk(view, seg_type, data)
             except Exception as e:
                 logger.error(f"VisStreamForwarder[{view}] 消费异常: {e}")
