@@ -163,8 +163,6 @@ class BehaviorModule(BaseModule):
         timestamp = data.get("localSec", msg.get("ts", 0))
         logger.info(f"行为模块收到举手事件: {operator_name} @{timestamp:.1f}s")
 
-    FRAME_PUSH_INTERVAL: int = 1
-
     def _process_pop_view(
         self,
         video_path: str,
@@ -254,7 +252,7 @@ class BehaviorModule(BaseModule):
                 # 此处把带标注帧喂入视觉流编码器 -> fMP4 -> 前端 MSE
                 if self._vis_encoder is not None:
                     try:
-                        self._vis_encoder.feed_frame(frame, timestamp)
+                        self._vis_encoder.feed_frame(frame)
                     except Exception as vis_error:
                         logger.warning(f"pop 喂帧失败: {vis_error}")
 
@@ -318,12 +316,11 @@ class BehaviorModule(BaseModule):
         logger.info(f"pop 视角处理完成，共 {len(self._events)} 条事件")
 
     def save_results(self, run_id: str) -> None:
-        """保存行为检测结果到 behavior_key_moments.json.
+        """收尾兜底保存: 实时落盘已逐条写入, 此处仅合并补写缺失事件(去重).
 
         Args:
             run_id (str): 本次运行标识.
         """
         with self._events_lock:
             events_list = list(self._events)
-        for event_item in events_list:
-            self._result_storage.add_event(run_id, event_item)
+        self._result_storage.merge_events(run_id, events_list)

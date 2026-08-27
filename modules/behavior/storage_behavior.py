@@ -3,6 +3,7 @@
 本模块以面向对象方式统管行为类事件（举手、手指屏幕、手指文件等），
 所有事件通过统一入口追加落盘到 behavior_key_moments.json。
 """
+import fcntl
 import json
 import logging
 import os
@@ -54,17 +55,73 @@ class BehaviorStorage(BaseStorage):
             return []
 
     def add_event(self, run_id: str, event: Dict) -> None:
-        """原子追加单条行为事件.
+        """跨进程安全地追加单条行为事件.
 
-        举手与手指类事件统一通过本方法落盘，保证多进程追加安全。
+        tracker(举手) 与 behavior(手指类) 两个进程并发写同一文件,
+        读-改-写全程持文件锁; 写回前按 localSec 排序, 保证文件时间轴有序.
 
         Args:
             run_id (str): 本次运行标识.
             event (Dict): 行为事件字典，约定包含 localSec 与 key_moment 字段.
         """
-        events_list = self._read_events(run_id)
-        events_list.append(event)
-        self._save_json_atomic(FILENAME, run_id, events_list)
+        file_path = str(self._paths.get_result_path(run_id, "behavior", FILENAME))
+        with self._locked(file_path):
+            events_list = self._read_events(run_id)
+            events_list.append(event)
+            events_list.sort(key=lambda e: e.get("localSec", 0))
+            if not self._save_json_atomic(FILENAME, run_id, events_list,
+                                          output_path=file_path):
+                logger.warning(f"行为事件落盘失败(将依赖收尾合并补写): {event}")
+
+    def merge_events(self, run_id: str, events: List[Dict]) -> None:
+        """收尾兜底合并: 仅补写文件中缺失的事件(按完整事件键去重).
+
+        Args:
+            run_id (str): 本次运行标识.
+            events (List[Dict]): 内存中累积的事件列表.
+        """
+        file_path = str(self._paths.get_result_path(run_id, "behavior", FILENAME))
+        with self._locked(file_path):
+            merged = self._read_events(run_id)
+            seen = {self._event_key(e) for e in merged}
+            added = 0
+            for event_item in events:
+                key = self._event_key(event_item)
+                if key not in seen:
+                    merged.append(event_item)
+                    seen.add(key)
+                    added += 1
+            if added:
+                merged.sort(key=lambda e: e.get("localSec", 0))
+                if not self._save_json_atomic(FILENAME, run_id, merged,
+                                              output_path=file_path):
+                    logger.warning(f"收尾合并落盘失败: 补写 {added} 条事件丢失")
+                    return
+                logger.info(f"收尾合并补写 {added} 条缺失事件")
+
+    @staticmethod
+    def _event_key(event: Dict) -> tuple:
+        """构造事件去重键(localSec+文案+来源+track_id).
+
+        Args:
+            event (Dict): 行为事件字典.
+
+        Returns:
+            tuple: 事件唯一键.
+        """
+        return (event.get("localSec"), event.get("key_moment"),
+                event.get("source"), event.get("track_id"))
+
+    def _locked(self, file_path: str) -> "_FileLock":
+        """获取跨进程文件锁上下文.
+
+        Args:
+            file_path (str): 目标数据文件路径, 锁文件为其加 .lock 后缀.
+
+        Returns:
+            _FileLock: 排他锁上下文管理器.
+        """
+        return _FileLock(file_path + ".lock")
 
     def report_hand_raise(
         self,
@@ -139,3 +196,43 @@ class BehaviorStorage(BaseStorage):
             f" {'(track_id=' + str(track_id) + ')' if track_id is not None else ''}"
             f" @{local_sec}s [source=behavior]"
         )
+
+
+class _FileLock:
+    """基于 fcntl.flock 的跨进程排他锁上下文管理器."""
+
+    def __init__(self, lock_path: str):
+        """初始化锁上下文.
+
+        Args:
+            lock_path (str): 锁文件路径.
+        """
+        self._lock_path = lock_path
+        self._handle = None
+
+    def __enter__(self) -> "_FileLock":
+        """打开锁文件并加排他锁, 加锁失败时关闭句柄后重抛.
+
+        Returns:
+            _FileLock: 自身.
+        """
+        self._handle = open(self._lock_path, "w")
+        try:
+            fcntl.flock(self._handle, fcntl.LOCK_EX)
+        except BaseException:
+            self._handle.close()
+            self._handle = None
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        """解锁并关闭句柄, 清理失败不掩盖 with 体的原始异常."""
+        try:
+            fcntl.flock(self._handle, fcntl.LOCK_UN)
+        finally:
+            try:
+                self._handle.close()
+            except OSError as close_error:
+                logger.warning(f"关闭锁文件失败: {close_error}")
+            finally:
+                self._handle = None
