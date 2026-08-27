@@ -1,7 +1,8 @@
 <script setup lang="ts">
-// VideoPanel: MSE fMP4 流式播放. front=主时钟(emit currentTime); pop=从动(followTo 主时钟)
-
+// VideoPanel: MSE fMP4 流式播放展示组件(薄)
+// front=主时钟(emit currentTime); pop=从动(锁步算法在 media/slave-sync, 此处仅驱动)
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { createSlaveSyncState, syncSlave, resetSlaveSync } from '../media/slave-sync'
 
 const props = withDefaults(defineProps<{
   title: string
@@ -22,15 +23,27 @@ const emit = defineEmits<{
 
 const videoRef = ref<HTMLVideoElement | null>(null)
 let animationFrameId: number | null = null
+const slaveState = createSlaveSyncState()
+// 起播门槛: 未起播过需攒 2s jitter buffer 再播(防首段即播→断供→播停循环, 声音卡顿);
+// 已起播后 stall 恢复只需 0.3s 余量(快速恢复)
+let startedOnce = false
 
-// 逐帧循环: front emit currentTime(主时钟); pop 自驱动 followTo(主时钟). 仅 isPlaying 时跑
+// 逐帧循环: front emit currentTime(主时钟); pop 调 slave-sync 锁步. 仅 isPlaying 时跑
 function stepRenderLoop() {
-  if (videoRef.value) {
-    if (props.viewType === 'front' && !videoRef.value.paused) {
-      emit('progress', videoRef.value.currentTime)
-    }
-    if (props.viewType === 'pop' && props.playbackSec != null) {
-      followTo(props.playbackSec)
+  const vid = videoRef.value
+  if (vid) {
+    if (props.viewType === 'front') {
+      // stall 自恢复: 首次 play() 时 MSE 数据常未就绪会 reject, buffered 足够后 RAF 持续重试 play
+      if (vid.paused && props.isPlaying && vid.buffered.length > 0) {
+        const bufEnd = vid.buffered.end(vid.buffered.length - 1)
+        const need = startedOnce ? 0.3 : 2
+        if (bufEnd - vid.currentTime > need) {
+          vid.play().then(() => { startedOnce = true }).catch(() => {})
+        }
+      }
+      if (!vid.paused) emit('progress', vid.currentTime)
+    } else if (props.viewType === 'pop' && props.playbackSec != null) {
+      syncSlave(vid, props.playbackSec, props.isPlaying, props.playbackRate ?? 1, slaveState)
     }
   }
   animationFrameId = requestAnimationFrame(stepRenderLoop)
@@ -56,30 +69,6 @@ function pauseVideo() {
   if (videoRef.value) videoRef.value.pause()
 }
 
-// pop 时刻对齐主时钟: 正常同速 diff≈0 不动; 失锁(>0.15s) buffered 内 seek 修正, 不变速追随
-function followTo(masterSec: number) {
-  const vid = videoRef.value
-  if (!vid) return
-
-  // stall 自恢复: pop paused 但应播放, 缓冲足够即唤醒
-  if (vid.paused && props.isPlaying) {
-    if (vid.buffered.length > 0) {
-      const bufEnd = vid.buffered.end(vid.buffered.length - 1)
-      if (bufEnd - vid.currentTime > 0.3) vid.play().catch(() => {})
-    }
-    return
-  }
-
-  if (Math.abs(vid.currentTime - masterSec) < 0.15) return
-  // 偏差超 0.15s: masterSec 在 buffered 内则 seek 对齐, 否则不动(不上推末尾致卡死)
-  for (let i = 0; i < vid.buffered.length; i++) {
-    if (masterSec >= vid.buffered.start(i) && masterSec <= vid.buffered.end(i) - 0.1) {
-      try { vid.currentTime = masterSec } catch {}
-      return
-    }
-  }
-}
-
 // 标签页切回前台恢复播放
 function handleVisibilityChange() {
   if (document.visibilityState === 'visible' && props.isPlaying && videoRef.value) {
@@ -89,15 +78,20 @@ function handleVisibilityChange() {
 
 defineExpose({ pauseVideo })
 
-// front/pop 同速共用 baseRate
+// 速率控制权分离: front 速率归水位引擎(此处 watch 设置);
+// pop 速率完全归 slave-sync 伺服层(每帧 base×factor 连续修正, 此处不得干预——
+// 否则伺服修正被 watch 周期性清零, pop 追赶失效掉队累积)
 watch(() => props.playbackRate, (rate) => {
+  if (props.viewType !== 'front') return
   if (!videoRef.value || !rate || rate <= 0) return
   videoRef.value.preservesPitch = true
   videoRef.value.playbackRate = rate
 })
 
-// mediaUrl 变化(重建流)时重置 currentTime=0 + 加载
+// mediaUrl 变化(重建流)时重置 currentTime=0 + 加载 + 清锁步越界计时 + 重置起播门槛
 watch(() => props.mediaUrl, () => {
+  resetSlaveSync(slaveState)
+  startedOnce = false
   if (videoRef.value) videoRef.value.currentTime = 0
 })
 
