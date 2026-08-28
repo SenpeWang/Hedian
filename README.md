@@ -17,7 +17,6 @@
 ## 📁 目录结构
 
 ```
-A_DemoSrc/
 ├── main.py                 # 入口：启动推理子进程 + Web 常驻（端口 5002）
 ├── config.yaml             # 视角级 GPU / Redis / 路径 / 视频配置
 ├── core/                   # 核心框架（事件总线/推理流/同步对齐/可视化编码）
@@ -36,24 +35,38 @@ A_DemoSrc/
 
 - Python **3.10**（conda 环境 `sp_hedian`）
 - Redis（Stream + Hash）
-- NVIDIA GPU（RTX 4090×2，视角级 GPU 分配）
+- NVIDIA GPU（RTX 4090 ×2，视角级 GPU 分配）
 - Node **20**（前端构建用）
 
-### 1. 启动后端
+### 1. 进入项目目录
 
 ```bash
-cd /home/wangshengping/Hedian/A_DemoSrc
-setsid nohup /home/wangshengping/myconda/envs/sp_hedian/bin/python main.py --gpu 0 > /tmp/hedian_web.log 2>&1 < /dev/null &
+cd /hedian
 ```
 
-### 2. 构建前端（需 Node 20）
+### 2. 配置虚拟环境
 
 ```bash
-cd frontend
-PATH=/home/wangshengping/node20/bin:$PATH npm run build
+conda create -n sp_hedian python=3.10
+conda activate sp_hedian
+pip install -r requirements.txt
 ```
 
-### 3. 访问
+### 3. 启动后端
+
+```bash
+cd /hedian
+setsid nohup python main.py --gpu 0 > /tmp/hedian_web.log 2>&1 < /dev/null &
+```
+
+### 4. 构建前端（需 Node 20）
+
+```bash
+cd /hedian/frontend
+npm run build
+```
+
+### 5. 访问
 
 浏览器打开 `http://<服务器IP>:5002`
 
