@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional, Set
 
 import numpy as np
 
-logger = logging.getLogger("module.tracker.tracker")
+logger = logging.getLogger("module.tracker")
 
 # 合法工位身份与基准坐标定义
 WORKSTATIONS: Dict[str, tuple] = {
@@ -27,14 +27,14 @@ class STrack:
         bbox: np.ndarray,
         score: float,
         identity: Optional[str] = None,
-    ):
+    ) -> None:
         """初始化跟踪目标实体.
 
         Args:
-            track_id (int): 全局唯一跟踪目标 ID.
-            bbox (np.ndarray): 边界框坐标 [x_min, y_min, x_max, y_max].
-            score (float): 目标检测或跟踪置信度得分.
-            identity (Optional[str]): 人员身份，仅限 'LEADER'|'ROAD1'|'ROAD2'|None.
+            track_id: 全局唯一跟踪目标 ID.
+            bbox: 边界框坐标 [x_min, y_min, x_max, y_max].
+            score: 目标检测或跟踪置信度得分.
+            identity: 人员身份，仅限 'LEADER'|'ROAD1'|'ROAD2'|None.
         """
         self.track_id: int = int(track_id)
         self.bbox: np.ndarray = np.array(bbox, dtype=float)
@@ -49,21 +49,21 @@ class STrack:
         return self._identity
 
     @identity.setter
-    def identity(self, identity_value: Optional[str]) -> None:
+    def identity(self, identity: Optional[str]) -> None:
         """设置目标人员身份，非法值自动置为 None.
 
         Args:
-            identity_value (Optional[str]): 待设置的身份字符串.
+            identity: 待设置的身份字符串.
         """
         self._identity = (
-            identity_value if identity_value in VALID_IDENTITIES else None
+            identity if identity in VALID_IDENTITIES else None
         )
 
     def get_center(self) -> np.ndarray:
         """计算并获取目标中心点坐标 [center_x, center_y].
 
         Returns:
-            np.ndarray: 中心点坐标一维数组 (2,).
+            中心点坐标一维数组 (2,).
         """
         return np.array([
             (self.bbox[0] + self.bbox[2]) / 2.0,
@@ -74,7 +74,7 @@ class STrack:
         """将实体序列化为标准化字典结构.
 
         Returns:
-            Dict[str, Any]: 包含 track_id, identity, bbox, score, center 的字典.
+            包含 track_id, identity, bbox, score, center 的字典.
         """
         center_x, center_y = self.get_center()
         return {
@@ -92,13 +92,13 @@ class MultiObjectTracker:
     结合 OC-SORT 与 ByteTrack 双阈值匹配算法，实现连续帧目标跟踪与初始工位身份分配。
     """
 
-    def __init__(self):
-        """初始化多目标跟踪器."""
+    def __init__(self) -> None:
+        """初始化内部 OC-SORT/ByteTrack 跟踪器与工位身份分配状态."""
         from modules.tracker.ocsort_bytetrack import OCSORTByteTracker
 
         self.tracker = OCSORTByteTracker(
-            track_thresh=0.50,
-            match_thresh=0.80,
+            track_threshold=0.50,
+            match_threshold=0.80,
             track_buffer=30000,
             frame_rate=30,
             min_center_distance=150.0,
@@ -120,19 +120,19 @@ class MultiObjectTracker:
         """根据工位基准坐标为跟踪目标分配初始身份 (LEADER, ROAD1, ROAD2).
 
         Args:
-            tracks (List[STrack]): 当前帧中的跟踪目标列表.
+            tracks: 当前帧中的跟踪目标列表.
         """
         if self.identities_assigned or len(tracks) < 2:
             return
 
-        workstations_list = list(WORKSTATIONS.items())
-        assigned_track_ids: set = set()
+        workstations = list(WORKSTATIONS.items())
+        assigned_track_object_ids: Set[int] = set()
 
         assignments = []
-        for identity_name, (workstation_x, workstation_y) in workstations_list:
+        for identity_name, (workstation_x, workstation_y) in workstations:
             best_track, best_distance = None, float("inf")
             for track in tracks:
-                if id(track) in assigned_track_ids:
+                if id(track) in assigned_track_object_ids:
                     continue
                 center_x, center_y = track.get_center()
                 distance = float(
@@ -145,7 +145,7 @@ class MultiObjectTracker:
                     best_distance, best_track = distance, track
             if best_track is not None:
                 assignments.append((identity_name, best_track))
-                assigned_track_ids.add(id(best_track))
+                assigned_track_object_ids.add(id(best_track))
 
         for identity_name, track in assignments:
             track.identity = identity_name
@@ -161,11 +161,11 @@ class MultiObjectTracker:
         """处理单帧检测结果并更新人员跟踪轨迹.
 
         Args:
-            frame (np.ndarray): 当前视频帧.
-            detections (List[Dict[str, Any]]): 目标检测结果字典列表.
+            frame: 当前视频帧.
+            detections: 目标检测结果字典列表.
 
         Returns:
-            List[STrack]: 更新后的 STrack 轨迹实体列表.
+            更新后的 STrack 轨迹实体列表.
         """
         self.frame_id += 1
         self.initialized = True
@@ -184,24 +184,24 @@ class MultiObjectTracker:
         self._track_map.clear()
         for raw_track in raw_tracks:
             track_id = int(raw_track.track_id)
-            bbox_array = raw_track.bbox
-            score_val = float(raw_track.score)
+            bbox = raw_track.bbox
+            score = float(raw_track.score)
 
             # 查找已分配的身份
             assigned_identity = None
-            for id_name, mapped_tid in self.identity_map.items():
-                if mapped_tid == track_id:
-                    assigned_identity = id_name
+            for identity_name, mapped_track_id in self.identity_map.items():
+                if mapped_track_id == track_id:
+                    assigned_identity = identity_name
                     break
 
-            track_obj = STrack(
+            track = STrack(
                 track_id=track_id,
-                bbox=bbox_array,
-                score=score_val,
+                bbox=bbox,
+                score=score,
                 identity=assigned_identity,
             )
-            tracks.append(track_obj)
-            self._track_map[track_id] = track_obj
+            tracks.append(track)
+            self._track_map[track_id] = track
 
         return tracks
 
@@ -209,10 +209,10 @@ class MultiObjectTracker:
         """根据身份名称获取对应的跟踪实体.
 
         Args:
-            identity (str): 身份名称 ('LEADER' | 'ROAD1' | 'ROAD2').
+            identity: 身份名称 ('LEADER' | 'ROAD1' | 'ROAD2').
 
         Returns:
-            Optional[STrack]: 匹配的 STrack 对象；不存在或未分配时返回 None.
+            匹配的 STrack 对象；不存在或未分配时返回 None.
         """
         track_id = self.identity_map.get(identity)
         if track_id is None:

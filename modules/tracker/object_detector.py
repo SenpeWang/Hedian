@@ -25,16 +25,16 @@ class ObjectDetector:
         pose_confidence: float = 0.3,
         nms_threshold: float = 0.35,
         img_size: int = 640,
-    ):
+    ) -> None:
         """初始化检测器.
 
         Args:
-            model_path (str): YOLO 目标检测模型权重路径.
-            pose_model_path (Optional[str]): YOLOPose 姿态估计模型权重路径，可选.
-            conf_threshold (float): 目标检测置信度阈值，默认 0.65.
-            pose_confidence (float): 姿态估计置信度阈值，默认 0.3.
-            nms_threshold (float): 非极大值抑制 (NMS) IoU 阈值，默认 0.35.
-            img_size (int): 推理输入图像尺寸，默认 640.
+            model_path: YOLO 目标检测模型权重路径.
+            pose_model_path: YOLOPose 姿态估计模型权重路径，可选.
+            conf_threshold: 目标检测置信度阈值，默认 0.65.
+            pose_confidence: 姿态估计置信度阈值，默认 0.3.
+            nms_threshold: 非极大值抑制 (NMS) IoU 阈值，默认 0.35.
+            img_size: 推理输入图像尺寸，默认 640.
 
         Raises:
             FileNotFoundError: 当检测模型文件不存在时抛出.
@@ -63,10 +63,10 @@ class ObjectDetector:
         """执行双阈值目标检测（专供 ByteTrack 高低分匹配阶段使用）.
 
         Args:
-            frame (np.ndarray): 输入的原始视频帧 (BGR 格式).
+            frame: 输入的原始视频帧 (BGR 格式).
 
         Returns:
-            Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+            按置信度拆分的高/低检测结果元组:
                 - high_detections: 高置信度检测结果列表 (conf >= conf_threshold)
                 - low_detections: 低置信度检测结果列表 (0.10 <= conf < conf_threshold)
         """
@@ -110,10 +110,10 @@ class ObjectDetector:
         """使用 YOLOPose 估计输入帧中所有人体骨架关键点.
 
         Args:
-            frame (np.ndarray): 输入的原始视频帧 (BGR 格式).
+            frame: 输入的原始视频帧 (BGR 格式).
 
         Returns:
-            List[Dict[str, Any]]: 姿态估计结果列表，每个元素包含：
+            姿态估计结果列表，每个元素包含：
                 - 'center' (np.ndarray): 目标人体中心点坐标 [cx, cy]
                 - 'keypoints' (np.ndarray): 17个关键点坐标与置信度数组 (17, 3)
                 - 'box' (List[float]): 人体边界框 [x_min, y_min, x_max, y_max]

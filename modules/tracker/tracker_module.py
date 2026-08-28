@@ -3,6 +3,7 @@
 继承 BaseModule，实现多目标检测、跟踪、前置摄像头举手识别调用及距离人数监控。
 """
 import logging
+from pathlib import Path
 import time
 from typing import Dict, List, Optional
 
@@ -15,13 +16,13 @@ from core.inference_stream import InferenceStream
 from core.path_manager import PathConfig
 from core.vis_encoder import VisEncoder
 
-from modules.tracker.object_detector import ObjectDetector
-from modules.tracker.multi_object_tracker import MultiObjectTracker, STrack
 from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.storage_behavior import BehaviorStorage
+from modules.gaze.gaze_module import GazeModule
+from modules.tracker.multi_object_tracker import MultiObjectTracker, STrack
+from modules.tracker.object_detector import ObjectDetector
 from modules.tracker.storage_tracker import TrackerStorage
 from modules.tracker.visualizer import draw_tracks
-from modules.gaze.gaze_module import GazeModule
 
 logger = logging.getLogger("module.tracker")
 
@@ -38,14 +39,14 @@ class TrackerModule(BaseModule):
         config: dict,
         paths: PathConfig,
         inference_stream: InferenceStream,
-    ):
+    ) -> None:
         """初始化多目标跟踪模块.
 
         Args:
-            event_bus (EventBus): 全局事件总线.
-            config (dict): 全局配置字典.
-            paths (PathConfig): 路径管理器.
-            inference_stream (InferenceStream): 前端推理流推送通道.
+            event_bus: 全局事件总线.
+            config: 全局配置字典.
+            paths: 路径管理器.
+            inference_stream: 前端推理流推送通道.
         """
         super().__init__(event_bus, config, paths, inference_stream)
         self._detector: Optional[ObjectDetector] = None
@@ -61,14 +62,18 @@ class TrackerModule(BaseModule):
 
     @property
     def module_name(self) -> str:
-        """模块名称."""
+        """模块名称.
+
+        Returns:
+            模块名称字符串.
+        """
         return "tracker"
 
     def initialize(self) -> bool:
         """初始化 MOT 模块各子组件与事件订阅.
 
         Returns:
-            bool: 初始化成功返回 True，失败返回 False.
+            初始化成功返回 True，失败返回 False.
         """
         try:
             tracker_config = self.config.get("tracker", {})
@@ -97,7 +102,7 @@ class TrackerModule(BaseModule):
                 config=gaze_config,
                 inference_fn=self.push_display,
                 event_bus=self.event_bus,
-                progress_fn=lambda cur, total: self.inference_stream.update_module_time("gaze", cur),
+                progress_fn=lambda current, total: self.inference_stream.update_module_time("gaze", current),
                 paths=self.paths,
             )
 
@@ -136,10 +141,9 @@ class TrackerModule(BaseModule):
         """处理前置监控视频流，执行人员检测、跟踪、行为调用与状态监控.
 
         Args:
-            video_path (str): 视频文件路径.
+            video_path: 视频文件路径，为空时使用配置中的默认前置摄像头视频.
         """
         try:
-            from pathlib import Path
             if not video_path:
                 video_path = str(self.paths.base_dir / self.config.get("videos", {}).get("front", "data/videos/camFRONT.mpg"))
             elif not Path(video_path).is_absolute() and not Path(video_path).exists():
@@ -150,17 +154,17 @@ class TrackerModule(BaseModule):
                 logger.error(f"无法打开视频: {video_path}")
                 return
 
-            _fps_read = video_capture.get(cv2.CAP_PROP_FPS)
-            if not _fps_read or _fps_read <= 0:
-                raise RuntimeError(f"读取 front 视频帧率失败(CAP_PROP_FPS={_fps_read}), 不再兜底")
-            fps = float(_fps_read)
+            raw_fps = video_capture.get(cv2.CAP_PROP_FPS)
+            if not raw_fps or raw_fps <= 0:
+                raise RuntimeError(f"读取 front 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不再兜底")
+            fps = float(raw_fps)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_count = 0
 
             # 确保关键帧目录已准备就绪
             self._result_storage.get_key_frames_dir(self._run_id)
 
-            identities_assigned_done = False
+            identities_broadcasted = False
 
             logger.info(f"开始处理视频: {video_path}")
             logger.info(f"FPS={fps}, 总帧数={total_frames}")
@@ -199,8 +203,8 @@ class TrackerModule(BaseModule):
                 })
 
                 # 1. 目标检测
-                high_conf_dets, low_conf_dets = self._detector.detect_two_thresholds(frame)
-                detections = high_conf_dets + low_conf_dets
+                high_conf_detections, low_conf_detections = self._detector.detect_two_thresholds(frame)
+                detections = high_conf_detections + low_conf_detections
 
                 # 2. 目标跟踪
                 tracks = self._tracker.track(frame, detections)
@@ -210,17 +214,17 @@ class TrackerModule(BaseModule):
                     self._tracker.assign_identities(tracks)
 
                 # 身份分配事件广播与落盘
-                if self._tracker.identities_assigned and not identities_assigned_done:
-                    identities_assigned_done = True
+                if self._tracker.identities_assigned and not identities_broadcasted:
+                    identities_broadcasted = True
                     self._identity_map = dict(self._tracker.identity_map)
 
-                    roles_formatted_str = ",".join(
+                    roles_formatted = ",".join(
                         f"{role_name}:{track_id}"
                         for role_name, track_id in self._identity_map.items()
                     )
                     self._events.append({
                         "localSec": round(timestamp, 2),
-                        "key_moment": f"角色分配,{roles_formatted_str}",
+                        "key_moment": f"角色分配,{roles_formatted}",
                         "source": "tracker",
                     })
                     if self._result_storage:
@@ -274,24 +278,33 @@ class TrackerModule(BaseModule):
                 try:
                     # 凝视:process_frame 用原始 frame 推理 + 绘制 ROI/head/gaze 到 frame 副本并返回
                     if self._gaze_processor:
-                        vis = self._gaze_processor.process_frame(frame, timestamp, frame_count)
+                        annotated_frame = self._gaze_processor.process_frame(frame, timestamp, frame_count)
                     else:
-                        vis = frame.copy()
+                        annotated_frame = frame.copy()
                     # 跟踪框 + 身份标签
-                    vis = draw_tracks(vis, tracks, self._identity_map)
+                    annotated_frame = draw_tracks(annotated_frame, tracks, self._identity_map)
                     # LEADER 与 ROAD 距离线
-                    self._draw_distance_lines(vis)
+                    self._draw_distance_lines(annotated_frame)
                     # 举手标签(在对应跟踪框上方)
                     for track_id, identity in raised_targets:
-                        tr = next((t for t in tracks if t.track_id == track_id), None)
-                        if tr is not None:
-                            bx = tr.bbox
-                            cv2.putText(vis, "举手",
-                                            (int(bx[0]), max(20, int(bx[1]) - 10)),
-                                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
+                        track = next(
+                            (candidate for candidate in tracks if candidate.track_id == track_id),
+                            None,
+                        )
+                        if track is not None:
+                            bbox = track.bbox
+                            cv2.putText(
+                                annotated_frame,
+                                "举手",
+                                (int(bbox[0]), max(20, int(bbox[1]) - 10)),
+                                cv2.FONT_HERSHEY_SIMPLEX,
+                                0.7,
+                                (0, 0, 255),
+                                2,
+                            )
                     # 喂入编码器(惰性启动,首帧确定分辨率)
                     if self._vis_encoder is not None:
-                        self._vis_encoder.feed_frame(vis)
+                        self._vis_encoder.feed_frame(annotated_frame)
                 except Exception as vis_error:
                     logger.warning(f"视觉帧叠加失败: {vis_error}")
 
@@ -309,33 +322,51 @@ class TrackerModule(BaseModule):
             logger.error(f"视频处理失败: {process_error}", exc_info=True)
 
     def save_results(self, run_id: str) -> None:
-        """保存 MOT 结果（委托给 TrackerStorage + gaze）."""
+        """保存 MOT 结果（委托给 TrackerStorage + gaze）.
+
+        Args:
+            run_id: 本次运行标识.
+        """
         self._result_storage.save_key_moments(run_id, self._events)
         self._result_storage.save_role_info(run_id, self._identity_map)
         self._gaze_processor.save_results(run_id)
         logger.info(f"MOT 结果已保存到 {run_id}")
 
-    def _on_flow_started(self, msg: dict) -> None:
-        """订阅 FLOW_STARTED：监护制流程开始时触发."""
-        data = msg.get("data", {})
-        if data.get("flow_type") == "supervision":
+    def _on_flow_started(self, event: dict) -> None:
+        """订阅 FLOW_STARTED：监护制流程开始时触发，载荷位于 "data" 键.
+
+        Args:
+            event: 事件总线分发的标准事件字典.
+        """
+        payload = event.get("data", {})
+        if payload.get("flow_type") == "supervision":
             self._supervision_active = True
-            flow_start_timestamp = data.get("flow_start_sec", 0)
+            flow_start_timestamp = payload.get("flow_start_sec", 0)
             logger.info(f"Tracker: 监护制流程开始 @{flow_start_timestamp:.1f}s")
 
-    def _on_flow_ended(self, msg: dict) -> None:
-        """订阅 FLOW_ENDED：流程结束时触发."""
-        data = msg.get("data", {})
-        if data.get("flow_type") == "supervision":
+    def _on_flow_ended(self, event: dict) -> None:
+        """订阅 FLOW_ENDED：流程结束时触发，载荷位于 "data" 键.
+
+        Args:
+            event: 事件总线分发的标准事件字典.
+        """
+        payload = event.get("data", {})
+        if payload.get("flow_type") == "supervision":
             self._supervision_active = False
-            flow_end_timestamp = data.get("flow_end_sec", 0)
+            flow_end_timestamp = payload.get("flow_end_sec", 0)
             logger.info(f"Tracker: 监护制流程结束 @{flow_end_timestamp:.1f}s")
 
-    def _on_rule_key_moment(self, msg: dict) -> None:
-        """订阅 RULE_KEY_MOMENT：规则层下发的监护绑定/解绑 key_moment 归属 tracker."""
-        data = msg.get("data", {})
-        timestamp = data.get("localSec", msg.get("ts", 0))
-        key_moment = data.get("key_moment", "")
+    def _on_rule_key_moment(self, event: dict) -> None:
+        """订阅 RULE_KEY_MOMENT：规则层下发的监护绑定/解绑 key_moment 归属 tracker.
+
+        时间戳优先取载荷 "localSec"，缺省回退到事件信封 "ts".
+
+        Args:
+            event: 事件总线分发的标准事件字典.
+        """
+        payload = event.get("data", {})
+        timestamp = payload.get("localSec", event.get("ts", 0))
+        key_moment = payload.get("key_moment", "")
         if not key_moment:
             return
         self._events.append({
@@ -348,7 +379,12 @@ class TrackerModule(BaseModule):
         logger.debug(f"Tracker 接收 RULE_KEY_MOMENT: {key_moment} @{timestamp:.1f}s")
 
     def update_progress(self, current: float, total: Optional[float] = None) -> None:
-        """更新 tracker 进度并推送 gaze 前端进度条."""
+        """更新 tracker 进度并推送 gaze 前端进度条.
+
+        Args:
+            current: 当前处理到的时间点（秒）.
+            total: 视频总时长（秒）.
+        """
         super().update_progress(current, total)
         if total and total > 0:
             current_time = time.time()
@@ -364,7 +400,11 @@ class TrackerModule(BaseModule):
                 })
 
     def _monitor_distance(self, timestamp: float) -> None:
-        """距离监控：判定 LEADER 与 ROAD1/ROAD2 距离状态并推送."""
+        """距离监控：判定 LEADER 与 ROAD1/ROAD2 距离状态并推送.
+
+        Args:
+            timestamp: 当前帧时间点（秒）.
+        """
         if not self._tracker.identities_assigned:
             return
         leader = self._tracker.get_track_by_identity("LEADER")
@@ -406,8 +446,13 @@ class TrackerModule(BaseModule):
                     "distance_px": int(distance),
                 }, timestamp=timestamp)
 
-    def _monitor_headcount(self, timestamp: float, tracks: list) -> None:
-        """人数监控：人数变化时推送，无人值守时保存 key_moment."""
+    def _monitor_headcount(self, timestamp: float, tracks: List[STrack]) -> None:
+        """人数监控：人数变化时推送，无人值守时保存 key_moment.
+
+        Args:
+            timestamp: 当前帧时间点（秒）.
+            tracks: 当前帧中的跟踪目标列表.
+        """
         people_count = len(tracks)
         last_count = getattr(self, "_last_people_count", -1)
         if people_count == last_count:
@@ -444,8 +489,12 @@ class TrackerModule(BaseModule):
                 "count": people_count,
             }, timestamp=timestamp)
 
-    def _draw_distance_lines(self, vis_frame: np.ndarray) -> None:
-        """在可视化帧上绘制 LEADER 与 ROAD1/ROAD2 的距离线."""
+    def _draw_distance_lines(self, annotated_frame: np.ndarray) -> None:
+        """在可视化帧上绘制 LEADER 与 ROAD1/ROAD2 的距离线.
+
+        Args:
+            annotated_frame: 待就地绘制距离线的可视化帧.
+        """
         leader = self._tracker.get_track_by_identity("LEADER")
         if not leader:
             return
@@ -457,7 +506,7 @@ class TrackerModule(BaseModule):
             road_center = target.get_center()
             distance = float(np.linalg.norm(leader_center - road_center))
             cv2.line(
-                vis_frame,
+                annotated_frame,
                 tuple(map(int, leader_center)),
                 tuple(map(int, road_center)),
                 (128, 128, 128),
@@ -468,7 +517,7 @@ class TrackerModule(BaseModule):
                 (int(leader_center[1]) + int(road_center[1])) // 2,
             )
             cv2.putText(
-                vis_frame,
+                annotated_frame,
                 f"{road_name} {int(distance)}px",
                 mid_point,
                 cv2.FONT_HERSHEY_SIMPLEX,
@@ -476,4 +525,3 @@ class TrackerModule(BaseModule):
                 (200, 200, 200),
                 2,
             )
-
