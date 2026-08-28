@@ -1,0 +1,31 @@
+# ===== Hedian 三层级提交规范 =====
+# 格式: <type>(hedian/<模块>/<脚本>): <描述>
+#
+# type:  fix / feat / refactor / chore / docs / build / perf / test
+#
+# 模块(第二层)取一级目录:
+#   main.py        -> hedian/main
+#   core/          -> hedian/core
+#   modules/       -> hedian/modules
+#   modules/voice  -> hedian/modules/voice
+#   rules/         -> hedian/rules
+#   evaluation/    -> hedian/evaluation
+#   web/           -> hedian/web
+#   frontend/      -> hedian/frontend
+#
+# 脚本(第三层)写具体改动文件名(可省,多个脚本时留模块层并在正文列出)
+#
+# 示例:
+#   fix(hedian/web/ws_handler): 修复 WS 断线重连后时钟不回零
+#   refactor(hedian/core/inference_sync): 对齐逻辑改为 min 聚合
+#   feat(hedian/modules/voice/speech_transcriber): 新增九字码归一化
+#   chore(hedian/frontend/src/composables/useWS): 清理死代码
+#
+# 多条改动跨脚本时, 主题写模块层, 正文逐行列脚本:
+#   fix(hedian/web): 修复视频推流时序
+#
+#   - ws_handler.py: 修复X
+#   - vis_forwarder.py: 修复Y
+#
+# 提交信息从这里开始(删掉上面所有 # 注释行):
+
