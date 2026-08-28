@@ -1,27 +1,37 @@
-# 核电站监护制合规检测系统 — 依赖清单
+# ============================================================
+# Hedian 环境依赖
+# Python 3.10 / CUDA 12.4 / 单卡 24GB 显存起
+# 安装:
+#   conda create -n hedian python=3.10 -y
+#   conda activate hedian
+#   pip install -r requirements.txt
+# 若 torch 缺少本机 CUDA 运行时:报错 libcudart.so.NN 无法打开,改用:
+#   pip install "torch==2.6.0+cu124" -i https://download.pytorch.org/whl/cu124
+# 本文件只列源码直接 import 的包,其余由其声明依赖自动安装
+# ============================================================
 
-# 核心依赖
-numpy>=1.26.0
-opencv-python>=4.11.0
-onnxruntime-gpu>=1.23.0
+# --- 深度学习 ---
+torch==2.6.0
+ultralytics==8.4.24
+transformers==4.57.6
 
-# 深度学习
-ultralytics>=8.0.0
-torch>=2.0.0
-transformers>=4.30.0
+# --- 语音识别与对齐 ---
+qwen-asr==0.0.6
+librosa==0.11.0
+noisereduce==3.0.3
 
-# Web 服务
-fastapi>=0.139.0
-uvicorn>=0.51.0
+# --- 推理运行时 ---
+onnxruntime-gpu==1.23.2
+numpy==2.2.6
+opencv-python-headless==4.11.0.86
+scipy==1.15.3
 
-# 音频处理
-librosa>=0.10.0
-soundfile>=0.12.0
+# --- Web 服务 ---
+fastapi==0.139.0
+uvicorn==0.51.0
+redis==8.0.1
 
-# 工具
-tqdm>=4.65.0
-pyyaml>=6.0
-
-# 可选
-noisereduce>=3.0.0
-boxmot>=10.0.0
+# --- 工具 ---
+PyYAML==6.0.3
+opencc-python-reimplemented==0.1.7
+pypinyin==0.55.0
