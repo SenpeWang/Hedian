@@ -8,7 +8,7 @@ import cv2
 import numpy as np
 
 from core.base_storage import BaseStorage
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 logger = logging.getLogger("module.tracker.storage")
 
@@ -23,11 +23,11 @@ class TrackerStorage(BaseStorage):
     的结构化管理与原子落盘能力。
     """
 
-    def __init__(self, paths: PathManager):
+    def __init__(self, paths: PathConfig):
         """初始化跟踪结果存储器.
 
         Args:
-            paths (PathManager): 路径管理器实例.
+            paths (PathConfig): 路径管理器实例.
         """
         super().__init__(paths, "tracker")
 

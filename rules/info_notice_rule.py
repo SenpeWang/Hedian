@@ -101,7 +101,7 @@ class InfoNoticeRule(BaseRule):
         }
 
         if self._event_bus:
-            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, ts=ts)
+            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, timestamp=ts)
 
         logger.info(
             f"信息通报流程结束 flow_id={self._flow_id} @{ts:.1f}s source={source}")

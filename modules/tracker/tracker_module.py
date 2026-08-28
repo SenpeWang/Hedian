@@ -12,7 +12,7 @@ import numpy as np
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 from core.vis_encoder import VisEncoder
 
 from modules.tracker.object_detector import ObjectDetector
@@ -36,7 +36,7 @@ class TrackerModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathManager,
+        paths: PathConfig,
         inference_stream: InferenceStream,
     ):
         """初始化多目标跟踪模块.
@@ -44,7 +44,7 @@ class TrackerModule(BaseModule):
         Args:
             event_bus (EventBus): 全局事件总线.
             config (dict): 全局配置字典.
-            paths (PathManager): 路径管理器.
+            paths (PathConfig): 路径管理器.
             inference_stream (InferenceStream): 前端推理流推送通道.
         """
         super().__init__(event_bus, config, paths, inference_stream)
@@ -404,7 +404,7 @@ class TrackerModule(BaseModule):
                     "state": state_label,
                     "operator": road_name,
                     "distance_px": int(distance),
-                }, ts=timestamp)
+                }, timestamp=timestamp)
 
     def _monitor_headcount(self, timestamp: float, tracks: list) -> None:
         """人数监控：人数变化时推送，无人值守时保存 key_moment."""
@@ -442,7 +442,7 @@ class TrackerModule(BaseModule):
             self.push_event(EventTopic.TRACKER_HEADCOUNT, {
                 "localSec": round(timestamp, 2),
                 "count": people_count,
-            }, ts=timestamp)
+            }, timestamp=timestamp)
 
     def _draw_distance_lines(self, vis_frame: np.ndarray) -> None:
         """在可视化帧上绘制 LEADER 与 ROAD1/ROAD2 的距离线."""

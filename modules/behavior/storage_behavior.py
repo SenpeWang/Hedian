@@ -11,7 +11,7 @@ from typing import Dict, List, Optional, Set
 
 from core.base_storage import BaseStorage
 from core.event_bus import EventBus, EventTopic
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 logger = logging.getLogger("module.behavior.storage")
 
@@ -26,11 +26,11 @@ class BehaviorStorage(BaseStorage):
     原子追加到 behavior_key_moments.json，避免多进程写入互相覆盖。
     """
 
-    def __init__(self, paths: PathManager):
+    def __init__(self, paths: PathConfig):
         """初始化行为存储.
 
         Args:
-            paths (PathManager): 路径管理器，提供结果目录解析能力.
+            paths (PathConfig): 路径管理器，提供结果目录解析能力.
         """
         super().__init__(paths, "behavior")
 
@@ -188,7 +188,7 @@ class BehaviorStorage(BaseStorage):
         event_bus.publish(
             EventTopic.BEHAVIOR_HAND_RAISED,
             event_payload,
-            ts=timestamp,
+            timestamp=timestamp,
         )
 
         logger.info(

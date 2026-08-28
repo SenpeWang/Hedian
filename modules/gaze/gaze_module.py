@@ -269,7 +269,7 @@ class GazeModule:
                         "away_duration": round(away_dur, 2),
                         "heads_count": heads_count,
                     },
-                                            ts=ts)
+                                            timestamp=ts)
                 logger.warning(f"凝视告警: 无人注视盘台 {away_dur:.1f}秒 @{ts:.1f}s")
         else:
             if self._alerting:
@@ -302,7 +302,7 @@ class GazeModule:
                         "state": "violation_end",
                         "duration": round(duration, 2),
                     },
-                                            ts=ts)
+                                            timestamp=ts)
             self._away_start_ts = None
             self._alerting = False
 
@@ -361,7 +361,7 @@ class GazeModule:
                     "localSec": round(ts, 2),
                     "has_turned": has_turned,
                 },
-                                        ts=ts)
+                                        timestamp=ts)
 
             logger.info(
                 f"GazeModule: 信息通报 10S 关注度评估完成 @{ts:.1f}s 结果='{key_moment_str}'"

@@ -2,7 +2,7 @@
 import logging
 from typing import List, Dict
 
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 logger = logging.getLogger("module.gaze.storage")
 
@@ -12,7 +12,7 @@ from core.base_storage import BaseStorage
 class GazeStorage(BaseStorage):
     """保存凝视告警关键事件（gaze_key_moments.json."""
 
-    def __init__(self, paths: PathManager):
+    def __init__(self, paths: PathConfig):
         """初始化."""
         super().__init__(paths, "gaze")
 

@@ -1,31 +1,29 @@
-"""
-模块基类 — 统一所有业务模块的接口.
+"""业务模块基类.
 
-所有业务模块（Voice, MOT, Gaze, Behavior）继承此基类，
-实现统一的初始化、处理、保存接口。
+统一 Voice / Tracker / Gaze / Behavior 等业务模块的初始化、处理、保存接口,
+以及向推理流与消息总线的推送方式.
 """
-from abc import ABC, abstractmethod
-from typing import Dict, Any, Optional, Union
 import logging
 import time
+from abc import ABC, abstractmethod
+from typing import Any, Dict, Optional, Union
 
 from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
 from core.inference_sync import InferenceSync
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 
 class BaseModule(ABC):
-    """
-    业务模块基类.
+    """业务模块基类.
 
-    所有业务模块必须继承此类并实现以下方法：
+    所有业务模块必须继承此类并实现:
     - module_name: 模块名称
     - initialize(): 初始化模块
     - process_video(): 处理视频
     - save_results(): 保存结果
 
-    使用方式：
+    典型用法:
         module = MyModule(event_bus, config, paths, inference_stream)
         module.start(video_path, run_id)
     """
@@ -34,17 +32,17 @@ class BaseModule(ABC):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathManager,
+        paths: PathConfig,
         inference_stream: Union[InferenceStream, InferenceSync],
     ):
-        """
-        初始化模块.
+        """初始化模块.
 
         Args:
-            event_bus: 消息总线
-            config: 配置字典
-            paths: 路径配置
-            inference_stream: 推理流写入端（InferenceStream，模块进程）或同步器（InferenceSync，Web 进程）
+            event_bus: 跨进程消息总线.
+            config: 配置字典.
+            paths: 路径配置.
+            inference_stream: 推理流写入端(InferenceStream, 模块进程)
+                或同步器(InferenceSync, Web 进程).
         """
         self.event_bus = event_bus
         self.config = config
@@ -69,11 +67,13 @@ class BaseModule(ABC):
             EventTopic.SAVE_KEY_MOMENTS, self._on_save_key_moments
         )
 
-    def _on_save_key_moments(self, msg: dict) -> None:
-        """
-        响应评估器的 SAVE_KEY_MOMENTS 事件：立即保存当前 key_moments.
+    def _on_save_key_moments(self, event: dict) -> None:
+        """响应评估器的 SAVE_KEY_MOMENTS 事件, 立即保存当前 key_moments.
 
-        这样在 FLOW_ENDED 触发时，各模块的数据已经落盘，评估器可以马上读取。
+        这样在 FLOW_ENDED 触发时, 各模块的数据已经落盘, 评估器可以马上读取.
+
+        Args:
+            event: 总线消息字典(本方法不使用其内容, 仅触发保存).
         """
         if self._run_id:
             try:
@@ -85,54 +85,48 @@ class BaseModule(ABC):
     @property
     @abstractmethod
     def module_name(self) -> str:
-        """
-        模块名称.
+        """模块名称.
 
         Returns:
-            模块名称，如 'voice', 'tracker', 'gaze', 'behavior'
+            模块名称, 如 'voice', 'tracker', 'gaze', 'behavior'.
         """
         pass
 
-    @property
     @abstractmethod
     def initialize(self) -> bool:
-        """
-        初始化模块（加载模型等.
+        """初始化模块(加载模型等).
 
         Returns:
-            初始化是否成功
+            初始化是否成功.
         """
         pass
 
     @abstractmethod
     def process_video(self, video_path: str) -> None:
-        """
-        处理视频.
+        """处理视频.
 
         Args:
-            video_path: 视频文件路径
+            video_path: 视频文件路径.
         """
         pass
 
     @abstractmethod
     def save_results(self, run_id: str) -> None:
-        """
-        保存结果.
+        """保存结果.
 
         Args:
-            run_id: 运行 ID
+            run_id: 运行 ID.
         """
         pass
 
     def start(self, video_path: str, run_id: str) -> None:
-        """
-        启动模块（模板方法.
+        """启动模块(模板方法).
 
-        按顺序执行：初始化 → 注册到聚合器 → 处理视频 → 保存结果
+        按顺序执行: 初始化 -> 处理视频 -> 保存结果.
 
         Args:
-            video_path: 视频文件路径
-            run_id: 运行 ID
+            video_path: 视频文件路径.
+            run_id: 运行 ID.
         """
         self.logger.info(f"模块 {self.module_name} 启动")
         self._running = True
@@ -170,17 +164,31 @@ class BaseModule(ABC):
                 self.logger.warning(f"模块 {self.module_name} 上报 source 结束信号失败: {e}")
 
     def stop(self) -> None:
-        """停止模块."""
+        """停止模块.
+
+        仅清除运行标记, 不等待 process_video 中的工作完成.
+        """
         self._running = False
         self.logger.info(f"模块 {self.module_name} 停止")
 
     @property
     def is_running(self) -> bool:
-        """模块是否正在运行."""
+        """模块是否正在运行.
+
+        Returns:
+            运行中返回 True.
+        """
         return self._running
 
     def update_progress(self, current: float, total: Optional[float] = None) -> None:
-        """更新进度：per-source 写入（借用 source 与独立进度 source 跳过."""
+        """更新进度(per-source 写入).
+
+        借用 source 与独立进度 source 跳过. 进度事件按 0.3 秒节流推送给前端.
+
+        Args:
+            current: 当前进度值(本地时间秒).
+            total: 进度总量; None 或非正数时不向前端推送.
+        """
         for source in self._inference_sources:
             if source in self._borrowed_sources or source in self._independent_progress_sources:
                 continue
@@ -198,12 +206,24 @@ class BaseModule(ABC):
                 })
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
-        """推送数据到推理流（非即时类型自动登记为归属 source."""
+        """推送数据到推理流.
+
+        非即时类型(progress / video_start 以外)自动登记为本模块归属 source.
+
+        Args:
+            event_type: 事件类型, 同时作为推理流的 source.
+            data: 事件载荷.
+        """
         if event_type not in ("progress", "video_start"):
             self._inference_sources.add(event_type)
         self.inference_stream.push_display(event_type, data)
 
-    def push_event(self, msg_type: str, data: Dict[str, Any], ts: float = 0.0) -> None:
-        """推送指令到跨进程消息流."""
-        self.event_bus.publish(msg_type, data, ts=ts)
+    def push_event(self, msg_type: str, data: Dict[str, Any], timestamp: float = 0.0) -> None:
+        """推送事件到跨进程消息总线.
 
+        Args:
+            msg_type: 消息类型.
+            data: 业务载荷.
+            timestamp: 事件时间戳; 0.0 表示未提供.
+        """
+        self.event_bus.publish(msg_type, data, timestamp=timestamp)

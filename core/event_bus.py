@@ -1,5 +1,4 @@
-"""
-消息总线 — 基于 Redis Stream 的跨进程通信.
+"""基于 Redis Stream 的跨进程发布订阅消息总线.
 
 消息格式:
   {"type": str, "data": dict, "ts": float}
@@ -8,12 +7,12 @@
   event_bus = EventBus()
   event_bus.start()
   event_bus.subscribe("voice.intent", my_callback)
-  event_bus.publish("voice.intent", {"text": "..."}, ts=1.5)
+  event_bus.publish("voice.intent", {"text": "..."}, timestamp=1.5)
   event_bus.stop()
 """
 import json
-import threading
 import logging
+import threading
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -23,7 +22,7 @@ logger = logging.getLogger("core.event_bus")
 
 
 class EventTopic:
-    """消息类型常量（同时也是 Redis Stream key."""
+    """消息类型常量(同时也是 Redis Stream key)."""
 
     # Voice -> EventBus
     VOICE_KEY_MOMENT = "voice.key_moment"
@@ -59,9 +58,19 @@ class EventBus:
                  redis_host: str = "localhost",
                  redis_port: int = 6379,
                  redis_db: int = 0,
-                 consumer_name: str = None,
+                 consumer_name: Optional[str] = None,
                  **kwargs):
-        """初始化."""
+        """初始化总线并验证 Redis 连通性.
+
+        每进程使用独立消费组实现跨进程广播.
+
+        Args:
+            redis_host: Redis 主机地址.
+            redis_port: Redis 端口.
+            redis_db: 数据库编号.
+            consumer_name: 消费者名; None 时按当前毫秒时间生成.
+            **kwargs: 预留扩展参数.
+        """
         from core.redis_conn import get_redis_client
         self._redis = get_redis_client(host=redis_host,
                                        port=redis_port,
@@ -86,11 +95,24 @@ class EventBus:
             raise
 
     def _get_stream_key(self, msg_type: str) -> str:
-        """获取流key."""
+        """拼接 Redis Stream key.
+
+        Args:
+            msg_type: 消息类型.
+
+        Returns:
+            以 STREAM_PREFIX 为前缀的 Stream key.
+        """
         return f"{self.STREAM_PREFIX}{msg_type}"
 
     def _ensure_consumer_group(self, stream_key: str) -> None:
-        """ensureconsumer分组."""
+        """确保消费组存在.
+
+        组已存在时 XGROUP CREATE 抛 BUSYGROUP, 属预期情况, 直接忽略.
+
+        Args:
+            stream_key: Redis Stream key.
+        """
         try:
             self._redis.xgroup_create(stream_key,
                                       self._consumer_group,
@@ -101,13 +123,19 @@ class EventBus:
             if "BUSYGROUP" not in str(e):
                 raise
 
-    def publish(self, msg_type: str, data: dict, ts: float = 0.0) -> None:
-        """发布."""
-        msg = {"type": msg_type, "data": data, "ts": ts}
+    def publish(self, msg_type: str, data: dict, timestamp: float = 0.0) -> None:
+        """发布一条消息.
+
+        Args:
+            msg_type: 消息类型, 决定写入哪个 Stream.
+            data: 业务载荷.
+            timestamp: 消息时间戳; 0.0 表示未提供.
+        """
+        event = {"type": msg_type, "data": data, "ts": timestamp}
         stream_key = self._get_stream_key(msg_type)
 
         try:
-            payload = json.dumps(msg, ensure_ascii=False)
+            payload = json.dumps(event, ensure_ascii=False)
             self._redis.xadd(stream_key, {"payload": payload}, maxlen=10000)
             self._message_count += 1
             logger.debug(f"发布消息: {msg_type}")
@@ -115,7 +143,14 @@ class EventBus:
             logger.error(f"发布消息失败: {msg_type}, {e}")
 
     def subscribe(self, msg_type: str, callback: Callable) -> None:
-        """订阅."""
+        """订阅消息类型.
+
+        已 start 但 listener 未运行时会补启动监听线程.
+
+        Args:
+            msg_type: 要订阅的消息类型.
+            callback: 收到消息时的回调, 入参为消息字典.
+        """
         with self._lock:
             if msg_type not in self._subscribers:
                 self._subscribers[msg_type] = []
@@ -135,23 +170,26 @@ class EventBus:
         logger.debug(f"订阅消息: {msg_type}")
 
     def start(self) -> None:
-        """启动."""
+        """启动监听线程.
+
+        无订阅频道时只置运行标记, 不创建线程.
+        """
         if self._running:
             return
         self._running = True
         self._stop_event.clear()
 
         with self._lock:
-            channels = list(self._subscribers.keys())
+            subscribed_topics = list(self._subscribers.keys())
 
-        if channels:
-            for ch in channels:
-                self._ensure_consumer_group(self._get_stream_key(ch))
+        if subscribed_topics:
+            for msg_type in subscribed_topics:
+                self._ensure_consumer_group(self._get_stream_key(msg_type))
 
             self._listener = threading.Thread(target=self._listen_loop,
                                               daemon=True)
             self._listener.start()
-            logger.info(f"消息总线启动，订阅频道: {channels}, 消费者: {self._consumer_name}")
+            logger.info(f"消息总线启动，订阅频道: {subscribed_topics}, 消费者: {self._consumer_name}")
         else:
             logger.info("消息总线启动（无订阅频道）")
 
@@ -160,8 +198,8 @@ class EventBus:
         while not self._stop_event.is_set():
             with self._lock:
                 stream_keys = [
-                    self._get_stream_key(ch)
-                    for ch in self._subscribers.keys()
+                    self._get_stream_key(msg_type)
+                    for msg_type in self._subscribers.keys()
                 ]
 
             if not stream_keys:
@@ -172,7 +210,7 @@ class EventBus:
 
             try:
                 # XREADGROUP 阻塞读取，超时 1 秒
-                results = self._redis.xreadgroup(
+                stream_entries = self._redis.xreadgroup(
                     self._consumer_group,
                     self._consumer_name,
                     last_ids,
@@ -180,25 +218,25 @@ class EventBus:
                     block=1000,  # 1 秒超时
                 )
 
-                if not results:
+                if not stream_entries:
                     continue
 
-                for stream_key, messages in results:
+                for stream_key, messages in stream_entries:
                     msg_type = stream_key.replace(self.STREAM_PREFIX, "")
 
                     for entry_id, fields in messages:
                         try:
                             payload = fields.get("payload", "{}")
-                            msg = json.loads(payload)
-                            msg_type_actual = msg.get("type", msg_type)
+                            event = json.loads(payload)
+                            actual_msg_type = event.get("type", msg_type)
 
                             with self._lock:
                                 callbacks = list(
-                                    self._subscribers.get(msg_type_actual, []))
+                                    self._subscribers.get(actual_msg_type, []))
 
                             # 先执行回调全部成功后 xack：避免"先 ack 后回调"在进程退出/回调失败时事件永久丢失
-                            for cb in callbacks:
-                                self._safe_call(cb, msg, msg_type_actual)
+                            for callback in callbacks:
+                                self._safe_call(callback, event, actual_msg_type)
 
                             self._redis.xack(stream_key, self._consumer_group,
                                              entry_id)
@@ -227,15 +265,21 @@ class EventBus:
                     logger.error(f"监听循环异常: {e}")
                     time.sleep(0.1)
 
-    def _safe_call(self, cb: Callable, msg: dict, msg_type: str) -> None:
-        """safecall."""
+    def _safe_call(self, callback: Callable, event: dict, msg_type: str) -> None:
+        """调用订阅者回调, 吞掉异常并记录日志.
+
+        Args:
+            callback: 订阅者回调.
+            event: 待投递的消息字典.
+            msg_type: 消息类型, 仅用于日志.
+        """
         try:
-            cb(msg)
+            callback(event)
         except Exception as e:
             logger.error(f"订阅者处理 {msg_type} 失败: {e}", exc_info=True)
 
     def stop(self) -> None:
-        """停止."""
+        """停止总线并等待监听线程退出."""
         if not self._running:
             return
         self._stop_event.set()

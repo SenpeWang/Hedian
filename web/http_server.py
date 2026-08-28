@@ -73,7 +73,7 @@ def create_app(
             inference_sync.reset()
 
         event_bus.publish("pipeline.start", {"run_id": new_run_id},
-                          ts=sig_time)
+                          timestamp=sig_time)
 
         pipeline_state["status"] = "running"
         client_host = request.client.host if request.client else "unknown"

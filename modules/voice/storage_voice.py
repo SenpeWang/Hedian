@@ -2,7 +2,7 @@
 import logging
 from typing import List, Dict
 
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 logger = logging.getLogger("module.voice.storage")
 
@@ -12,7 +12,7 @@ from core.base_storage import BaseStorage
 class VoiceStorage(BaseStorage):
     """语音结果存储器，负责解耦数据存储动作."""
 
-    def __init__(self, paths: PathManager):
+    def __init__(self, paths: PathConfig):
         """初始化."""
         super().__init__(paths, "voice")
 

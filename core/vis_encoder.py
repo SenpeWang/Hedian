@@ -1,9 +1,9 @@
-"""视觉流编码器 — 在业务模块进程内把带标注的帧实时编码为 fragmented MP4,
-通过 Redis Stream 推送给 Web 进程转发到前端 MSE.
+"""视觉流编码器: 把带标注的帧实时编码为 fragmented MP4 并推送到 Redis Stream.
 
 每个视角(tracker=front / behavior=pop)持有一个持续 ffmpeg 子进程:
   - 视频轨:rawvideo 帧(BGR)经 stdin 喂入,PTS = 帧序号/fps,按推理节奏产出
   - 音频轨:front 从原视频文件复用(-i video_path -map 1:a);pop 无音频(-an)
+
 输出 fMP4 字节流,按 MP4 box 边界切分为 init 段(ftyp+moov)与 media 段(moof+mdat),
 xadd 到 inference:vis_stream:{view},供 VisStreamForwarder 消费.
 
@@ -29,14 +29,19 @@ _MDAT = b"mdat"
 def _read_box(stream) -> Optional[tuple]:
     """从二进制流中读取一个完整 MP4 box.
 
+    支持 64 位扩展 size 与 box 延伸到 EOF(size=0)两种特殊编码.
+
+    Args:
+        stream: 二进制流(如 subprocess stdout).
+
     Returns:
-        (完整 box 字节, type) 或 None(EOF / 截断).
+        (完整 box 字节, box 类型) 或 None(EOF / 截断).
     """
     header = stream.read(8)
     if len(header) < 8:
         return None
     size = struct.unpack(">I", header[:4])[0]
-    typ = header[4:8]
+    box_type = header[4:8]
     if size == 1:
         # 64 位扩展 size
         ext = stream.read(8)
@@ -47,16 +52,16 @@ def _read_box(stream) -> Optional[tuple]:
         body = stream.read(body_size) if body_size > 0 else b""
         if body_size > 0 and len(body) < body_size:
             return None
-        return header + ext + body, typ
+        return header + ext + body, box_type
     if size == 0:
         # box 延伸到 EOF
         body = stream.read()
-        return header + body, typ
+        return header + body, box_type
     body_size = size - 8
     body = stream.read(body_size) if body_size > 0 else b""
     if body_size > 0 and len(body) < body_size:
         return None
-    return header + body, typ
+    return header + body, box_type
 
 
 class VisEncoder:
@@ -74,6 +79,19 @@ class VisEncoder:
         redis_db: int = 0,
         with_audio: bool = True,
     ):
+        """初始化编码器.
+
+        Args:
+            view: 视角名, 用于拼接 Redis Stream key.
+            video_path: 原视频路径; 非 None 且 with_audio 为真时复用其音频轨.
+            fps: 输出帧率.
+            width: 帧宽; 0 表示首帧时按实际 shape 确定.
+            height: 帧高; 0 表示首帧时按实际 shape 确定.
+            redis_host: Redis 主机地址.
+            redis_port: Redis 端口.
+            redis_db: 数据库编号.
+            with_audio: 是否携带音频轨.
+        """
         self.view = view
         self.video_path = video_path
         self.fps = fps
@@ -81,7 +99,7 @@ class VisEncoder:
         self.height = int(height)
         # 只有提供原视频路径且显式需要音频时才复用音频轨
         self.with_audio = bool(with_audio and video_path)
-        self._key = KEY_PREFIX + view
+        self._stream_key = KEY_PREFIX + view
 
         import redis
         # 二进制 payload,必须 decode_responses=False
@@ -96,6 +114,11 @@ class VisEncoder:
         self._frame_count = 0
 
     def _build_cmd(self) -> list:
+        """拼装 ffmpeg 命令行.
+
+        Returns:
+            ffmpeg 命令行参数列表, stdin 为 rawvideo 输入, stdout 为 fMP4 输出.
+        """
         cmd = [
             "ffmpeg", "-y",
             "-f", "rawvideo", "-pix_fmt", "bgr24",
@@ -142,12 +165,15 @@ class VisEncoder:
         """喂入一帧(已带标注),惰性启动编码器(首帧时据 shape 确定分辨率).
 
         编码失败不应拖垮推理:写失败时置 _stopped,推理继续但该视角无流.
+
+        Args:
+            frame: BGR 帧, 形状 (H, W, 3).
         """
         if self._stopped:
             return
         if self._proc is None:
-            h, w = frame.shape[:2]
-            self.height, self.width = int(h), int(w)
+            frame_height, frame_width = frame.shape[:2]
+            self.height, self.width = int(frame_height), int(frame_width)
             self.start()
         if self._proc is None or self._proc.stdin is None:
             return
@@ -168,15 +194,15 @@ class VisEncoder:
                 box = _read_box(stream)
                 if box is None:
                     break
-                data, typ = box
-                if typ == _MOOF:
+                data, box_type = box
+                if box_type == _MOOF:
                     # 首次遇到 moof → 之前累积的 ftyp+moov 即 init 段
                     if init_buf and not self._init_sent:
                         self._xadd("init", b"".join(init_buf))
                         self._init_sent = True
                         init_buf = []
                     pending_moof = data
-                elif typ == _MDAT:
+                elif box_type == _MDAT:
                     if pending_moof is not None:
                         self._xadd("media", pending_moof + data)
                         pending_moof = None
@@ -193,29 +219,35 @@ class VisEncoder:
         finally:
             # end 段必须等 ffmpeg 真正退出后才写入(有界等待):
             # reader 提前退出而 ffmpeg 仍在产出时立即写 end, 会令转发器误判供给终止
-            rc = None
+            return_code = None
             for _ in range(15):
                 try:
-                    rc = self._proc.wait(timeout=1)
+                    return_code = self._proc.wait(timeout=1)
                     break
                 except Exception:
                     continue
-            if rc is not None:
-                logger.info(f"VisEncoder[{self.view}] ffmpeg 退出 rc={rc}, 共喂 {self._frame_count} 帧")
+            if return_code is not None:
+                logger.info(f"VisEncoder[{self.view}] ffmpeg 退出 rc={return_code}, 共喂 {self._frame_count} 帧")
             else:
                 logger.warning(f"VisEncoder[{self.view}] ffmpeg 15s 未退出, 强制收尾写 end")
             self._xadd("end", b"")
 
-    def _xadd(self, seg_type: str, data: bytes) -> None:
+    def _xadd(self, segment_type: str, data: bytes) -> None:
+        """向视觉流 Redis Stream 写入一个段.
+
+        Args:
+            segment_type: 段类型, 取值 "init" / "media" / "end".
+            data: 段字节内容; "end" 段为空字节.
+        """
         try:
             self._redis.xadd(
-                self._key,
-                {"type": seg_type.encode(), "data": data},
+                self._stream_key,
+                {"type": segment_type.encode(), "data": data},
                 maxlen=200000,
                 approximate=True,
             )
         except Exception as e:
-            logger.error(f"VisEncoder[{self.view}] xadd {seg_type} 失败: {e}")
+            logger.error(f"VisEncoder[{self.view}] xadd {segment_type} 失败: {e}")
 
     def _drain_stderr(self) -> None:
         """排空 ffmpeg stderr(防管道满阻塞),记录非进度行用于诊断."""
@@ -223,9 +255,9 @@ class VisEncoder:
             for raw in iter(self._proc.stderr.readline, b""):
                 if self._stopped:
                     break
-                txt = raw.decode("utf-8", "ignore").strip()
-                if txt and not any(k in txt for k in ("frame=", "fps=", "size=", "bitrate=", "speed=", "cpb:", "Side data")):
-                    logger.warning(f"ffmpeg[{self.view}]: {txt}")
+                line = raw.decode("utf-8", "ignore").strip()
+                if line and not any(k in line for k in ("frame=", "fps=", "size=", "bitrate=", "speed=", "cpb:", "Side data")):
+                    logger.warning(f"ffmpeg[{self.view}]: {line}")
         except Exception:
             pass
 

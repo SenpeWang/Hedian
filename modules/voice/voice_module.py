@@ -8,7 +8,7 @@ import logging
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 
 from modules.voice.speech_transcriber import (
     SpeechTranscriber,
@@ -31,7 +31,7 @@ class VoiceModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathManager,
+        paths: PathConfig,
         inference_stream: InferenceStream,
     ):
         """初始化."""
@@ -111,7 +111,7 @@ class VoiceModule(BaseModule):
                         self.push_event(EventTopic.VOICE_KEY_MOMENT, {
                             "localSec": local_sec,
                             "key_moment": key_moment,
-                        }, ts=local_sec)
+                        }, timestamp=local_sec)
 
                     # 保存归一化后的文本，确保 voice_full_text.json 中的设备码为纯英文数字
                     event["text"] = display_text if text else event.get("text", "")

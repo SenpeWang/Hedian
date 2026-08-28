@@ -15,7 +15,7 @@ from ultralytics import YOLO
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
-from core.path_manager import PathManager
+from core.path_manager import PathConfig
 from core.vis_encoder import VisEncoder
 
 from modules.behavior.screen_detect import FingerScreenDetector
@@ -44,7 +44,7 @@ class BehaviorModule(BaseModule):
         self,
         event_bus: EventBus,
         config: dict,
-        paths: PathManager,
+        paths: PathConfig,
         inference_stream: InferenceStream,
     ):
         """初始化行为检测模块.
@@ -52,7 +52,7 @@ class BehaviorModule(BaseModule):
         Args:
             event_bus (EventBus): 全局事件总线.
             config (dict): 全局配置字典.
-            paths (PathManager): 路径管理器.
+            paths (PathConfig): 路径管理器.
             inference_stream (InferenceStream): 前端推理流推送通道.
         """
         super().__init__(event_bus, config, paths, inference_stream)
@@ -274,7 +274,7 @@ class BehaviorModule(BaseModule):
                     if topic is None:
                         logger.warning(f"未知行为事件类型: {event_item.get('event')}，跳过事件流推送")
                         continue
-                    self.push_event(topic, payload, ts=event_sec)
+                    self.push_event(topic, payload, timestamp=event_sec)
 
                 if frame_count % 300 == 0:
                     progress_pct = frame_count * 100 // total_frames if total_frames else 0
