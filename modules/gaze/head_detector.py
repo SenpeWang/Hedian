@@ -1,5 +1,4 @@
-"""
-头部检测模块.
+"""头部检测模块.
 
 使用 YOLOv8 ONNX 模型检测头部。
 """
@@ -7,17 +6,33 @@ import logging
 import os
 from typing import List, Optional
 
-import numpy as np
 import cv2
+import numpy as np
 
 logger = logging.getLogger("module.gaze.head_detector")
 
 
 class HeadBox:
-    """头部边界框."""
+    """头部边界框.
 
-    def __init__(self, score: float, x1: int, y1: int, x2: int, y2: int):
-        """初始化."""
+    Attributes:
+        score: 检测置信度。
+        x1: 左上角 x 坐标。
+        y1: 左上角 y 坐标。
+        x2: 右下角 x 坐标。
+        y2: 右下角 y 坐标。
+    """
+
+    def __init__(self, score: float, x1: int, y1: int, x2: int, y2: int) -> None:
+        """初始化头部边界框.
+
+        Args:
+            score: 检测置信度。
+            x1: 左上角 x 坐标。
+            y1: 左上角 y 坐标。
+            x2: 右下角 x 坐标。
+            y2: 右下角 y 坐标。
+        """
         self.score = score
         self.x1 = x1
         self.y1 = y1
@@ -26,18 +41,25 @@ class HeadBox:
 
     @property
     def cx(self) -> int:
-        """中心点 x 坐标."""
+        """中心点 x 坐标.
+
+        Returns:
+            中心点 x 坐标（整数）。
+        """
         return (self.x1 + self.x2) // 2
 
     @property
     def cy(self) -> int:
-        """中心点 y 坐标."""
+        """中心点 y 坐标.
+
+        Returns:
+            中心点 y 坐标（整数）。
+        """
         return (self.y1 + self.y2) // 2
 
 
 class HeadDetector:
-    """
-    头部检测器.
+    """头部检测器.
 
     使用 YOLOv8 ONNX 模型检测头部。
     """
@@ -50,17 +72,16 @@ class HeadDetector:
         head_max_size: int = 300,
         nms_iou_threshold: float = 0.45,
         providers: Optional[List[str]] = None,
-    ):
-        """
-        初始化头部检测器.
+    ) -> None:
+        """初始化头部检测器.
 
         Args:
-            model_path: 模型路径
-            conf_threshold: 置信度阈值
-            head_min_size: 最小头部大小
-            head_max_size: 最大头部大小
-            nms_iou_threshold: NMS IOU 阈值
-            providers: ONNX Runtime 提供者
+            model_path: 模型路径。
+            conf_threshold: 置信度阈值。
+            head_min_size: 最小头部大小。
+            head_max_size: 最大头部大小。
+            nms_iou_threshold: NMS IOU 阈值。
+            providers: ONNX Runtime 提供者。
         """
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"YOLOv8 模型不存在: {model_path}")
@@ -72,12 +93,12 @@ class HeadDetector:
             providers = ["CUDAExecutionProvider"]
 
         # 仅使用 GPU
-        sess_opts = onnxruntime.SessionOptions()
-        sess_opts.log_severity_level = 3
+        session_options = onnxruntime.SessionOptions()
+        session_options.log_severity_level = 3
         onnxruntime.set_default_logger_severity(3)
 
         self._session = onnxruntime.InferenceSession(
-            model_path, sess_options=sess_opts, providers=providers
+            model_path, sess_options=session_options, providers=providers
         )
         # 硬性要求: 仅允许 GPU 推理; CUDA EP 未生效说明已静默回退 CPU, 立即失败
         if "CUDAExecutionProvider" not in self._session.get_providers():
@@ -96,56 +117,58 @@ class HeadDetector:
         logger.info(f"加载头部检测模型: {os.path.basename(model_path)}")
 
     def detect(self, image: np.ndarray) -> List[HeadBox]:
-        """
-        检测头部.
+        """检测头部.
 
         Args:
-            image: BGR 图像
+            image: BGR 图像。
 
         Returns:
-            头部边界框列表
+            头部边界框列表。
         """
-        h, w = image.shape[:2]
+        image_h, image_w = image.shape[:2]
 
-        # Letterbox resize (maintain aspect ratio, pad with gray)
-        scale = min(self._input_size / h, self._input_size / w)
-        new_w, new_h = int(w * scale), int(h * scale)
-        resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
+        # Letterbox 缩放：保持长宽比，灰色填充
+        scale = min(self._input_size / image_h, self._input_size / image_w)
+        new_width = int(image_w * scale)
+        new_height = int(image_h * scale)
+        resized = cv2.resize(image, (new_width, new_height),
+                             interpolation=cv2.INTER_LINEAR)
         padded = np.full((self._input_size, self._input_size, 3), 114, dtype=np.uint8)
-        pad_x = (self._input_size - new_w) // 2
-        pad_y = (self._input_size - new_h) // 2
-        padded[pad_y : pad_y + new_h, pad_x : pad_x + new_w] = resized
+        pad_x = (self._input_size - new_width) // 2
+        pad_y = (self._input_size - new_height) // 2
+        padded[pad_y:pad_y + new_height, pad_x:pad_x + new_width] = resized
 
-        # BGR to RGB, normalize, CHW
+        # BGR 转 RGB、归一化并转 CHW
         input_tensor = padded[:, :, ::-1].astype(np.float32) / 255.0
         input_tensor = input_tensor.transpose(2, 0, 1)
         input_tensor = np.expand_dims(input_tensor, axis=0)
 
         outputs = self._session.run(self._output_names, {self._input_name: input_tensor})
 
-        # Output: [1, 5, 8400] → transpose to [8400, 5] = [cx, cy, w, h, score]
-        preds = outputs[0][0].T
+        # 输出 [1, 5, 8400] 转置为 [8400, 5] = [center_x, center_y, width, height, score]
+        predictions = outputs[0][0].T
 
-        scores = preds[:, 4]
-        mask = scores > self._conf_threshold
-        preds = preds[mask]
+        scores = predictions[:, 4]
+        valid_mask = scores > self._conf_threshold
+        predictions = predictions[valid_mask]
 
-        if len(preds) == 0:
+        if len(predictions) == 0:
             return []
 
-        # Convert cx,cy,w,h to x1,y1,x2,y2 (in padded image scale)
-        cx, cy, bw, bh = preds[:, 0], preds[:, 1], preds[:, 2], preds[:, 3]
-        x1 = cx - bw / 2
-        y1 = cy - bh / 2
-        x2 = cx + bw / 2
-        y2 = cy + bh / 2
+        # 由中心点与宽高换算边界框（padding 图坐标）
+        center_x, center_y = predictions[:, 0], predictions[:, 1]
+        head_width, head_height = predictions[:, 2], predictions[:, 3]
+        x1 = center_x - head_width / 2
+        y1 = center_y - head_height / 2
+        x2 = center_x + head_width / 2
+        y2 = center_y + head_height / 2
 
         # NMS
-        boxes_for_nms = np.stack([x1, y1, x2, y2], axis=1).astype(np.float32)
-        scores_for_nms = preds[:, 4].astype(np.float32)
+        nms_boxes = np.stack([x1, y1, x2, y2], axis=1).astype(np.float32)
+        nms_scores = predictions[:, 4].astype(np.float32)
         indices = cv2.dnn.NMSBoxes(
-            boxes_for_nms.tolist(),
-            scores_for_nms.tolist(),
+            nms_boxes.tolist(),
+            nms_scores.tolist(),
             self._conf_threshold,
             self._nms_iou_threshold,
         )
@@ -155,33 +178,35 @@ class HeadDetector:
 
         indices = np.array(indices).flatten()
 
-        # Remove padding offset and scale to original image coordinates
+        # 去除 padding 偏移并缩放到原图坐标
         heads = []
-        for idx in indices:
-            bx1 = int((x1[idx] - pad_x) / scale)
-            by1 = int((y1[idx] - pad_y) / scale)
-            bx2 = int((x2[idx] - pad_x) / scale)
-            by2 = int((y2[idx] - pad_y) / scale)
+        for index in indices:
+            box_x1 = int((x1[index] - pad_x) / scale)
+            box_y1 = int((y1[index] - pad_y) / scale)
+            box_x2 = int((x2[index] - pad_x) / scale)
+            box_y2 = int((y2[index] - pad_y) / scale)
 
-            bx1 = max(0, bx1)
-            by1 = max(0, by1)
-            bx2 = min(w, bx2)
-            by2 = min(h, by2)
+            box_x1 = max(0, box_x1)
+            box_y1 = max(0, box_y1)
+            box_x2 = min(image_w, box_x2)
+            box_y2 = min(image_h, box_y2)
 
-            box_w = bx2 - bx1
-            box_h = by2 - by1
+            box_width = box_x2 - box_x1
+            box_height = box_y2 - box_y1
 
-            if box_w < self._head_min_size or box_h < self._head_min_size:
+            if box_width < self._head_min_size or box_height < self._head_min_size:
                 continue
-            if box_w > self._head_max_size or box_h > self._head_max_size:
+            if box_width > self._head_max_size or box_height > self._head_max_size:
                 continue
 
-            heads.append(HeadBox(
-                score=float(scores_for_nms[idx]),
-                x1=bx1,
-                y1=by1,
-                x2=bx2,
-                y2=by2,
-            ))
+            heads.append(
+                HeadBox(
+                    score=float(nms_scores[index]),
+                    x1=box_x1,
+                    y1=box_y1,
+                    x2=box_x2,
+                    y2=box_y2,
+                )
+            )
 
         return heads

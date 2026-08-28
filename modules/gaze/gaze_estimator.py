@@ -1,5 +1,4 @@
-"""
-注视推断模块.
+"""注视推断模块.
 
 使用 Gazelle ONNX 模型推断注视方向。
 """
@@ -7,8 +6,8 @@ import logging
 import os
 from typing import List, Optional, Tuple
 
-import numpy as np
 import cv2
+import numpy as np
 
 from modules.gaze.head_detector import HeadBox
 
@@ -16,8 +15,7 @@ logger = logging.getLogger("module.gaze.estimator")
 
 
 class GazeEstimator:
-    """
-    注视推断器.
+    """注视推断器.
 
     使用 Gazelle ONNX 模型推断注视方向。
     """
@@ -26,13 +24,12 @@ class GazeEstimator:
         self,
         model_path: str,
         providers: Optional[List[str]] = None,
-    ):
-        """
-        初始化注视推断器.
+    ) -> None:
+        """初始化注视推断器.
 
         Args:
-            model_path: 模型路径
-            providers: ONNX Runtime 提供者
+            model_path: 模型路径。
+            providers: ONNX Runtime 提供者。
         """
         if not os.path.exists(model_path):
             raise FileNotFoundError(f"Gazelle 模型不存在: {model_path}")
@@ -44,13 +41,15 @@ class GazeEstimator:
             providers = ["CUDAExecutionProvider"]
 
         # 仅使用 GPU
-        sess_opts = onnxruntime.SessionOptions()
-        sess_opts.log_severity_level = 3
+        session_options = onnxruntime.SessionOptions()
+        session_options.log_severity_level = 3
 
-        logger.info(f"加载注视推断模型: {os.path.basename(model_path)} (provider: {providers})")
+        logger.info(
+            f"加载注视推断模型: {os.path.basename(model_path)} (provider: {providers})"
+        )
 
         self._session = onnxruntime.InferenceSession(
-            model_path, sess_options=sess_opts, providers=providers
+            model_path, sess_options=session_options, providers=providers
         )
         # 硬性要求: 仅允许 GPU 推理; CUDA EP 未生效说明已静默回退 CPU, 立即失败
         if "CUDAExecutionProvider" not in self._session.get_providers():
@@ -66,44 +65,45 @@ class GazeEstimator:
             if "heatmap" in self._output_names
             else 0
         )
-        self._inout_idx = (
+        self._in_out_score_idx = (
             self._output_names.index("inout")
             if "inout" in self._output_names
             else None
         )
 
-        logger.info(f"注视推断模型加载完成, 输入: {self._input_names}, 输出: {self._output_names}")
+        logger.info(
+            f"注视推断模型加载完成, 输入: {self._input_names}, 输出: {self._output_names}"
+        )
 
     def predict(
         self,
         image: np.ndarray,
         head_boxes: List[HeadBox],
     ) -> Tuple[Optional[np.ndarray], Optional[np.ndarray], List[HeadBox]]:
-        """
-        推断注视方向.
+        """推断注视方向.
 
         Args:
-            image: BGR 图像
-            head_boxes: 头部边界框列表
+            image: BGR 图像。
+            head_boxes: 头部边界框列表。
 
         Returns:
-            (heatmaps[N,H,W], inout_scores[N], valid_boxes)
+            (heatmaps[N,H,W], in_out_scores[N], valid_boxes)
         """
         if not head_boxes:
             return None, None, []
 
-        h, w = image.shape[:2]
-        inv_w = 1.0 / float(w)
-        inv_h = 1.0 / float(h)
+        image_h, image_w = image.shape[:2]
+        inv_width = 1.0 / float(image_w)
+        inv_height = 1.0 / float(image_h)
 
         normalized_boxes = []
         valid_boxes = []
 
         for box in head_boxes:
-            x1 = np.clip(box.x1 * inv_w, 0.0, 1.0)
-            y1 = np.clip(box.y1 * inv_h, 0.0, 1.0)
-            x2 = np.clip(box.x2 * inv_w, 0.0, 1.0)
-            y2 = np.clip(box.y2 * inv_h, 0.0, 1.0)
+            x1 = np.clip(box.x1 * inv_width, 0.0, 1.0)
+            y1 = np.clip(box.y1 * inv_height, 0.0, 1.0)
+            x2 = np.clip(box.x2 * inv_width, 0.0, 1.0)
+            y2 = np.clip(box.y2 * inv_height, 0.0, 1.0)
 
             if x2 <= x1 or y2 <= y1:
                 continue
@@ -127,8 +127,10 @@ class GazeEstimator:
         outputs = self._session.run(self._output_names, feed)
 
         heatmaps = outputs[self._heatmap_idx]
-        inout_scores = (
-            outputs[self._inout_idx] if self._inout_idx is not None else None
+        in_out_scores = (
+            outputs[self._in_out_score_idx]
+            if self._in_out_score_idx is not None
+            else None
         )
 
-        return heatmaps, inout_scores, valid_boxes
+        return heatmaps, in_out_scores, valid_boxes

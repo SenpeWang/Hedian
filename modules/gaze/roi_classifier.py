@@ -1,15 +1,14 @@
-"""
-ROI 分类模块.
+"""ROI 分类模块.
 
 负责加载 ROI 配置，分类注视方向。
 """
 import json
 import logging
 import math
-from typing import List, Tuple, Optional
+from typing import List, Optional, Tuple
 
-import numpy as np
 import cv2
+import numpy as np
 
 from modules.gaze.head_detector import HeadBox
 
@@ -17,8 +16,7 @@ logger = logging.getLogger("module.gaze.roi")
 
 
 class ROIClassifier:
-    """
-    ROI 分类器.
+    """ROI 分类器.
 
     负责加载 ROI 配置，分类注视方向。
     """
@@ -26,18 +24,17 @@ class ROIClassifier:
     def __init__(
         self,
         roi_json_path: str,
-        inout_threshold: float = 0.5,
+        in_out_threshold: float = 0.5,
         heatmap_threshold: float = 0.3,
-    ):
-        """
-        初始化 ROI 分类器.
+    ) -> None:
+        """初始化 ROI 分类器.
 
         Args:
-            roi_json_path: ROI 配置文件路径
-            inout_threshold: 进出阈值
-            heatmap_threshold: 热力图阈值
+            roi_json_path: ROI 配置文件路径。
+            in_out_threshold: 进出阈值。
+            heatmap_threshold: 热力图阈值。
         """
-        self._inout_threshold = inout_threshold
+        self._in_out_score_threshold = in_out_threshold
         self._heatmap_threshold = heatmap_threshold
 
         # 加载 ROI 配置
@@ -48,11 +45,10 @@ class ROIClassifier:
     def _load_roi_polygons(
         self, roi_json_path: str
     ) -> Tuple[List[Tuple[str, np.ndarray]], List[Tuple[str, np.ndarray]]]:
-        """
-        加载 ROI 多边形（支持 LabelMe 格式.
+        """加载 ROI 多边形（支持 LabelMe 格式）.
 
         Args:
-            roi_json_path: ROI 配置文件路径
+            roi_json_path: ROI 配置文件路径。
 
         Returns:
             (gaze_rois, head_zones)
@@ -79,13 +75,19 @@ class ROIClassifier:
                 if not points:
                     continue
 
-                # 处理圆形
+                # 圆形近似为 64 顶点多边形
                 if shape_type == "circle":
-                    cx, cy = points[0]
-                    ex, ey = points[1]
-                    radius = math.sqrt((ex - cx) ** 2 + (ey - cy) ** 2)
-                    angles = [i * 2 * math.pi / 64 for i in range(64)]
-                    points = [[cx + radius * math.cos(a), cy + radius * math.sin(a)] for a in angles]
+                    center_x, center_y = points[0]
+                    edge_x, edge_y = points[1]
+                    radius = math.sqrt((edge_x - center_x) ** 2
+                                       + (edge_y - center_y) ** 2)
+                    angles = [angle_index * 2 * math.pi / 64
+                              for angle_index in range(64)]
+                    points = [
+                        [center_x + radius * math.cos(angle),
+                         center_y + radius * math.sin(angle)]
+                        for angle in angles
+                    ]
 
                 contour = np.array(points, dtype=np.float32).reshape(-1, 1, 2)
 
@@ -96,19 +98,18 @@ class ROIClassifier:
 
             return gaze_rois, head_zones
 
-        except Exception as e:
-            logger.error(f"加载 ROI 配置失败: {e}", exc_info=True)
+        except Exception as error:
+            logger.error(f"加载 ROI 配置失败: {error}", exc_info=True)
             return [], []
 
     def filter_heads_by_zone(self, heads: List[HeadBox]) -> List[HeadBox]:
-        """
-        只保留在 head_zone 内的头部.
+        """只保留在 head_zone 内的头部.
 
         Args:
-            heads: 头部边界框列表
+            heads: 头部边界框列表。
 
         Returns:
-            过滤后的头部边界框列表
+            过滤后的头部边界框列表。
         """
         if not self._head_zones:
             return heads
@@ -116,7 +117,9 @@ class ROIClassifier:
         filtered = []
         for head in heads:
             for _, contour in self._head_zones:
-                if cv2.pointPolygonTest(contour, (float(head.cx), float(head.cy)), False) >= 0:
+                if cv2.pointPolygonTest(
+                    contour, (float(head.cx), float(head.cy)), False
+                ) >= 0:
                     filtered.append(head)
                     break
 
@@ -125,59 +128,62 @@ class ROIClassifier:
     def extract_gaze_point(
         self,
         heatmap_2d: np.ndarray,
-        img_w: int,
-        img_h: int,
+        image_width: int,
+        image_height: int,
     ) -> Optional[Tuple[int, int]]:
-        """
-        从热力图提取注视点（加权质心.
+        """从热力图提取注视点（加权质心）.
 
         Args:
-            heatmap_2d: 热力图
-            img_w: 图像宽度
-            img_h: 图像高度
+            heatmap_2d: 热力图。
+            image_width: 图像宽度。
+            image_height: 图像高度。
 
         Returns:
-            注视点坐标 (x, y)，或 None
+            注视点坐标 (x, y)，或 None。
         """
         mask = heatmap_2d > self._heatmap_threshold
 
         if not np.any(mask):
-            peak_idx = np.argmax(heatmap_2d)
-            py, px = np.unravel_index(peak_idx, heatmap_2d.shape)
-            gx = int(px / heatmap_2d.shape[1] * img_w)
-            gy = int(py / heatmap_2d.shape[0] * img_h)
-            return gx, gy
+            # 无超过阈值的区域时退化为峰值位置
+            peak_index = np.argmax(heatmap_2d)
+            row, col = np.unravel_index(peak_index, heatmap_2d.shape)
+            gaze_x = int(col / heatmap_2d.shape[1] * image_width)
+            gaze_y = int(row / heatmap_2d.shape[0] * image_height)
+            return gaze_x, gaze_y
 
         weights = heatmap_2d[mask]
-        ys, xs = np.where(mask)
-        gx = int(np.average(xs, weights=weights) / heatmap_2d.shape[1] * img_w)
-        gy = int(np.average(ys, weights=weights) / heatmap_2d.shape[0] * img_h)
+        rows, cols = np.where(mask)
+        gaze_x = int(np.average(cols, weights=weights)
+                      / heatmap_2d.shape[1] * image_width)
+        gaze_y = int(np.average(rows, weights=weights)
+                      / heatmap_2d.shape[0] * image_height)
 
-        return gx, gy
+        return gaze_x, gaze_y
 
     def classify_gaze(
         self,
-        inout_score: float,
+        in_out_score: float,
         gaze_point: Tuple[int, int],
     ) -> Tuple[str, str]:
-        """
-        分类注视状态.
+        """分类注视状态.
 
         Args:
-            inout_score: 进出分数
-            gaze_point: 注视点坐标
+            in_out_score: 进出分数。
+            gaze_point: 注视点坐标。
 
         Returns:
             (status, roi_label)
         """
-        if inout_score < self._inout_threshold:
+        if in_out_score < self._in_out_score_threshold:
             return "OUTSIDE_FRAME", ""
 
-        gx, gy = gaze_point
+        gaze_x, gaze_y = gaze_point
 
         for label, contour in self._gaze_rois:
-            dist = cv2.pointPolygonTest(contour, (float(gx), float(gy)), False)
-            if dist >= 0:
+            distance = cv2.pointPolygonTest(
+                contour, (float(gaze_x), float(gaze_y)), False
+            )
+            if distance >= 0:
                 return "IN_ROI", label
 
         return "OUTSIDE_ROI", ""
