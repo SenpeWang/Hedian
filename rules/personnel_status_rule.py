@@ -10,7 +10,7 @@
 import logging
 from typing import Optional, List
 
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.personnel_status")
@@ -34,7 +34,7 @@ class PersonnelStatusRule(BaseRule):
         """名称."""
         return "personnel_status"
 
-    def subscribe_events(self, event_bus: EventStream) -> None:
+    def subscribe_events(self, event_bus: EventBus) -> None:
         """订阅events."""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.GAZE_ALERT, self._on_gaze_alert)

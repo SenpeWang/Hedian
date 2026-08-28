@@ -6,7 +6,7 @@
 import logging
 
 from core.base_module import BaseModule
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
 
@@ -15,7 +15,7 @@ from modules.voice.speech_transcriber import (
     process_transcribed_words,
     normalize_devices_in_text,
 )
-from modules.voice.storage_voice import VoiceResultStorage
+from modules.voice.storage_voice import VoiceStorage
 
 logger = logging.getLogger("module.voice")
 
@@ -29,7 +29,7 @@ class VoiceModule(BaseModule):
 
     def __init__(
         self,
-        event_bus: EventStream,
+        event_bus: EventBus,
         config: dict,
         paths: PathManager,
         inference_stream: InferenceStream,
@@ -58,7 +58,7 @@ class VoiceModule(BaseModule):
             )
 
             # 初始化结果存储
-            self._result_storage = VoiceResultStorage(self.paths)
+            self._result_storage = VoiceStorage(self.paths)
 
             logger.info("语音模块初始化完成")
             return True
@@ -166,5 +166,5 @@ class VoiceModule(BaseModule):
             return None
 
     def save_results(self, run_id: str) -> None:
-        """保存语音结果（委托给 VoiceResultStorage."""
+        """保存语音结果（委托给 VoiceStorage."""
         self._result_storage.save_results(run_id, self._events)

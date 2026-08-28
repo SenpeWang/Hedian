@@ -10,7 +10,7 @@ import os
 from typing import Dict, List, Optional, Set
 
 from core.base_storage import BaseStorage
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from core.path_manager import PathManager
 
 logger = logging.getLogger("module.behavior.storage")
@@ -125,7 +125,7 @@ class BehaviorStorage(BaseStorage):
 
     def report_hand_raise(
         self,
-        event_bus: EventStream,
+        event_bus: EventBus,
         run_id: str,
         identity: Optional[str],
         timestamp: float,
@@ -142,7 +142,7 @@ class BehaviorStorage(BaseStorage):
         3. 推送事件流供 web 规则层判定（EventTopic.BEHAVIOR_HAND_RAISED）
 
         Args:
-            event_bus (EventStream): 事件总线，用于推送推理流与事件流.
+            event_bus (EventBus): 事件总线，用于推送推理流与事件流.
             run_id (str): 本次运行标识.
             identity (Optional[str]): 举手者的合法身份 ('LEADER'|'ROAD1'|'ROAD2')；未分配严格为 None.
             timestamp (float): 事件发生时间（秒）.

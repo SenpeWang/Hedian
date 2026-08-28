@@ -10,7 +10,7 @@
 """
 import logging
 
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from rules.rule_base import BaseRule
 
 logger = logging.getLogger("rules.self_ticket")
@@ -39,7 +39,7 @@ class SelfTicketRule(BaseRule):
         """名称."""
         return "self_ticket"
 
-    def subscribe_events(self, event_bus: EventStream) -> None:
+    def subscribe_events(self, event_bus: EventBus) -> None:
         """订阅events."""
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)

@@ -13,7 +13,7 @@ from typing import Any, Callable, Dict, List, Optional
 
 import redis
 
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from evaluation.flow_data_extractor import FlowDataExtractor
 from evaluation.qwen_evaluator import QwenEvaluator
 
@@ -29,7 +29,7 @@ class FlowEvaluationManager:
 
     def __init__(
         self,
-        event_bus: EventStream,
+        event_bus: EventBus,
         result_dir: str,
         fps: float = 30.0,
         model_path: Optional[str] = None,
@@ -41,7 +41,7 @@ class FlowEvaluationManager:
         """初始化流程评估编排器.
 
         Args:
-            event_bus (EventStream): 全局事件发布订阅总线.
+            event_bus (EventBus): 全局事件发布订阅总线.
             result_dir (str): 本次运行结果保存目录路径.
             fps (float): 视频基准帧率，默认 30.0.
             model_path (Optional[str]): Qwen 大模型本地权重路径.
@@ -50,7 +50,7 @@ class FlowEvaluationManager:
             inference_fn (Optional[Callable]): 兼容回退推送函数.
             get_playback_sec_fn (Optional[Callable[[], float]]): 获取前端实际画面播放秒数的函数.
         """
-        self._event_bus: EventStream = event_bus
+        self._event_bus: EventBus = event_bus
         self._result_dir: str = result_dir
         self._fps: float = fps
         self._sync_fn = sync_fn or inference_fn

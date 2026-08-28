@@ -9,7 +9,7 @@ logger = logging.getLogger("module.voice.storage")
 from core.base_storage import BaseStorage
 
 
-class VoiceResultStorage(BaseStorage):
+class VoiceStorage(BaseStorage):
     """语音结果存储器，负责解耦数据存储动作."""
 
     def __init__(self, paths: PathManager):

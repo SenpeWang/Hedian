@@ -11,7 +11,7 @@ import logging
 from abc import ABC, abstractmethod
 from typing import Dict, List, Optional
 
-from core.event_bus import EventStream
+from core.event_bus import EventBus
 
 logger = logging.getLogger("rules.base")
 
@@ -25,7 +25,7 @@ class BaseRule(ABC):
         pass
 
     @abstractmethod
-    def subscribe_events(self, event_bus: EventStream) -> None:
+    def subscribe_events(self, event_bus: EventBus) -> None:
         """声明本制度关心哪些事件."""
         pass
 
@@ -88,11 +88,11 @@ class RuleRegistry:
         except Exception as e:
             logger.error(f"扫描制度目录失败: {e}", exc_info=True)
 
-    def get(self, name: str) -> Optional[BaseRule]:
+    def get_rule(self, name: str) -> Optional[BaseRule]:
         """获取."""
         return self._rules.get(name)
 
-    def all(self) -> List[BaseRule]:
+    def get_all_rules(self) -> List[BaseRule]:
         """全部."""
         return list(self._rules.values())
 

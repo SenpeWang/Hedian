@@ -37,9 +37,9 @@ def create_app(
         """新建 Redis 连接（连接参数从 config 注入）."""
         from core.redis_conn import get_redis_client
         return get_redis_client(
-            host=config.get("_redis_host", "localhost"),
-            port=config.get("_redis_port", 6379),
-            db=config.get("_redis_db", 0),
+            host=config.get("redis_host", "localhost"),
+            port=config.get("redis_port", 6379),
+            db=config.get("redis_db", 0),
         )
 
     # 保存到 app.state 供外部访问

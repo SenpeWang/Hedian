@@ -9,7 +9,7 @@ from typing import Dict, Any, Optional, Union
 import logging
 import time
 
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
 from core.inference_sync import InferenceSync
 from core.path_manager import PathManager
@@ -32,7 +32,7 @@ class BaseModule(ABC):
 
     def __init__(
         self,
-        event_bus: EventStream,
+        event_bus: EventBus,
         config: dict,
         paths: PathManager,
         inference_stream: Union[InferenceStream, InferenceSync],

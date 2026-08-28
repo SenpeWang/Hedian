@@ -131,7 +131,7 @@ class TrackState:
     REMOVED = 3
 
 
-class STrack:
+class Tracklet:
     """OC-SORT / ByteTrack 跟踪轨迹内部实体类."""
 
     def __init__(self, tlwh, score):
@@ -320,19 +320,19 @@ class OCSORTByteTracker:
         self._center_dist_thresh = 0.6
         self._center_norm_thresh = 4.0
 
-        self.tracked_stracks: List[STrack] = []
-        self.lost_stracks: List[STrack] = []
-        self.removed_stracks: List[STrack] = []
-        self.tentative_stracks: List[STrack] = []
+        self.tracked_stracks: List[Tracklet] = []
+        self.lost_stracks: List[Tracklet] = []
+        self.removed_stracks: List[Tracklet] = []
+        self.tentative_stracks: List[Tracklet] = []
 
         self.frame_id = 0
         self.track_id = 0
 
-    def _get_predicted_center(self, track: STrack) -> np.ndarray:
+    def _get_predicted_center(self, track: Tracklet) -> np.ndarray:
         """计算轨迹在当前帧的预测中心点位置.
 
         Args:
-            track (STrack): 目标轨迹对象.
+            track (Tracklet): 目标轨迹对象.
 
         Returns:
             np.ndarray: 预测中心坐标 [cx, cy].
@@ -355,7 +355,7 @@ class OCSORTByteTracker:
 
         return last_center
 
-    def update(self, high_dets: List[Dict], low_dets: List[Dict] = None) -> List[STrack]:
+    def update(self, high_dets: List[Dict], low_dets: List[Dict] = None) -> List[Tracklet]:
         """更新."""
         self.frame_id += 1
 
@@ -546,7 +546,7 @@ class OCSORTByteTracker:
             if too_close:
                 continue
 
-            new_track = STrack(det['tlwh'], det['score'])
+            new_track = Tracklet(det['tlwh'], det['score'])
             new_track.frame_id = self.frame_id
             new_track.start_frame = self.frame_id
             new_track.state = TrackState.TRACKED

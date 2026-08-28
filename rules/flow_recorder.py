@@ -14,7 +14,7 @@ import threading
 import logging
 from typing import Dict, List, Optional
 
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 
 logger = logging.getLogger("rules.flow_recorder")
 
@@ -22,7 +22,7 @@ logger = logging.getLogger("rules.flow_recorder")
 class FlowEventRecorder:
     """流程事件记录器 — 保存每个流程的开始/结束时间到 rules/flow_events.json."""
 
-    def __init__(self, event_bus: EventStream):
+    def __init__(self, event_bus: EventBus):
         """初始化."""
         self._event_bus = event_bus
         self._result_dir: Optional[str] = None

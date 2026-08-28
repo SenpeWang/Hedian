@@ -96,7 +96,7 @@ def _run_module_process(
             "按约定禁止 CPU 回退, 拒绝启动"
         )
     from pathlib import Path
-    from core.event_bus import EventStream
+    from core.event_bus import EventBus
     from core.inference_stream import InferenceStream
     from core.path_manager import PathManager
 
@@ -125,7 +125,7 @@ def _run_module_process(
     from core.logger import redirect_file_logger
     redirect_file_logger(new_log_file)
 
-    event_bus = EventStream(
+    event_bus = EventBus(
         redis_host=REDIS_HOST,
         redis_port=REDIS_PORT,
         redis_db=REDIS_DB,
@@ -178,7 +178,7 @@ def run_behavior_process(config_dict, paths_dict, video_path, run_id):
 def run_web_process(config_dict, paths_dict, run_id=None):
     """运行web处理."""
     from pathlib import Path
-    from core.event_bus import EventStream
+    from core.event_bus import EventBus
     from core.inference_sync import InferenceSync
     from core.path_manager import PathManager
     from web.http_server import create_app
@@ -198,7 +198,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         model_root=Path(paths_dict["model_root"]),
         result_root=Path(paths_dict["result_root"]),
     )
-    event_bus = EventStream(redis_host=REDIS_HOST,
+    event_bus = EventBus(redis_host=REDIS_HOST,
                             redis_port=REDIS_PORT,
                             redis_db=REDIS_DB,
                             consumer_name="web_process")
@@ -513,9 +513,9 @@ def main():
     config_dict["gpu_default"] = args.gpu or config.gpu_default
     # Redis 配置：优先从 config.yaml 的 redis 段读取，缺省回退到默认 localhost:6379/0
     _redis_cfg = config_dict.get("redis", {})
-    config_dict["_redis_host"] = _redis_cfg.get("host", REDIS_HOST)
-    config_dict["_redis_port"] = int(_redis_cfg.get("port", REDIS_PORT))
-    config_dict["_redis_db"] = int(_redis_cfg.get("db", REDIS_DB))
+    config_dict["redis_host"] = _redis_cfg.get("host", REDIS_HOST)
+    config_dict["redis_port"] = int(_redis_cfg.get("port", REDIS_PORT))
+    config_dict["redis_db"] = int(_redis_cfg.get("db", REDIS_DB))
     config_dict["_log_file"] = log_file
     config_dict["video_path"] = config.video_path
     paths_dict = {

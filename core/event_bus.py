@@ -5,7 +5,7 @@
   {"type": str, "data": dict, "ts": float}
 
 用法:
-  event_bus = EventStream()
+  event_bus = EventBus()
   event_bus.start()
   event_bus.subscribe("voice.intent", my_callback)
   event_bus.publish("voice.intent", {"text": "..."}, ts=1.5)
@@ -25,23 +25,23 @@ logger = logging.getLogger("core.event_bus")
 class EventTopic:
     """消息类型常量（同时也是 Redis Stream key."""
 
-    # Voice -> EventStream
+    # Voice -> EventBus
     VOICE_KEY_MOMENT = "voice.key_moment"
 
-    # Tracker -> EventStream
+    # Tracker -> EventBus
     TRACKER_PROXIMITY = "tracker.proximity"
     TRACKER_HEADCOUNT = "tracker.headcount"
 
-    # Behavior -> EventStream
+    # Behavior -> EventBus
     BEHAVIOR_HAND_RAISED = "behavior.hand_raised"
     BEHAVIOR_FINGER_SCREEN = "behavior.finger_screen"
     BEHAVIOR_FINGER_FILE = "behavior.finger_file"
 
-    # Gaze -> EventStream
+    # Gaze -> EventBus
     GAZE_ATTENTION = "gaze.attention"
     GAZE_ALERT = "gaze.alert"
 
-    # Rules -> EventStream
+    # Rules -> EventBus
     FLOW_STARTED = "flow.started"
     FLOW_ENDED = "flow.ended"
     RULE_KEY_MOMENT = "rule.key_moment"
@@ -50,7 +50,7 @@ class EventTopic:
     SAVE_KEY_MOMENTS = "save.key_moments"
 
 
-class EventStream:
+class EventBus:
     """基于 Redis Stream 的发布/订阅消息总线."""
 
     STREAM_PREFIX = "module:events:"

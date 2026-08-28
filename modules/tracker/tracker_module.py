@@ -10,7 +10,7 @@ import cv2
 import numpy as np
 
 from core.base_module import BaseModule
-from core.event_bus import EventStream, EventTopic
+from core.event_bus import EventBus, EventTopic
 from core.inference_stream import InferenceStream
 from core.path_manager import PathManager
 from core.vis_encoder import VisEncoder
@@ -34,7 +34,7 @@ class TrackerModule(BaseModule):
 
     def __init__(
         self,
-        event_bus: EventStream,
+        event_bus: EventBus,
         config: dict,
         paths: PathManager,
         inference_stream: InferenceStream,
@@ -42,7 +42,7 @@ class TrackerModule(BaseModule):
         """初始化多目标跟踪模块.
 
         Args:
-            event_bus (EventStream): 全局事件总线.
+            event_bus (EventBus): 全局事件总线.
             config (dict): 全局配置字典.
             paths (PathManager): 路径管理器.
             inference_stream (InferenceStream): 前端推理流推送通道.
@@ -171,9 +171,9 @@ class TrackerModule(BaseModule):
                 video_path=video_path,
                 fps=fps,
                 with_audio=True,
-                redis_host=self.config.get("_redis_host", "localhost"),
-                redis_port=self.config.get("_redis_port", 6379),
-                redis_db=self.config.get("_redis_db", 0),
+                redis_host=self.config.get("redis_host", "localhost"),
+                redis_port=self.config.get("redis_port", 6379),
+                redis_db=self.config.get("redis_db", 0),
             )
 
             # 通知前端启动视频流
