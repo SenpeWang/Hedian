@@ -4,12 +4,13 @@
 负责从各模块的 JSON 文件中提取指定时间范围的事件数据。
 从 Redis 读取模块实时进度，等待所有模块处理完再提取。
 """
-import os
 import json
-import time
 import logging
+import os
+import time
+from typing import Any, Dict, List, Optional, Tuple
+
 import redis
-from typing import Dict, List, Tuple
 
 from core.inference_stream import KEY_PROGRESS, KEY_SOURCE_DONE
 
@@ -24,13 +25,12 @@ class FlowDataExtractor:
     从 Redis 读取模块实时进度，等待所有模块处理完再提取。
     """
 
-    def __init__(self, result_dir: str, redis_client=None):
-        """
-        初始化数据提取器.
+    def __init__(self, result_dir: str, redis_client: Optional[Any] = None) -> None:
+        """初始化数据提取器.
 
         Args:
-            result_dir: 结果目录路径
-            redis_client: Redis 客户端（用于读取模块进度）
+            result_dir: 结果目录路径.
+            redis_client: Redis 客户端（用于读取模块进度），为 None 时自建.
         """
         self._result_dir = result_dir
         self._redis = redis_client or redis.Redis(
@@ -39,13 +39,15 @@ class FlowDataExtractor:
 
         # 动态解析 config.yaml 确定启用的模块
         self._enabled_modules = {"voice", "tracker", "gaze", "behavior"}
-        config_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "config.yaml")
+        config_path = os.path.join(
+            os.path.dirname(os.path.dirname(__file__)), "config.yaml"
+        )
         if os.path.exists(config_path):
             try:
                 import yaml
-                with open(config_path, encoding="utf-8") as f:
-                    cfg = yaml.safe_load(f) or {}
-                modules_cfg = cfg.get("modules", {})
+                with open(config_path, encoding="utf-8") as file_obj:
+                    config = yaml.safe_load(file_obj) or {}
+                modules_cfg = config.get("modules", {})
                 self._enabled_modules = set()
                 if modules_cfg.get("voice", True):
                     self._enabled_modules.add("voice")
@@ -54,23 +56,32 @@ class FlowDataExtractor:
                     self._enabled_modules.add("gaze")  # gaze 伴随 tracker 启用
                 if modules_cfg.get("behavior", True):
                     self._enabled_modules.add("behavior")
-                logger.info(f"数据提取器初始化成功，当前启用的等待模块: {self._enabled_modules}")
-            except Exception as e:
-                logger.warning(f"数据提取器加载配置文件失败，默认等待全部模块: {e}")
+                logger.info(
+                    f"数据提取器初始化成功，当前启用的等待模块: {self._enabled_modules}"
+                )
+            except Exception as error:
+                logger.warning(
+                    f"数据提取器加载配置文件失败，默认等待全部模块: {error}"
+                )
 
-    def extract(self, start_sec: float, end_sec: float,
-                wait: bool = True, timeout: int = 300) -> Tuple[List[Dict], List[Dict], List[Dict], List[Dict]]:
-        """
-        提取指定时间范围的事件.
+    def extract(
+        self,
+        start_sec: float,
+        end_sec: float,
+        wait: bool = True,
+        timeout: int = 300,
+    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]],
+               List[Dict[str, Any]], List[Dict[str, Any]]]:
+        """提取指定时间范围的事件.
 
         Args:
-            start_sec: 开始时间（秒）
-            end_sec: 结束时间（秒）
-            wait: 是否等待所有模块处理完
-            timeout: 超时时间（秒），默认5分钟
+            start_sec: 开始时间（秒）.
+            end_sec: 结束时间（秒）.
+            wait: 是否等待所有模块处理完.
+            timeout: 超时时间（秒），默认 5 分钟.
 
         Returns:
-            (voice_events, tracker_events, gaze_events, behavior_events)
+            四元组，依次为 voice/tracker/gaze/behavior 的事件列表.
         """
         if wait:
             logger.info(f"等待所有模块处理到 {end_sec}s...")
@@ -91,8 +102,12 @@ class FlowDataExtractor:
 
         return tuple(events.values())
 
-    def save_extracted_data(self, flow_data: dict) -> None:
-        """保存到 evaluation/extracted_{flow_type}_{flow_id}.json."""
+    def save_extracted_data(self, flow_data: Dict[str, Any]) -> None:
+        """把提取拼接好的流程数据保存到 evaluation/extracted_*.json.
+
+        Args:
+            flow_data: 拼接完成的流程数据字典.
+        """
         try:
             eval_dir = os.path.join(self._result_dir, "evaluation")
             os.makedirs(eval_dir, exist_ok=True)
@@ -102,13 +117,13 @@ class FlowDataExtractor:
             filename = f"extracted_{flow_type}_{flow_id}.json"
             output_path = os.path.join(eval_dir, filename)
 
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(flow_data, f, ensure_ascii=False, indent=2)
+            with open(output_path, "w", encoding="utf-8") as file_obj:
+                json.dump(flow_data, file_obj, ensure_ascii=False, indent=2)
 
             logger.info(f"提取拼接好的流程数据已成功保存到: {output_path}")
 
-        except Exception as e:
-            logger.error(f"保存提取的流程数据失败: {e}", exc_info=True)
+        except Exception as error:
+            logger.error(f"保存提取的流程数据失败: {error}", exc_info=True)
 
     def _wait_all_modules(self, target_sec: float, timeout: int) -> None:
         """
@@ -124,8 +139,8 @@ class FlowDataExtractor:
         到 timeout，导致流程结束后评估被延迟数分钟。
 
         Args:
-            target_sec: 目标时间（秒）
-            timeout: 超时时间（秒）
+            target_sec: 目标时间（秒）.
+            timeout: 超时时间（秒）.
         """
         start_time = time.time()
 
@@ -165,8 +180,8 @@ class FlowDataExtractor:
         try:
             all_progress = self._redis.hgetall(KEY_PROGRESS)
             done = self._redis.hgetall(KEY_SOURCE_DONE)
-        except Exception as e:
-            logger.error(f"读取模块进度失败: {e}")
+        except Exception as error:
+            logger.error(f"读取模块进度失败: {error}")
             return {}
 
         progress: Dict[str, float] = {}
@@ -179,17 +194,18 @@ class FlowDataExtractor:
                 continue
         return progress
 
-    def _extract_events_from_json(self, source: str, start_sec: float, end_sec: float) -> List[Dict]:
-        """
-        从 {source}/{source}_key_moments.json 提取时间范围内的事件.
+    def _extract_events_from_json(
+        self, source: str, start_sec: float, end_sec: float
+    ) -> List[Dict[str, Any]]:
+        """从 {source}/{source}_key_moments.json 提取时间范围内的事件.
 
         Args:
-            source: 模块名（voice/tracker/gaze/behavior）
-            start_sec: 开始时间
-            end_sec: 结束时间
+            source: 模块名（voice/tracker/gaze/behavior）.
+            start_sec: 开始时间（秒）.
+            end_sec: 结束时间（秒）.
 
         Returns:
-            事件列表
+            时间范围内的事件列表.
         """
         path = os.path.join(self._result_dir, source, f"{source}_key_moments.json")
 
@@ -198,16 +214,16 @@ class FlowDataExtractor:
             return []
 
         try:
-            with open(path, encoding="utf-8") as f:
-                all_events = json.load(f)
+            with open(path, encoding="utf-8") as file_obj:
+                all_events = json.load(file_obj)
 
             # 按时间范围过滤
             return [
-                ev for ev in all_events
-                if start_sec <= (ev.get("localSec") or 0) <= end_sec
+                event for event in all_events
+                if start_sec <= (event.get("localSec") or 0) <= end_sec
             ]
 
-        except Exception as e:
-            logger.error(f"加载{source}事件失败: {e}")
+        except Exception as error:
+            logger.error(f"加载{source}事件失败: {error}")
             return []
 

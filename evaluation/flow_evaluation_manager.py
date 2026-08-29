@@ -37,18 +37,18 @@ class FlowEvaluationManager:
         direct_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         inference_fn: Optional[Callable[[str, Dict[str, Any]], None]] = None,
         get_playback_sec_fn: Optional[Callable[[], float]] = None,
-    ):
+    ) -> None:
         """初始化流程评估编排器.
 
         Args:
-            event_bus (EventBus): 全局事件发布订阅总线.
-            result_dir (str): 本次运行结果保存目录路径.
-            fps (float): 视频基准帧率，默认 30.0.
-            model_path (Optional[str]): Qwen 大模型本地权重路径.
-            sync_fn (Optional[Callable]): 经过中间件对齐的系统通知推送函数（flow_start/flow_end）.
-            direct_fn (Optional[Callable]): 完全绕过中间件的评估流式直推函数（WebSocket 文本通道）.
-            inference_fn (Optional[Callable]): 兼容回退推送函数.
-            get_playback_sec_fn (Optional[Callable[[], float]]): 获取前端实际画面播放秒数的函数.
+            event_bus: 全局事件发布订阅总线.
+            result_dir: 本次运行结果保存目录路径.
+            fps: 视频基准帧率，默认 30.0.
+            model_path: Qwen 大模型本地权重路径.
+            sync_fn: 经过中间件对齐的系统通知推送函数（flow_start/flow_end）.
+            direct_fn: 完全绕过中间件的评估流式直推函数（WebSocket 文本通道）.
+            inference_fn: 兼容回退推送函数.
+            get_playback_sec_fn: 获取前端实际画面播放秒数的函数.
         """
         self._event_bus: EventBus = event_bus
         self._result_dir: str = result_dir
@@ -92,7 +92,7 @@ class FlowEvaluationManager:
         """动态更新评估结果输出目录.
 
         Args:
-            result_dir (str): 新的结果目录路径.
+            result_dir: 新的结果目录路径.
         """
         self._result_dir = result_dir
         self._qwen_dir = os.path.join(result_dir, "qwen")
@@ -113,16 +113,16 @@ class FlowEvaluationManager:
             self._eval_futures.clear()
         logger.info("FlowEvaluationManager 已重置")
 
-    def _on_flow_started(self, msg: Dict[str, Any]) -> None:
+    def _on_flow_started(self, event: Dict[str, Any]) -> None:
         """处理流程开始事件.
 
         Args:
-            msg (Dict[str, Any]): 事件总线通知消息.
+            event: 事件总线通知消息.
         """
-        data = msg.get("data", {})
-        flow_id = data.get("flow_id", 0)
-        flow_type = data.get("flow_type", "unknown")
-        timestamp = data.get("flow_start_sec", msg.get("ts", 0.0))
+        payload = event.get("data", {})
+        flow_id = payload.get("flow_id", 0)
+        flow_type = payload.get("flow_type", "unknown")
+        timestamp = payload.get("flow_start_sec", event.get("ts", 0.0))
 
         if self._sync_fn:
             self._sync_fn("flow_start", {
@@ -132,49 +132,51 @@ class FlowEvaluationManager:
                     "flow_id": flow_id,
                     "flow_type": flow_type,
                     "flow_start_sec": timestamp,
-                    "start_source": data.get("start_source", "unknown"),
+                    "start_source": payload.get("start_source", "unknown"),
                 },
             })
 
         logger.info(f"收到流程开始事件 flow_id={flow_id} type={flow_type} @{timestamp:.1f}s")
 
-    def _on_flow_ended(self, msg: Dict[str, Any]) -> None:
+    def _on_flow_ended(self, event: Dict[str, Any]) -> None:
         """处理流程结束事件，启动后台异步评估流水线.
 
         Args:
-            msg (Dict[str, Any]): 事件总线通知消息.
+            event: 事件总线通知消息.
         """
-        flow = msg.get("data", {})
-        flow_id = flow.get("flow_id", 0)
+        payload = event.get("data", {})
+        flow_id = payload.get("flow_id", 0)
         if not flow_id:
             logger.warning("FLOW_ENDED 事件缺少 flow_id")
             return
 
         with self._lock:
-            self._completed_flows.append(flow)
+            self._completed_flows.append(payload)
 
         if self._sync_fn:
             self._sync_fn("flow_end", {
-                "localSec": flow.get("flow_end_sec", 0.0),
+                "localSec": payload.get("flow_end_sec", 0.0),
                 "tag": "flow_end",
-                "data": flow,
+                "data": payload,
             })
 
         logger.info(f"收到流程结束事件 flow_id={flow_id}，提交后台异步评估")
 
-        future = self._executor.submit(self._process_flow_pipeline, flow)
+        future = self._executor.submit(self._process_flow_pipeline, payload)
         with self._eval_lock:
             self._eval_futures[flow_id] = future
         future.add_done_callback(
             lambda completed_future, flow_identifier=flow_id: self._on_pipeline_done(completed_future, flow_identifier)
         )
 
-    def _on_pipeline_done(self, future: concurrent.futures.Future, flow_id: int) -> None:
+    def _on_pipeline_done(
+        self, future: concurrent.futures.Future, flow_id: int
+    ) -> None:
         """后台单流程异步评估完成回调.
 
         Args:
-            future (concurrent.futures.Future): 执行完成的 Future 对象.
-            flow_id (int): 流程编号.
+            future: 执行完成的 Future 对象.
+            flow_id: 流程编号.
         """
         with self._eval_lock:
             self._eval_futures.pop(flow_id, None)
@@ -315,7 +317,7 @@ class FlowEvaluationManager:
         """统计各流程类型的数量（最大 flow_id）.
 
         Returns:
-            Dict[str, int]: 各流程类型的计数映射.
+            各流程类型的计数映射.
         """
         eval_dir = os.path.join(self._result_dir, "evaluation")
         counts: Dict[str, int] = {}
@@ -329,20 +331,25 @@ class FlowEvaluationManager:
                     continue
                 flow_type = name_part[:last_underscore_idx]
                 try:
-                    current_fid = int(name_part[last_underscore_idx + 1:])
-                    if current_fid > counts.get(flow_type, 0):
-                        counts[flow_type] = current_fid
+                    current_flow_id = int(name_part[last_underscore_idx + 1:])
+                    if current_flow_id > counts.get(flow_type, 0):
+                        counts[flow_type] = current_flow_id
                 except ValueError:
                     continue
         return counts
 
-    def _save_flow_llm_response(self, flow_id: int, report: Dict[str, Any], flow_data: Dict[str, Any]) -> None:
+    def _save_flow_llm_response(
+        self,
+        flow_id: int,
+        report: Dict[str, Any],
+        flow_data: Dict[str, Any],
+    ) -> None:
         """保存单个 flow 的大模型评估完整数据.
 
         Args:
-            flow_id (int): 流程编号.
-            report (Dict[str, Any]): 评估报告字典.
-            flow_data (Dict[str, Any]): 提取的多模态事实数据.
+            flow_id: 流程编号.
+            report: 评估报告字典.
+            flow_data: 提取的多模态事实数据.
         """
         try:
             flow_type = flow_data.get("flow_type", "unknown")

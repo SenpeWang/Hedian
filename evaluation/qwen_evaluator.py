@@ -1,14 +1,15 @@
-"""大模型评估模块."""
-import os
+"""大模型（Qwen3）评估模块，以子进程方式运行会话评估.
+
+在独立子进程中加载 Qwen3 模型按流程类型构建 prompt 并生成评估报告，
+子进程退出即释放显存，评估结果与 prompt 一并落盘供前端展示。
+"""
 import logging
 import multiprocessing as mp
+import os
 import queue
 from typing import Any, Dict, Optional
 
-
 logger = logging.getLogger("evaluation.qwen")
-
-
 
 
 # 设置离线模式
@@ -28,16 +29,22 @@ _THINK_BLOCK_PROMPT = """
 """
 
 
-def _qwen_worker(model_path: str, prompt: str, message_queue: Any, eval_gpu: str = "1"):
-    """子进程工作函数：在智能挑选的空闲 GPU 上加载模型并生成评估报告.
+def _qwen_worker(
+    model_path: str,
+    prompt: str,
+    message_queue: Any,
+    eval_gpu: str = "1",
+) -> None:
+    """子进程工作函数：在指定 GPU 上加载模型并生成评估报告.
 
-    启动即探测并选择当前最空闲的物理 GPU，使 cuda:0 映射到该卡。
+    按 config 分配的 eval_gpu 启动模型（不再自主探测），
     评估完成后子进程退出，显存 100% 自动释放。
 
     Args:
-        model_path (str): Qwen 模型本地权重目录路径.
-        prompt (str): 输入的大模型提示词.
-        message_queue (Any): 跨进程消息通信队列.
+        model_path: Qwen 模型本地权重目录路径.
+        prompt: 输入的大模型提示词.
+        message_queue: 跨进程消息通信队列.
+        eval_gpu: 评估子进程使用的 GPU 编号.
     """
     # 视角级 GPU 分配: 评估走 config 指定的 GPU(eval_gpu), 不再自主探测
     os.environ["CUDA_VISIBLE_DEVICES"] = str(eval_gpu)
@@ -103,21 +110,40 @@ def _qwen_worker(model_path: str, prompt: str, message_queue: Any, eval_gpu: str
         thread.join()
         message_queue.put(("done", None))
 
-    except Exception as e:
+    except Exception as error:
         import traceback
-        message_queue.put(("error", f"{e}\n{traceback.format_exc()}"))
+        message_queue.put(("error", f"{error}\n{traceback.format_exc()}"))
 
 
 class QwenEvaluator:
     """Qwen 大模型评估器（子进程模式，走 config 分配的 GPU，评估完自动释放显存）."""
 
-    def __init__(self, model_path: Optional[str] = None, eval_gpu: str = "1"):
-        """初始化."""
+    def __init__(self, model_path: Optional[str] = None, eval_gpu: str = "1") -> None:
+        """初始化 Qwen 评估器.
+
+        Args:
+            model_path: Qwen 模型本地权重目录路径，为 None 时使用默认路径.
+            eval_gpu: 评估子进程使用的 GPU 编号.
+        """
         self._model_path = model_path
         self._eval_gpu = eval_gpu
 
-    def evaluate(self, flow_data: Dict, stream_callback=None, total_flows: int = 0) -> Dict:
-        """在独立子进程中评估流程（动态选择空闲 GPU），评估完子进程退出释放显存."""
+    def evaluate(
+        self,
+        flow_data: Dict[str, Any],
+        stream_callback: Optional[Any] = None,
+        total_flows: int = 0,
+    ) -> Dict[str, Any]:
+        """在独立子进程中评估流程，评估完子进程退出释放显存.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+            stream_callback: 逐 token 流式回调，可为 None.
+            total_flows: 同类型流程总数，用于生成第几个流程的描述.
+
+        Returns:
+            评估结果字典，含 flow_type/score/report_text/prompt.
+        """
         worker_process = None
         prompt = ""
         try:
@@ -139,25 +165,25 @@ class QwenEvaluator:
             report_text = ""
             while worker_process.is_alive() or not msg_queue.empty():
                 try:
-                    msg_type, data = msg_queue.get(timeout=0.2)
+                    msg_type, payload = msg_queue.get(timeout=0.2)
                 except queue.Empty:
                     continue
                 if msg_type == "chunk":
-                    report_text += data
+                    report_text += payload
                     if stream_callback:
                         try:
-                            stream_callback(data)
-                        except Exception as e:
+                            stream_callback(payload)
+                        except Exception as error:
                             # 回调失败（如前端断开）不影响评估流程，仅记录
-                            logger.warning(f"流式回调推送失败（不影响评估）: {e}")
+                            logger.warning(f"流式回调推送失败（不影响评估）: {error}")
                 elif msg_type == "done":
                     break
                 elif msg_type == "error":
-                    logger.error(f"子进程评估失败: {data}")
+                    logger.error(f"子进程评估失败: {payload}")
                     return {
                         "flow_type": flow_data.get("flow_type", "未知"),
                         "score": 0,
-                        "report_text": f"评估失败: {data}",
+                        "report_text": f"评估失败: {payload}",
                         "prompt": prompt,
                     }
 
@@ -177,12 +203,12 @@ class QwenEvaluator:
                 "prompt": prompt,
             }
 
-        except Exception as e:
-            logger.error(f"Qwen 评估失败: {e}", exc_info=True)
+        except Exception as error:
+            logger.error(f"Qwen 评估失败: {error}", exc_info=True)
             return {
                 "flow_type": flow_data.get("flow_type", "未知"),
                 "score": 0,
-                "report_text": f"评估失败: {e}",
+                "report_text": f"评估失败: {error}",
                 "prompt": prompt,
             }
         finally:
@@ -194,32 +220,40 @@ class QwenEvaluator:
                         worker_process.join(timeout=3)
                     else:
                         worker_process.join(timeout=1)
-                except Exception as ex:
-                    logger.error(f"清理评估子进程出错: {ex}")
+                except Exception as cleanup_error:
+                    logger.error(f"清理评估子进程出错: {cleanup_error}")
                 try:
                     worker_process.close()
                 except (OSError, ValueError):
                     # ValueError: 进程仍运行；OSError: 管道/句柄问题，均为清理兜底，可忽略
                     pass
 
-    def _build_prompt(self, flow_data: Dict, total_flows: int = 0) -> str:
-        """构建评估 prompt."""
+    def _build_prompt(self, flow_data: Dict[str, Any], total_flows: int = 0) -> str:
+        """按流程类型构建评估 prompt.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+            total_flows: 同类型流程总数，大于 0 时在 prompt 中标注第几个流程.
+
+        Returns:
+            针对该流程类型的完整评估 prompt 文本.
+        """
         flow_type = flow_data.get("flow_type", "未知")
         flow_id = flow_data.get("flow_id", 0)
 
-        flow_type_cn_map = {
+        flow_type_label_map = {
             "supervision": "监护制",
             "self_ticket": "自唱票",
             "info_notice": "信息通报",
         }
-        flow_type_cn = flow_type_cn_map.get(flow_type, flow_type)
+        flow_type_label = flow_type_label_map.get(flow_type, flow_type)
 
         if total_flows > 0:
             flow_data = dict(flow_data)
             flow_data["_total_flows"] = total_flows
             flow_data["_flow_id_desc"] = (
-                f"本次共 {total_flows} 个{flow_type_cn}流程，"
-                f"当前为第 {flow_id} 个{flow_type_cn}流程"
+                f"本次共 {total_flows} 个{flow_type_label}流程，"
+                f"当前为第 {flow_id} 个{flow_type_label}流程"
             )
 
         if flow_type == "supervision":
@@ -231,8 +265,15 @@ class QwenEvaluator:
         else:
             return f"评估流程类型: {flow_type}"
 
-    def _build_info_notice_prompt(self, flow_data: Dict) -> str:
-        """构建信息通报评估 prompt."""
+    def _build_info_notice_prompt(self, flow_data: Dict[str, Any]) -> str:
+        """构建信息通报评估 prompt.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+
+        Returns:
+            完整的信息通报评估 prompt 文本.
+        """
         voice_events = flow_data.get("voice_events", [])
         gaze_events = flow_data.get("gaze_events", [])
         behavior_events = flow_data.get("behavior_events", [])
@@ -307,8 +348,15 @@ class QwenEvaluator:
         prompt += _THINK_BLOCK_PROMPT
         return prompt
 
-    def _build_supervision_prompt(self, flow_data: Dict) -> str:
-        """构建监护制评估 prompt."""
+    def _build_supervision_prompt(self, flow_data: Dict[str, Any]) -> str:
+        """构建监护制评估 prompt.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+
+        Returns:
+            完整的监护制评估 prompt 文本.
+        """
         voice_events = flow_data.get("voice_events", [])
         tracker_events = flow_data.get("tracker_events", [])
         behavior_events = flow_data.get("behavior_events", [])
@@ -394,8 +442,15 @@ class QwenEvaluator:
         prompt += _THINK_BLOCK_PROMPT
         return prompt
 
-    def _build_self_ticket_prompt(self, flow_data: Dict) -> str:
-        """构建自唱票评估 prompt."""
+    def _build_self_ticket_prompt(self, flow_data: Dict[str, Any]) -> str:
+        """构建自唱票评估 prompt.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+
+        Returns:
+            完整的自唱票评估 prompt 文本.
+        """
         voice_events = flow_data.get("voice_events", [])
         behavior_events = flow_data.get("behavior_events", [])
 
@@ -465,7 +520,14 @@ class QwenEvaluator:
         return prompt
 
     def _extract_score(self, report_text: str) -> int:
-        """从报告文本中提取评分."""
+        """从报告文本中提取评分.
+
+        Args:
+            report_text: 大模型生成的评估报告全文.
+
+        Returns:
+            提取到的评分；无法提取时记录告警并默认返回 5 分.
+        """
         import re
 
         # 清除 <think>...</think> 思考块的干扰，防止匹配到大模型在思考推理过程中演算的各项中间分值
