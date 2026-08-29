@@ -89,14 +89,14 @@ class SupervisionRule(BaseRule):
 
     def _start_flow(
         self,
-        ts: float,
+        timestamp: float,
         source: str,
         target_role: Optional[str] = None,
     ) -> None:
         """启动监护流程.
 
         Args:
-            ts: 流程开始时间（秒）.
+            timestamp: 流程开始时间（秒）.
             source: 流程触发来源（如 voice）.
             target_role: 监护对象身份；为 None 时后续通过距离动态绑定.
         """
@@ -109,7 +109,7 @@ class SupervisionRule(BaseRule):
         self._near_start_ts = -1.0
         self._far_start_ts = -1.0
         self._flow_id = self._next_flow_id()
-        self._flow_start_sec = ts
+        self._flow_start_sec = timestamp
         self._flow_start_source = source
         self._target_role = None  # 启动时不进行默认绑定，通过后续距离动态判断
         self._operator_states = {}
@@ -126,21 +126,21 @@ class SupervisionRule(BaseRule):
             self._event_bus.publish(EventTopic.FLOW_STARTED, {
                 "flow_id": self._flow_id,
                 "flow_type": "supervision",
-                "flow_start_sec": ts,
+                "flow_start_sec": timestamp,
                 "start_source": source,
                 "target_role": None,
             },
-                                    timestamp=ts)
+                                    timestamp=timestamp)
 
-        logger.info(f"流程开始 flow_id={self._flow_id} @{ts:.1f}s source={source}")
+        logger.info(f"流程开始 flow_id={self._flow_id} @{timestamp:.1f}s source={source}")
 
     def _close_flow(
-        self, ts: float = 0, source: str = "unknown"
+        self, timestamp: float = 0, source: str = "unknown"
     ) -> Dict[str, Any]:
         """关闭监护流程并发布 FLOW_ENDED 事件.
 
         Args:
-            ts: 流程结束时间（秒）.
+            timestamp: 流程结束时间（秒）.
             source: 结束来源（如 normal_end）.
 
         Returns:
@@ -156,22 +156,22 @@ class SupervisionRule(BaseRule):
         # 若流程结束时从未到位监护，下发“未监护” key_moment
         if not is_supervised:
             no_bind_key_moment = {
-                "localSec": round(ts, 2),
+                "localSec": round(timestamp, 2),
                 "key_moment": "监护员未到位（未监护）",
                 "source": "tracker",
             }
             if self._event_bus:
                 self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                         no_bind_key_moment,
-                                        timestamp=ts)
-            logger.info(f"监护流程结束 @{ts:.1f}s: 监护员未到位（未监护）")
+                                        timestamp=timestamp)
+            logger.info(f"监护流程结束 @{timestamp:.1f}s: 监护员未到位（未监护）")
 
         flow = {
             "flow_id": self._flow_id,
             "flow_type": "supervision",
             "flow_start_sec": self._flow_start_sec,
-            "flow_end_sec": ts,
-            "flow_continue_sec": round(ts - self._flow_start_sec, 2),
+            "flow_end_sec": timestamp,
+            "flow_continue_sec": round(timestamp - self._flow_start_sec, 2),
             "start_source": self._flow_start_source,
             "end_source": source,
             "target_role": self._target_role,
@@ -181,9 +181,9 @@ class SupervisionRule(BaseRule):
         }
 
         if self._event_bus:
-            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, timestamp=ts)
+            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, timestamp=timestamp)
 
-        logger.info(f"流程结束 flow_id={self._flow_id} @{ts:.1f}s")
+        logger.info(f"流程结束 flow_id={self._flow_id} @{timestamp:.1f}s")
 
         self._active = False
         self._state = "IDLE"
@@ -197,7 +197,7 @@ class SupervisionRule(BaseRule):
     def _on_voice_intent(self, event: Dict[str, Any]) -> None:
         """处理语音事件."""
         payload = event.get("data", {})
-        ts = payload.get("localSec", event.get("ts", 0.0))
+        timestamp = payload.get("localSec", event.get("ts", 0.0))
         key_moment = payload.get("key_moment", "")
         if not key_moment:
             return
@@ -205,12 +205,12 @@ class SupervisionRule(BaseRule):
         # 启动流程判定：语音"监护"/"请求监护"即启动，5秒内举手则指定监护对象
         if not self._active:
             is_supervision_word = (key_moment in ["监护", "请求监护"])
-            has_hand_raise = (abs(ts - self._last_hand_raise_ts) <= 5.0)
+            has_hand_raise = (abs(timestamp - self._last_hand_raise_ts) <= 5.0)
 
             if is_supervision_word:
                 # 5秒内有举手则用举手者身份，否则不指定（后续通过距离动态绑定）
                 role = self._last_hand_raise_role if has_hand_raise else None
-                self._start_flow(ts, source="voice", target_role=role)
+                self._start_flow(timestamp, source="voice", target_role=role)
 
         # 流程运行中：非控制关键字视为设备识别码（九字码）
         if self._active:
@@ -239,19 +239,19 @@ class SupervisionRule(BaseRule):
     def _on_hand_raised(self, event: Dict[str, Any]) -> None:
         """处理 BEHAVIOR_HAND_RAISED 举手事件."""
         payload = event.get("data", {})
-        ts = payload.get("localSec", event.get("ts", 0))
+        timestamp = payload.get("localSec", event.get("ts", 0))
         # 身份由跟踪模块赋予后随事件下发；缺失时保留 None，不自行赋予
         role = payload.get("operator")
 
         # 仅记录举手时间与人员角色
-        self._last_hand_raise_ts = ts
+        self._last_hand_raise_ts = timestamp
         self._last_hand_raise_role = role
-        logger.debug(f"监护制: 收到举手事件 @{ts:.1f}s")
+        logger.debug(f"监护制: 收到举手事件 @{timestamp:.1f}s")
 
     def _on_proximity_update(self, event: Dict[str, Any]) -> None:
         """处理 TRACKER_PROXIMITY 距离状态更新，实现状态机转移."""
         payload = event.get("data", {})
-        ts = payload.get("localSec", event.get("ts", 0))
+        timestamp = payload.get("localSec", event.get("ts", 0))
         state = payload.get("state", "")
         operator = payload.get("operator", "")
 
@@ -259,9 +259,9 @@ class SupervisionRule(BaseRule):
         self._operator_states[operator] = state
 
         # 流程超时兜底（300 秒无进展自动关闭）
-        if self._active and ts - self._flow_start_sec > 300.0:
+        if self._active and timestamp - self._flow_start_sec > 300.0:
             logger.warning(f"监护制流程超时未结束，自动关闭 flow_id={self._flow_id}")
-            self._close_flow(ts, source="timeout")
+            self._close_flow(timestamp, source="timeout")
             return
 
         if not self._active:
@@ -284,8 +284,8 @@ class SupervisionRule(BaseRule):
             # REQUESTING → BOUND: "监护中"持续 bind_hold_sec
             if any_close:
                 if self._near_start_ts < 0:
-                    self._near_start_ts = ts
-                elif ts - self._near_start_ts >= self._bind_hold_sec:
+                    self._near_start_ts = timestamp
+                elif timestamp - self._near_start_ts >= self._bind_hold_sec:
                     self._target_role = next(
                         (op for op, s in self._operator_states.items()
                          if s == "监护中"), None)
@@ -294,19 +294,19 @@ class SupervisionRule(BaseRule):
                     self._far_start_ts = -1.0
                     target_role_name = self._target_role or ""
                     logger.info(
-                        f"状态转移: REQUESTING → BOUND @{ts:.1f}s, 监护对象={self._target_role}({target_role_name})"
+                        f"状态转移: REQUESTING → BOUND @{timestamp:.1f}s, 监护对象={self._target_role}({target_role_name})"
                     )
 
                     # 下发"监护员已到位" key_moment
                     bind_key_moment = {
-                        "localSec": round(ts, 2),
+                        "localSec": round(timestamp, 2),
                         "key_moment": f"监护员已到位监护{target_role_name}",
                         "source": "tracker",
                     }
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                                 bind_key_moment,
-                                                timestamp=ts)
+                                                timestamp=timestamp)
             else:
                 self._near_start_ts = -1.0
 
@@ -314,25 +314,25 @@ class SupervisionRule(BaseRule):
             # BOUND → IDLE: 目标操作员"未监护"持续 unbind_hold_sec
             if target_far:
                 if self._far_start_ts < 0:
-                    self._far_start_ts = ts
-                elif ts - self._far_start_ts >= self._unbind_hold_sec:
+                    self._far_start_ts = timestamp
+                elif timestamp - self._far_start_ts >= self._unbind_hold_sec:
                     self._state = "IDLE"
                     target_role_name = self._target_role or ""
                     logger.info(
-                        f"状态转移: BOUND → IDLE @{ts:.1f}s (人员离开超{self._unbind_hold_sec:.0f}秒)"
+                        f"状态转移: BOUND → IDLE @{timestamp:.1f}s (人员离开超{self._unbind_hold_sec:.0f}秒)"
                     )
 
                     # 下发"监护员已离开" key_moment 并关闭流程
                     unbind_key_moment = {
-                        "localSec": round(ts, 2),
+                        "localSec": round(timestamp, 2),
                         "key_moment": f"监护员已离开监护{target_role_name}",
                         "source": "tracker",
                     }
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                                 unbind_key_moment,
-                                                timestamp=ts)
-                    self._close_flow(ts, source="distance")
+                                                timestamp=timestamp)
+                    self._close_flow(timestamp, source="distance")
             else:
                 self._far_start_ts = -1.0
 

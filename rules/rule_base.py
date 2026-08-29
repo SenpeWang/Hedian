@@ -43,7 +43,7 @@ class BaseRule(ABC):
         if not self.is_active():
             return None
         # 动态分派给子类的 _close_flow
-        return self._close_flow(ts=0, source="finalize")
+        return self._close_flow(timestamp=0, source="finalize")
 
     def _next_flow_id(self) -> int:
         """获取下一个流程 ID.

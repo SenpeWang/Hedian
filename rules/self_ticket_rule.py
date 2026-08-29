@@ -53,20 +53,20 @@ class SelfTicketRule(BaseRule):
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
 
-    def _start_flow(self, ts: float, device_code: str) -> None:
+    def _start_flow(self, timestamp: float, device_code: str) -> None:
         """启动自唱票流程.
 
         Args:
-            ts: 流程开始时间（秒）.
+            timestamp: 流程开始时间（秒）.
             device_code: 本次自唱票对应的设备九字码.
         """
         # 关闭上一个自唱票
         if self._active:
-            self._close_flow(ts, source="new_ticket")
+            self._close_flow(timestamp, source="new_ticket")
 
         self._active = True
         self._flow_id = self._next_flow_id()
-        self._flow_start_sec = ts
+        self._flow_start_sec = timestamp
         self._device_code = device_code
         self._code_read = False
         self._operation_executed = False
@@ -76,21 +76,21 @@ class SelfTicketRule(BaseRule):
             self._event_bus.publish(EventTopic.FLOW_STARTED, {
                 "flow_id": self._flow_id,
                 "flow_type": "self_ticket",
-                "flow_start_sec": ts,
+                "flow_start_sec": timestamp,
                 "device_code": device_code,
             },
-                                    timestamp=ts)
+                                    timestamp=timestamp)
 
         logger.info(
-            f"流程开始 flow_id={self._flow_id} @{ts:.1f}s 设备={device_code}")
+            f"流程开始 flow_id={self._flow_id} @{timestamp:.1f}s 设备={device_code}")
 
     def _close_flow(
-        self, ts: float = 0, source: str = "unknown"
+        self, timestamp: float = 0, source: str = "unknown"
     ) -> Dict[str, Any]:
         """关闭自唱票流程并发布 FLOW_ENDED 事件.
 
         Args:
-            ts: 流程结束时间（秒）.
+            timestamp: 流程结束时间（秒）.
             source: 结束来源（如 new_ticket）.
 
         Returns:
@@ -103,8 +103,8 @@ class SelfTicketRule(BaseRule):
             "flow_id": self._flow_id,
             "flow_type": "self_ticket",
             "flow_start_sec": self._flow_start_sec,
-            "flow_end_sec": ts,
-            "flow_continue_sec": round(ts - self._flow_start_sec, 2),
+            "flow_end_sec": timestamp,
+            "flow_continue_sec": round(timestamp - self._flow_start_sec, 2),
             "end_source": source,
             "device_code": self._device_code,
             "code_read": self._code_read,
@@ -113,9 +113,9 @@ class SelfTicketRule(BaseRule):
         }
 
         if self._event_bus:
-            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, timestamp=ts)
+            self._event_bus.publish(EventTopic.FLOW_ENDED, flow, timestamp=timestamp)
 
-        logger.info(f"流程结束 flow_id={self._flow_id} @{ts:.1f}s")
+        logger.info(f"流程结束 flow_id={self._flow_id} @{timestamp:.1f}s")
 
         self._active = False
         self._flow_id = 0
