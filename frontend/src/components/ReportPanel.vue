@@ -45,7 +45,7 @@ function cardLabel(flowType: string) {
 <template>
   <div class="panel">
     <div class="panel-title">📋 流程评价</div>
-    <div class="panel-body" ref="cardsEl" style="scroll-behavior: smooth">
+    <div class="panel-body" ref="cardsEl">
       <div class="summary-grid">
         <div><div class="val">{{ supN }}</div><div class="lbl">监护制流程</div></div>
         <div><div class="val">{{ ticketN }}</div><div class="lbl">自唱票流程</div></div>

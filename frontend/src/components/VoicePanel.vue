@@ -40,7 +40,7 @@ function renderText(entry: VoiceEntry) {
 <template>
   <div class="panel">
     <div class="panel-title">🎤 人员对话记录</div>
-    <div class="panel-body" ref="scrollEl" style="scroll-behavior: smooth">
+    <div class="panel-body" ref="scrollEl">
       <div v-for="entry in entries" :key="entry.sec" class="text-item">
         <span class="ts">[{{ fmt(entry.sec) }}]</span>
         <span v-html="renderText(entry)"></span>
