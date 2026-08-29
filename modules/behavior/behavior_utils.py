@@ -8,85 +8,146 @@
 所有函数均为无副作用纯函数，供 screen_detect / file_detector / hand_raiser /
 object_detector 等模块复用。
 """
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 
 
 # 几何工具（移植自 behavior-v1/finger_screen_pop.py，模块级纯函数）
-def point_in_polygon(pt: Tuple[float, float], poly: np.ndarray) -> bool:
-    """射线法判断点是否在多边形内."""
-    x, y = pt
-    n = len(poly)
+def point_in_polygon(point: Tuple[float, float], polygon: np.ndarray) -> bool:
+    """射线法判断点是否在多边形内.
+
+    Args:
+        point: 待判断的点坐标 (x, y).
+        polygon: 多边形顶点数组，形状 (n, 2).
+
+    Returns:
+        点位于多边形内返回 True，否则返回 False.
+    """
+    point_x, point_y = point
+    vertex_count = len(polygon)
     inside = False
-    j = n - 1
-    for i in range(n):
-        xi, yi = poly[i]
-        xj, yj = poly[j]
-        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) /
-                                       (yj - yi + 1e-9) + xi):
+    previous_index = vertex_count - 1
+    for current_index in range(vertex_count):
+        current_x, current_y = polygon[current_index]
+        previous_x, previous_y = polygon[previous_index]
+        if ((current_y > point_y) != (previous_y > point_y)) and (
+            point_x < (previous_x - current_x) * (point_y - current_y) /
+            (previous_y - current_y + 1e-9) + current_x
+        ):
             inside = not inside
-        j = i
+        previous_index = current_index
     return inside
 
 
-def point_to_segment_dist(p, a, b) -> float:
-    """点 p 到线段 ab 的最短距离."""
-    px, py = p
-    ax, ay = a
-    bx, by = b
-    abx, aby = bx - ax, by - ay
-    apx, apy = px - ax, py - ay
-    denom = abx * abx + aby * aby
-    if denom < 1e-9:
-        return float(np.hypot(apx, apy))
-    t = max(0.0, min(1.0, (apx * abx + apy * aby) / denom))
-    cx, cy = ax + t * abx, ay + t * aby
-    return float(np.hypot(px - cx, py - cy))
+def point_to_segment_distance(
+    point: Tuple[float, float],
+    segment_start: Tuple[float, float],
+    segment_end: Tuple[float, float],
+) -> float:
+    """点到线段的最短距离，投影落在端点外侧时取端点距离.
+
+    Args:
+        point: 待判断的点坐标 (x, y).
+        segment_start: 线段起点坐标.
+        segment_end: 线段终点坐标.
+
+    Returns:
+        点到线段的最短欧氏距离；线段退化（长度接近 0）时取到起点的距离.
+    """
+    point_x, point_y = point
+    start_x, start_y = segment_start
+    end_x, end_y = segment_end
+    edge_x, edge_y = end_x - start_x, end_y - start_y
+    offset_x, offset_y = point_x - start_x, point_y - start_y
+    denominator = edge_x * edge_x + edge_y * edge_y
+    if denominator < 1e-9:
+        return float(np.hypot(offset_x, offset_y))
+    parameter = max(
+        0.0, min(1.0, (offset_x * edge_x + offset_y * edge_y) / denominator)
+    )
+    closest_x = start_x + parameter * edge_x
+    closest_y = start_y + parameter * edge_y
+    return float(np.hypot(point_x - closest_x, point_y - closest_y))
 
 
-def point_to_polygon_dist(p, poly: np.ndarray) -> float:
-    """点 p 到多边形轮廓的最短距离（含内部返回 0）."""
-    if point_in_polygon(p, poly):
+def point_to_polygon_distance(
+    point: Tuple[float, float], polygon: np.ndarray,
+) -> float:
+    """点到多边形轮廓的最短距离，点位于多边形内时返回 0.
+
+    Args:
+        point: 待判断的点坐标 (x, y).
+        polygon: 多边形顶点数组，形状 (n, 2).
+
+    Returns:
+        点到多边形各边的最短距离最小值；点在多边形内返回 0.
+    """
+    if point_in_polygon(point, polygon):
         return 0.0
-    pts = poly.reshape(-1, 2)
+    vertices = polygon.reshape(-1, 2)
     return min(
-        point_to_segment_dist(p, tuple(pts[i]), tuple(pts[(i + 1) % len(pts)]))
-        for i in range(len(pts)))
+        point_to_segment_distance(
+            point, tuple(vertices[index]), tuple(vertices[(index + 1) % len(vertices)])
+        )
+        for index in range(len(vertices)))
 
 
-def bbox_to_polygon_dist(bbox, poly: np.ndarray) -> float:
-    """Bbox 四角到多边形的最短距离."""
+def bbox_to_polygon_distance(bbox, polygon: np.ndarray) -> float:
+    """检测框四角到多边形的最短距离.
+
+    Args:
+        bbox: 检测框 [x1, y1, x2, y2].
+        polygon: 多边形顶点数组，形状 (n, 2).
+
+    Returns:
+        检测框四个角点到多边形的最短距离最小值.
+    """
     x1, y1, x2, y2 = bbox
     corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
-    return min(point_to_polygon_dist(c, poly) for c in corners)
+    return min(point_to_polygon_distance(corner, polygon) for corner in corners)
 
 
-def bbox_polygon_overlap_ratio(bbox, poly: np.ndarray) -> float:
-    """Bbox 与多边形的重叠比（交集面积 / bbox 面积）."""
+def bbox_polygon_overlap_ratio(bbox, polygon: np.ndarray) -> float:
+    """检测框与多边形的重叠比，即交集面积除以检测框面积.
+
+    Args:
+        bbox: 检测框 [x1, y1, x2, y2].
+        polygon: 多边形顶点数组，形状 (n, 2).
+
+    Returns:
+        检测框与多边形交集面积占检测框面积的比例，取值 0~1.
+    """
     x1, y1, x2, y2 = bbox
-    # 采样 bbox 内部网格点判断是否在多边形内
-    nx, ny = 8, 8
-    inside = 0
-    total = 0
-    for i in range(nx):
-        for j in range(ny):
-            px = x1 + (i + 0.5) / nx * (x2 - x1)
-            py = y1 + (j + 0.5) / ny * (y2 - y1)
-            total += 1
-            if point_in_polygon((px, py), poly):
-                inside += 1
-    return inside / max(1, total)
+    # 采样检测框内部网格点判断是否在多边形内
+    grid_size_x, grid_size_y = 8, 8
+    inside_count = 0
+    total_count = 0
+    for column_index in range(grid_size_x):
+        for row_index in range(grid_size_y):
+            sample_x = x1 + (column_index + 0.5) / grid_size_x * (x2 - x1)
+            sample_y = y1 + (row_index + 0.5) / grid_size_y * (y2 - y1)
+            total_count += 1
+            if point_in_polygon((sample_x, sample_y), polygon):
+                inside_count += 1
+    return inside_count / max(1, total_count)
 
 
-def bbox_iou(a, b) -> float:
+def bbox_iou(box_a, box_b) -> float:
     """计算两个 bbox [x1, y1, x2, y2] 的 IoU.
 
     统一合并原 file_detector._iou 与 hand_raiser._bbox_iou，
     采用 `union > 0` 边界保护，避免除零。
+
+    Args:
+        box_a: 检测框 A 的 [x1, y1, x2, y2].
+        box_b: 检测框 B 的 [x1, y1, x2, y2].
+
+    Returns:
+        两个检测框的交并比，两框面积之和为 0 时返回 0.
     """
-    ax1, ay1, ax2, ay2 = a
-    bx1, by1, bx2, by2 = b
+    ax1, ay1, ax2, ay2 = box_a
+    bx1, by1, bx2, by2 = box_b
     ix1, iy1 = max(ax1, bx1), max(ay1, by1)
     ix2, iy2 = min(ax2, bx2), min(ay2, by2)
     iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
@@ -102,52 +163,84 @@ class PoseTools:
     """姿态几何工具."""
 
     @staticmethod
-    def calc_angle(a, b, c) -> Optional[float]:
-        """
-        计算 ∠abc（顶点 b）的角度（度）.
+    def calc_angle(
+        point_a: np.ndarray,
+        point_b: np.ndarray,
+        point_c: np.ndarray,
+    ) -> Optional[float]:
+        """计算三点构成的角度（度），点 b 为顶点，退化时返回 None.
 
-        a, b, c: [x, y, conf] 或 [x, y]
+        Args:
+            point_a: 端点 A 坐标及置信度 [x, y, conf]，或 [x, y].
+            point_b: 顶点 B 坐标及置信度 [x, y, conf]，或 [x, y].
+            point_c: 端点 C 坐标及置信度 [x, y, conf]，或 [x, y].
+
+        Returns:
+            角度（度）；两向量任一长度退化时返回 None.
         """
-        ba = np.array([a[0] - b[0], a[1] - b[1]], dtype=float)
-        bc = np.array([c[0] - b[0], c[1] - b[1]], dtype=float)
-        nba = np.linalg.norm(ba)
-        nbc = np.linalg.norm(bc)
-        if nba < 1e-6 or nbc < 1e-6:
+        vector_ba = np.array(
+            [point_a[0] - point_b[0], point_a[1] - point_b[1]], dtype=float
+        )
+        vector_bc = np.array(
+            [point_c[0] - point_b[0], point_c[1] - point_b[1]], dtype=float
+        )
+        norm_ba = np.linalg.norm(vector_ba)
+        norm_bc = np.linalg.norm(vector_bc)
+        if norm_ba < 1e-6 or norm_bc < 1e-6:
             return None
-        cos_a = float(np.clip(np.dot(ba, bc) / (nba * nbc), -1.0, 1.0))
-        return float(np.degrees(np.arccos(cos_a)))
+        cos_angle = float(np.clip(
+            np.dot(vector_ba, vector_bc) / (norm_ba * norm_bc), -1.0, 1.0
+        ))
+        return float(np.degrees(np.arccos(cos_angle)))
 
 
 class PoseEMAFilter:
     """关键点 EMA 平滑滤波器（对齐 behavior-v1）.
 
     对每个跟踪目标的关键点做指数移动平均，抑制单帧抖动；
-    低置信度关键点（conf < conf_thres）沿用历史值，避免噪声误判。
+    低置信度关键点（confidence < conf_threshold）沿用历史值，避免噪声误判。
     """
 
-    def __init__(self, alpha: float = 0.5, conf_thres: float = 0.25):
-        """初始化."""
-        self.alpha = alpha
-        self.conf_thres = conf_thres
-        self.history: dict = {}
+    def __init__(self, alpha: float = 0.5, conf_threshold: float = 0.25) -> None:
+        """初始化 EMA 滤波器.
 
-    def update(self, key, keypoints: np.ndarray) -> np.ndarray:
-        """更新并返回平滑后的关键点（key 为外部 track_id）."""
-        if key not in self.history:
-            self.history[key] = keypoints.copy()
+        Args:
+            alpha: EMA 平滑系数，取 0~1 之间.
+            conf_threshold: 关键点有效置信度阈值.
+        """
+        self.alpha: float = alpha
+        self.conf_threshold: float = conf_threshold
+        self.history: Dict[object, np.ndarray] = {}
+
+    def update(self, track_id: int, keypoints: np.ndarray) -> np.ndarray:
+        """更新并返回平滑后的关键点.
+
+        Args:
+            track_id: 外部跟踪标识，作为历史关键点缓存的键.
+            keypoints: 当前帧关键点数组，形状 (17, 3)，末列为置信度.
+
+        Returns:
+            平滑后的关键点数组；首次更新或低置信度时沿用历史值.
+        """
+        if track_id not in self.history:
+            self.history[track_id] = keypoints.copy()
             return keypoints
-        prev = self.history[key]
+        previous_keypoints = self.history[track_id]
         smoothed = np.zeros_like(keypoints)
-        for i in range(len(keypoints)):
-            cx, cy, cc = keypoints[i]
-            px, py, pc = prev[i]
-            if cc < self.conf_thres:
-                smoothed[i] = [px, py, pc]  # 低置信度沿用历史
-            else:
-                smoothed[i] = [
-                    self.alpha * cx + (1.0 - self.alpha) * px,
-                    self.alpha * cy + (1.0 - self.alpha) * py,
-                    cc,
+        for keypoint_index in range(len(keypoints)):
+            x, y, confidence = keypoints[keypoint_index]
+            previous_x, previous_y, previous_confidence = (
+                previous_keypoints[keypoint_index]
+            )
+            if confidence < self.conf_threshold:
+                smoothed[keypoint_index] = [
+                    previous_x, previous_y, previous_confidence,
                 ]
-        self.history[key] = smoothed.copy()
+            else:
+                smoothed[keypoint_index] = [
+                    self.alpha * x + (1.0 - self.alpha) * previous_x,
+                    self.alpha * y + (1.0 - self.alpha) * previous_y,
+                    confidence,
+                ]
+        self.history[track_id] = smoothed.copy()
         return smoothed

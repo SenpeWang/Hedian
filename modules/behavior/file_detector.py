@@ -17,8 +17,8 @@ from modules.behavior.behavior_vis import (
 logger = logging.getLogger("module.behavior.file_detector")
 
 # 类别索引（与 behavior_yolo.pt 训练一致）
-CLS_FILE: int = 1
-CLS_POINTING_HAND: int = 4
+CLASS_FILE: int = 1
+CLASS_POINTING_HAND: int = 4
 
 
 class FingerFileDetector(BaseDetector):
@@ -33,14 +33,14 @@ class FingerFileDetector(BaseDetector):
         file_iou_threshold: float = 0.2,
         cooldown_sec: float = 1.5,
         fps: float = 30.0,
-    ):
+    ) -> None:
         """初始化手指指向文件检测器.
 
         Args:
-            detect_conf (float): 检测置信度阈值，默认 0.25.
-            file_iou_threshold (float): 手指框与文件框的判定 IoU 阈值，默认 0.2.
-            cooldown_sec (float): 动作触发后的冷却时间（秒），默认 1.5.
-            fps (float): 视频采样帧率，默认 30.0.
+            detect_conf: 检测置信度阈值，默认 0.25.
+            file_iou_threshold: 手指框与文件框的判定 IoU 阈值，默认 0.2.
+            cooldown_sec: 动作触发后的冷却时间（秒），默认 1.5.
+            fps: 视频采样帧率，默认 30.0.
         """
         super().__init__(cooldown_sec, fps)
         self.detect_conf: float = detect_conf
@@ -56,33 +56,34 @@ class FingerFileDetector(BaseDetector):
         """检测当前帧中是否存在手指向文件的行为.
 
         Args:
-            frame (np.ndarray): 当前视频帧（原地绘制检测框）.
-            results (Any): YOLO 模型推理结果对象.
-            frame_count (int): 当前视频帧号.
-            fps (float): 视频帧率.
+            frame: 当前视频帧（原地绘制检测框）.
+            results: YOLO 模型推理结果对象.
+            frame_count: 当前视频帧号.
+            fps: 视频帧率.
 
         Returns:
-            List[Dict[str, Any]]: 触发事件字典列表，包含 event, state, frame_id, iou 等字段.
+            触发事件字典列表，包含 event, state, frame_id, iou 等字段.
         """
         events: List[Dict[str, Any]] = []
         if results is None:
             return events
-        det = getattr(results, "boxes", None)
-        if det is None or len(det) == 0:
+        boxes = getattr(results, "boxes", None)
+        if boxes is None or len(boxes) == 0:
             return events
 
-        boxes_xyxy = det.xyxy.cpu().numpy()
-        classes = det.cls.cpu().numpy().astype(int)
-        confidences = det.conf.cpu().numpy()
+        boxes_xyxy = boxes.xyxy.cpu().numpy()
+        classes = boxes.cls.cpu().numpy().astype(int)
+        confidences = boxes.conf.cpu().numpy()
 
-        hands, files = [], []
+        hands: List[Any] = []
+        files: List[Any] = []
         for index in range(len(classes)):
             if confidences[index] < self.detect_conf:
                 continue
             box = boxes_xyxy[index]
-            if classes[index] == CLS_POINTING_HAND:
+            if classes[index] == CLASS_POINTING_HAND:
                 hands.append(box)
-            elif classes[index] == CLS_FILE:
+            elif classes[index] == CLASS_FILE:
                 files.append(box)
 
         draw_detection_boxes(frame, hands=hands, files=files)
@@ -92,10 +93,10 @@ class FingerFileDetector(BaseDetector):
         best_iou = 0.0
         for hand_box in hands:
             for file_box in files:
-                iou_val = bbox_iou(hand_box, file_box)
-                if iou_val > best_iou:
-                    best_iou = iou_val
-                if iou_val >= self.file_iou_threshold:
+                iou = bbox_iou(hand_box, file_box)
+                if iou > best_iou:
+                    best_iou = iou
+                if iou >= self.file_iou_threshold:
                     triggered = True
 
         if triggered:
