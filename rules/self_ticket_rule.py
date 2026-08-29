@@ -79,7 +79,7 @@ class SelfTicketRule(BaseRule):
                 "flow_start_sec": ts,
                 "device_code": device_code,
             },
-                                    ts=ts)
+                                    timestamp=ts)
 
         logger.info(
             f"流程开始 flow_id={self._flow_id} @{ts:.1f}s 设备={device_code}")

@@ -93,7 +93,7 @@ class InfoNoticeRule(BaseRule):
                 "flow_start_sec": ts,
                 "start_source": source,
             },
-                                    ts=ts)
+                                    timestamp=ts)
 
         logger.info(
             f"信息通报流程开始 flow_id={self._flow_id} @{ts:.1f}s 伴随举手={has_hand_raise} source={source}"

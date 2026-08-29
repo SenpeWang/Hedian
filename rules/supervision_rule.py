@@ -130,7 +130,7 @@ class SupervisionRule(BaseRule):
                 "start_source": source,
                 "target_role": None,
             },
-                                    ts=ts)
+                                    timestamp=ts)
 
         logger.info(f"流程开始 flow_id={self._flow_id} @{ts:.1f}s source={source}")
 
@@ -163,7 +163,7 @@ class SupervisionRule(BaseRule):
             if self._event_bus:
                 self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                         no_bind_key_moment,
-                                        ts=ts)
+                                        timestamp=ts)
             logger.info(f"监护流程结束 @{ts:.1f}s: 监护员未到位（未监护）")
 
         flow = {
@@ -306,7 +306,7 @@ class SupervisionRule(BaseRule):
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                                 bind_key_moment,
-                                                ts=ts)
+                                                timestamp=ts)
             else:
                 self._near_start_ts = -1.0
 
@@ -331,7 +331,7 @@ class SupervisionRule(BaseRule):
                     if self._event_bus:
                         self._event_bus.publish(EventTopic.RULE_KEY_MOMENT,
                                                 unbind_key_moment,
-                                                ts=ts)
+                                                timestamp=ts)
                     self._close_flow(ts, source="distance")
             else:
                 self._far_start_ts = -1.0
