@@ -16,11 +16,13 @@ const props = defineProps<{
 const emit = defineEmits<{ toggle: [flowId: string] }>()
 
 const cardsEl = ref<HTMLElement | null>(null)
-// 滚底: 卡片数 + 流式内容变化
-useScrollBottom(cardsEl, () => props.segCards.length + '|' + props.segCards.map(c => (c.streamBuffer || '') + (c.reportText || '')).join('\n'))
 
 // 打字机(shownText + shownLen), 完成态切换在 composable 内(card.streaming=false)
 const { shownText } = useTypewriter(toRef(props, 'segCards'))
+
+// 滚底: 依赖打字机已揭示文本(think+report), 使逐字揭示的正文也能实时滚到最新
+// 仅依赖 streamBuffer/reportText 会在后端发完、打字机仍逐字揭示时停止滚动, 导致正文追不上
+useScrollBottom(cardsEl, () => props.segCards.map(c => shownText(c, 'think') + shownText(c, 'report')).join('\n'))
 
 function scoreColor(score: number) {
   return score >= 8 ? '#00ff88' : score >= 5 ? '#ffaa00' : '#ff4d4d'
