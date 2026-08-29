@@ -23,7 +23,7 @@ _TYPE_CODE = {"init": 0, "media": 1, "end": 2}
 class WSHandler:
     """WebSocket 客户端推送与状态连接管理器."""
 
-    def __init__(self):
+    def __init__(self) -> None:
         """初始化 WebSocket 处理器."""
         self._active_connections: List[WebSocket] = []
         self._loop: Optional[asyncio.AbstractEventLoop] = None
@@ -35,18 +35,29 @@ class WSHandler:
         # 状态快照注入: 总时长/流水线状态/同步器, connect 时补发给前端(刷新即恢复进度)
         self._total_duration: float = 0.0
         self._pipeline_state: Optional[Dict[str, Any]] = None
-        self._inference_sync = None
+        self._inference_sync: Optional[Any] = None
 
     def set_event_loop(self, loop: asyncio.AbstractEventLoop) -> None:
         """设置异步事件循环.
 
         Args:
-            loop (asyncio.AbstractEventLoop): FastAPI 异步主事件循环.
+            loop: FastAPI 异步主事件循环.
         """
         self._loop = loop
 
-    def set_state_refs(self, total_duration: float, pipeline_state, inference_sync=None) -> None:
-        """注入总时长/流水线状态/同步器, 供 connect 补发状态快照."""
+    def set_state_refs(
+        self,
+        total_duration: float,
+        pipeline_state: Dict[str, Any],
+        inference_sync: Optional[Any] = None,
+    ) -> None:
+        """注入总时长/流水线状态/同步器, 供 connect 补发状态快照.
+
+        Args:
+            total_duration: 视频总时长（秒）.
+            pipeline_state: 流水线状态引用（含 status 字段）.
+            inference_sync: 推理流同步器，用于计算当前全局秒.
+        """
         self._total_duration = float(total_duration or 0.0)
         self._pipeline_state = pipeline_state
         self._inference_sync = inference_sync
@@ -58,23 +69,32 @@ class WSHandler:
         (不依赖前端 video 是否加载) 与当前 globalSec, 推理进度条可正确恢复.
         """
         total = self._total_duration or 0.0
-        status_s = (self._pipeline_state or {}).get("status", "idle")
-        if status_s == "running" and self._inference_sync is not None:
+        pipeline_status = (self._pipeline_state or {}).get("status", "idle")
+        if pipeline_status == "running" and self._inference_sync is not None:
             try:
-                g = self._inference_sync._compute_global_sec()
+                global_sec = self._inference_sync._compute_global_sec()
                 # 排除 inf/nan/负
-                if g == float("inf") or not (g == g) or g < 0:
-                    g = 0.0
+                if (
+                    global_sec == float("inf")
+                    or not (global_sec == global_sec)
+                    or global_sec < 0
+                ):
+                    global_sec = 0.0
             except Exception:
-                g = 0.0
+                global_sec = 0.0
         else:
             # idle: 未开始或已重置, 进度 0(刷新=重新开始)
-            g = 0.0
-        msg = {"source": "status", "totalDuration": total, "globalSec": g, "status": status_s}
+            global_sec = 0.0
+        msg = {
+            "source": "status",
+            "totalDuration": total,
+            "globalSec": global_sec,
+            "status": pipeline_status,
+        }
         try:
             await websocket.send_text(json.dumps(msg, ensure_ascii=False))
-        except Exception as e:
-            logger.debug(f"补发状态快照失败: {e}")
+        except Exception as error:
+            logger.debug(f"补发状态快照失败: {error}")
 
     async def connect(self, websocket: WebSocket) -> None:
         """接受并注册新的客户端 WebSocket 连接,并补发已缓存的视频流 init 段."""
@@ -90,7 +110,7 @@ class WSHandler:
         """注销已断开的客户端 WebSocket 连接.
 
         Args:
-            websocket (WebSocket): 待注销的连接对象.
+            websocket: 待注销的连接对象.
         """
         if websocket in self._active_connections:
             self._active_connections.remove(websocket)
@@ -107,16 +127,18 @@ class WSHandler:
         """更新前端实际上报的画面播放时间戳（秒）.
 
         Args:
-            current_sec (float): 当前视频画面渲染所在的全局秒数.
+            current_sec: 当前视频画面渲染所在的全局秒数.
         """
         with self._playback_lock:
-            self._current_playback_sec = max(self._current_playback_sec, float(current_sec))
+            self._current_playback_sec = max(
+                self._current_playback_sec, float(current_sec)
+            )
 
     def get_playback_sec(self) -> float:
         """获取当前前端实际上报的画面播放时间戳（秒）.
 
         Returns:
-            float: 前端当前正在播放的全局秒数.
+            前端当前正在播放的全局秒数.
         """
         with self._playback_lock:
             return self._current_playback_sec
@@ -125,7 +147,7 @@ class WSHandler:
         """推送结构化元数据 batch 到所有在线客户端 (纯 JSON 文本帧).
 
         Args:
-            event (Optional[Dict[str, Any]]): 包含 globalSec 及各源数据的批次字典；
+            event: 包含 globalSec 及各源数据的批次字典；
                 若为 None 表示本轮推理结束，发送 done 哨兵文本。
         """
         if not self._active_connections or not self._loop:
@@ -149,7 +171,7 @@ class WSHandler:
         """推送纯文本 JSON 事件到所有客户端（用于评估报告流式直推等高实时事件）.
 
         Args:
-            event (Dict[str, Any]): 待推送的 JSON 事件字典.
+            event: 待推送的 JSON 事件字典.
         """
         if not self._active_connections or not self._loop:
             return
@@ -179,8 +201,8 @@ class WSHandler:
         for view, data in self._vis_init_cache.items():
             try:
                 await websocket.send_bytes(self._build_vis_payload(view, "init", data))
-            except Exception as e:
-                logger.error(f"补发 init 段失败 [{view}]: {e}")
+            except Exception as error:
+                logger.error(f"补发 init 段失败 [{view}]: {error}")
 
     def send_vis_chunk(self, view: str, seg_type: str, data: bytes) -> None:
         """把一段 fMP4(init/media/end)以二进制帧推给所有在线客户端.
@@ -209,6 +231,6 @@ class WSHandler:
         """获取当前在线 WebSocket 客户端数量.
 
         Returns:
-            int: 在线客户端数.
+            在线客户端数.
         """
         return len(self._active_connections)

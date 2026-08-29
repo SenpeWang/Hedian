@@ -8,6 +8,7 @@ import json
 import logging
 import time
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, JSONResponse
@@ -19,12 +20,22 @@ logger = logging.getLogger("web.server")
 
 
 def create_app(
-    config: dict,
-    event_bus,
-    paths,
-    inference_sync=None,
+    config: Dict[str, Any],
+    event_bus: Any,
+    paths: Any,
+    inference_sync: Optional[Any] = None,
 ) -> FastAPI:
-    """创建 FastAPI 应用."""
+    """创建 FastAPI 应用.
+
+    Args:
+        config: 全局配置字典.
+        event_bus: 跨进程消息总线.
+        paths: 路径配置.
+        inference_sync: 推理流同步器，可为 None.
+
+    Returns:
+        已装配全部路由与中间件的 FastAPI 应用.
+    """
     app = FastAPI(title="Hedian A_DemoSrc")
 
     # WebSocket 处理器
@@ -33,7 +44,7 @@ def create_app(
     # 流水线状态
     pipeline_state = {"status": "idle"}
 
-    def _r():
+    def _get_redis():
         """新建 Redis 连接（连接参数从 config 注入）."""
         from core.redis_conn import get_redis_client
         return get_redis_client(
@@ -51,19 +62,19 @@ def create_app(
 
     @app.post("/start")
     async def start(request: Request):
-        """启动流水线（幂等：已在运行时拒绝重复启动."""
+        """启动流水线（幂等：已在运行时拒绝重复启动）."""
         if pipeline_state["status"] == "running":
             logger.warning("拒绝重复启动：流水线已在运行")
             return {"status": "already_running"}
 
         # 一次性清理所有推理流/事件/进度 key（scan_iter 遍历时删除安全）
-        r = _r()
-        r.flushdb()
+        redis_client = _get_redis()
+        redis_client.flushdb()
         ws_handler.reset()
         logger.info("已执行 r.flushdb() 彻底清空 Redis 历史残留数据")
 
         sig_time = time.time()
-        r.set("pipeline:start_signal", str(sig_time), ex=3600)
+        redis_client.set("pipeline:start_signal", str(sig_time), ex=3600)
 
         from datetime import datetime
         new_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
@@ -82,19 +93,19 @@ def create_app(
 
     @app.post("/stop")
     async def stop(request: Request):
-        """停止."""
+        """停止流水线并清理 Redis 中残留的推理/模块/流水线状态."""
         stop_fn = getattr(app.state, "stop_pipeline", None)
         stopped_count = 0
         if stop_fn:
             stopped_count = stop_fn()
 
-        r = _r()
-        for key in r.scan_iter("inference:*"):
-            r.delete(key)
-        for key in r.scan_iter("module:*"):
-            r.delete(key)
-        for key in r.scan_iter("pipeline:*"):
-            r.delete(key)
+        redis_client = _get_redis()
+        for key in redis_client.scan_iter("inference:*"):
+            redis_client.delete(key)
+        for key in redis_client.scan_iter("module:*"):
+            redis_client.delete(key)
+        for key in redis_client.scan_iter("pipeline:*"):
+            redis_client.delete(key)
 
         if inference_sync:
             inference_sync.reset()
@@ -112,12 +123,12 @@ def create_app(
 
     @app.post("/reset")
     async def reset(request: Request):
-        """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存,回到干净 idle."""
+        """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存."""
         stop_fn = getattr(app.state, "stop_pipeline", None)
         stopped_count = stop_fn() if stop_fn else 0
         # 彻底清空所有 Redis 残留(与 /start 一致), 不遗漏非前缀 key
-        r = _r()
-        r.flushdb()
+        redis_client = _get_redis()
+        redis_client.flushdb()
         if inference_sync:
             inference_sync.reset()
         ws_handler.clear_vis_cache()
@@ -127,7 +138,7 @@ def create_app(
 
     @app.websocket("/ws/data")
     async def websocket_data(websocket: WebSocket):
-        """websocket数据."""
+        """处理 WebSocket 双工连接:接收心跳与播放进度,断开时注销连接."""
         ws_handler.set_event_loop(asyncio.get_running_loop())
         await ws_handler.connect(websocket)
         try:
@@ -143,8 +154,8 @@ def create_app(
                     pass
         except WebSocketDisconnect:
             ws_handler.disconnect(websocket)
-        except Exception as e:
-            logger.debug(f"WebSocket 非预期断开: {e}")
+        except Exception as error:
+            logger.debug(f"WebSocket 非预期断开: {error}")
             ws_handler.disconnect(websocket)
 
     async def _video_response(prefix: str, name: str):
@@ -169,7 +180,7 @@ def create_app(
 
     @app.get("/status")
     async def status():
-        """状态."""
+        """获取流水线状态与在线 WebSocket 客户端数."""
         return {
             "pipeline": pipeline_state["status"],
             "ws_clients": ws_handler.get_client_count(),
@@ -177,19 +188,27 @@ def create_app(
 
     @app.get("/api/config")
     async def get_config():
-        """获取配置."""
+        """获取运行时配置."""
         return config
 
     @app.get("/api/modules")
     async def get_modules():
-        """获取modules."""
+        """获取启用的模块配置."""
         return {"modules": config.get("modules", {})}
 
     class NoCacheStaticFiles(StaticFiles):
         """禁用浏览器缓存的静态文件服务."""
 
-        async def get_response(self, path: str, scope):
-            """获取response."""
+        async def get_response(self, path: str, scope: Any):
+            """生成带禁用缓存响应头的静态文件响应.
+
+            Args:
+                path: 请求的静态文件路径.
+                scope: ASGI 连接作用域.
+
+            Returns:
+                已附加 Cache-Control/Pragma/Expires 响应头的文件响应.
+            """
             response = await super().get_response(path, scope)
             response.headers[
                 "Cache-Control"] = "no-cache, no-store, must-revalidate"
