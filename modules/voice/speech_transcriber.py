@@ -1,13 +1,13 @@
-"""
-语音转文字模块.
+"""语音转文字模块：基于 Qwen3-ASR 转录音频，带后处理纠错与幻觉过滤.
 
-使用 Qwen3-ASR 进行语音转录，带后处理纠错和幻觉过滤。
+分段转录音频并做重叠去重，随后应用拼音纠错、设备码归一化与关键词匹配，
+产出带时间戳的词表与关键事件（key_moment）。
 """
+import logging
 import os
 import re
-import logging
 import unicodedata
-from typing import List, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 
@@ -40,16 +40,36 @@ CORRECTIONS = [
 
 
 def apply_corrections(text: str) -> str:
-    """应用后处理纠错规则，按最长匹配优先."""
+    """应用后处理纠错规则，按最长匹配优先替换并压缩连续标点.
+
+    Args:
+        text: ASR 原始识别文本.
+
+    Returns:
+        应用全部纠错规则与标点压缩后的文本.
+    """
     corrected = text
-    for wrong, right in sorted(CORRECTIONS, key=lambda x: len(x[0]), reverse=True):
+    for wrong, right in sorted(
+        CORRECTIONS,
+        key=lambda correction: len(correction[0]),
+        reverse=True,
+    ):
         corrected = corrected.replace(wrong, right)
     return re.sub(r'[。，]{3,}', '。', corrected)
 
 
 # ======================== Qwen3-ASR 辅助函数 ========================
-def _read_attr_or_key(item, *names, default=None):
-    """读取attrorkey."""
+def _read_attr_or_key(item: Any, *names: str, default: Any = None) -> Any:
+    """按候选名依次读取字典键或对象属性.
+
+    Args:
+        item: 待读取的字典或对象.
+        *names: 候选字段名，按顺序尝试.
+        default: 全部候选都不存在时返回的默认值.
+
+    Returns:
+        第一个命中的字段值，未命中时返回 default.
+    """
     for name in names:
         if isinstance(item, dict) and name in item:
             return item[name]
@@ -57,8 +77,17 @@ def _read_attr_or_key(item, *names, default=None):
             return getattr(item, name)
     return default
 
-def _safe_float(value, default=0.0):
-    """safefloat."""
+
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    """把任意输入安全转换为浮点数，空值与非法输入回退到默认值.
+
+    Args:
+        value: 待转换的值，允许为 None 或空字符串.
+        default: 转换失败或输入为空时返回的默认值.
+
+    Returns:
+        转换得到的浮点数.
+    """
     try:
         if value is None or value == "":
             return default
@@ -66,8 +95,23 @@ def _safe_float(value, default=0.0):
     except (TypeError, ValueError):
         return default
 
-def normalize_qwen_results(results, duration_seconds=0.0):
-    """归一化qwen结果."""
+
+def normalize_qwen_results(
+    results: Any,
+    duration_seconds: float = 0.0,
+) -> List[Dict[str, Any]]:
+    """把 Qwen3-ASR 返回结果统一归一化为段级字典列表.
+
+    兼容列表/单对象两种返回形态，并按 time_stamps/timestamps/words 三个
+    候选字段读取字级时间戳；无字级信息时退回段级起止时间。
+
+    Args:
+        results: Qwen3-ASR 的原始返回结果.
+        duration_seconds: 音频总时长（秒），用于无字级信息时兜底段结束时间.
+
+    Returns:
+        段级结果列表，每项含 start/end/text，有字级信息时附加 words.
+    """
     if results is None:
         return []
     if not isinstance(results, (list, tuple)):
@@ -76,14 +120,14 @@ def normalize_qwen_results(results, duration_seconds=0.0):
     segments = []
     for result in results:
         text = str(_read_attr_or_key(result, "text", default="") or "").strip()
-        raw_stamps = (
+        raw_timestamps = (
             _read_attr_or_key(result, "time_stamps")
             or _read_attr_or_key(result, "timestamps")
             or _read_attr_or_key(result, "words")
             or []
         )
         words = []
-        for stamp in raw_stamps:
+        for stamp in raw_timestamps:
             word_text = str(
                 _read_attr_or_key(stamp, "text", "word", "token", default="") or ""
             ).strip()
@@ -98,10 +142,10 @@ def normalize_qwen_results(results, duration_seconds=0.0):
             })
 
         if words:
-            start = min(word["start"] for word in words)
-            end = max(word["end"] for word in words)
+            start = min(word_item["start"] for word_item in words)
+            end = max(word_item["end"] for word_item in words)
             if not text:
-                text = "".join(word["word"] for word in words)
+                text = "".join(word_item["word"] for word_item in words)
         else:
             start = 0.0
             end = float(duration_seconds or 0.0)
@@ -109,22 +153,21 @@ def normalize_qwen_results(results, duration_seconds=0.0):
         if not text:
             continue
 
-        item = {
+        segment_result = {
             "start": float(start),
             "end": float(end if end >= start else start),
             "text": text,
         }
         if words:
-            item["words"] = words
-        segments.append(item)
+            segment_result["words"] = words
+        segments.append(segment_result)
     return segments
 
 
 class SpeechTranscriber:
-    """
-    语音转文字器.
+    """基于 Qwen3-ASR 的语音转文字器.
 
-    使用 Qwen3-ASR 模型进行语音转录，带后处理纠错。
+    负责模型加载、分段转录与去重，结果的后处理纠错在文本归一化函数中完成。
     """
 
     def __init__(
@@ -134,17 +177,29 @@ class SpeechTranscriber:
         sample_rate: int = 16000,
         device: str = "cuda",
         torch_dtype: Optional[str] = None,
-    ):
-        """初始化."""
+    ) -> None:
+        """初始化转录器配置，模型在此阶段不会加载.
+
+        Args:
+            model_path: Qwen3-ASR 模型本地路径.
+            aligner_path: Word-level Aligner 路径，存在时启用字级时间戳.
+            sample_rate: 目标采样率（Hz）.
+            device: 推理设备，"cuda" 或 "cpu".
+            torch_dtype: PyTorch 数据类型名，为 None 时按设备自动选择.
+        """
         self.model_path = model_path
         self.aligner_path = aligner_path
         self.sample_rate = sample_rate
         self.device = device
         self.torch_dtype = torch_dtype
-        self._model = None
+        self._model: Any = None
 
-    def _load_model(self):
-        """加载 ASR 模型."""
+    def _load_model(self) -> None:
+        """加载 ASR 模型，已加载时直接返回.
+
+        配置 beam search 与惩罚参数；对齐器路径存在且可访问时额外启用
+        强制对齐以产出字级时间戳。
+        """
         if self._model is not None:
             return
 
@@ -154,10 +209,10 @@ class SpeechTranscriber:
 
             # 配置推理参数
             device_map = "cuda:0" if self.device == "cuda" else "cpu"
-            torch_type = getattr(torch, self.torch_dtype) if self.torch_dtype else (torch.bfloat16 if self.device == "cuda" else torch.float32)
+            torch_dtype = getattr(torch, self.torch_dtype) if self.torch_dtype else (torch.bfloat16 if self.device == "cuda" else torch.float32)
 
             kwargs = {
-                "dtype": torch_type,
+                "dtype": torch_dtype,
                 "device_map": device_map,
                 "num_beams": 5,
                 "do_sample": False,
@@ -170,7 +225,7 @@ class SpeechTranscriber:
             if self.aligner_path and os.path.exists(self.aligner_path):
                 kwargs["forced_aligner"] = self.aligner_path
                 kwargs["forced_aligner_kwargs"] = {
-                    "dtype": torch_type,
+                    "dtype": torch_dtype,
                     "device_map": device_map,
                 }
                 logger.info(f"开启 Word-level Aligner 对齐器: {self.aligner_path}")
@@ -184,16 +239,24 @@ class SpeechTranscriber:
             logger.error(f"模型加载失败: {e}", exc_info=True)
             raise
 
-    def transcribe(self, audio_path: str, progress_callback=None, on_segment=None) -> List[Dict]:
-        """
-        转录音频文件.
+    def transcribe(
+        self,
+        audio_path: str,
+        progress_callback: Optional[Any] = None,
+        on_segment: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """转录音频文件并返回带时间戳的词列表.
+
+        先加载并降噪音频、定位语音结束位置，再按滑动窗口分段转录，
+        可选地通过回调报告进度或逐段回调产出的词表。
 
         Args:
-            audio_path: 音频文件路径
-            progress_callback: 进度回调函数 callback(current_sec, total_sec)
+            audio_path: 音频文件路径.
+            progress_callback: 进度回调 callback(current_sec, total_sec)，可为 None.
+            on_segment: 逐段回调 callback(words, seg_start, seg_end, total_sec)，可为 None.
 
         Returns:
-            词列表 [{"word": str, "start": float, "end": float}, ...]
+            词列表，每项含 word/start/end；转录失败时返回空列表.
         """
         self._load_model()
 
@@ -242,11 +305,28 @@ class SpeechTranscriber:
         window_sec: float = 20,
         overlap_sec: float = 0,
         start_time: float = 0,
-        end_time: float = None,
-        progress_callback=None,
-        on_segment=None,
-    ) -> List[Dict]:
-        """分段转录(带重叠)，每段独立转录，midpoint去重."""
+        end_time: Optional[float] = None,
+        progress_callback: Optional[Any] = None,
+        on_segment: Optional[Any] = None,
+    ) -> List[Dict[str, Any]]:
+        """按滑动窗口分段转录，逐段去重后拼接为完整词表.
+
+        重叠窗口按 midpoint 去重，避免重复词；过短或过静的窗口直接跳过，
+        单段转录异常只告警不中断整体流程。
+
+        Args:
+            audio: 一维音频波形数组.
+            sr: 采样率（Hz）.
+            window_sec: 窗口时长（秒）.
+            overlap_sec: 相邻窗口重叠时长（秒），0 表示无重叠.
+            start_time: 首个窗口的起始时间（秒）.
+            end_time: 转录结束时间（秒），为 None 时取音频实际时长.
+            progress_callback: 进度回调 callback(current_sec, total_sec)，可为 None.
+            on_segment: 逐段回调 callback(words, seg_start, seg_end, total_sec)，可为 None.
+
+        Returns:
+            按时间顺序拼接的词列表，每项含 word/start/end.
+        """
         if end_time is None:
             end_time = len(audio) / sr
 
@@ -255,97 +335,131 @@ class SpeechTranscriber:
             step = window_sec
 
         windows = []
-        t = float(start_time)
-        while t < end_time:
-            cur_end = min(t + window_sec, end_time)
-            windows.append((t, cur_end))
-            t += step
+        window_start = float(start_time)
+        while window_start < end_time:
+            window_end = min(window_start + window_sec, end_time)
+            windows.append((window_start, window_end))
+            window_start += step
 
         all_words = []
 
-        for i, (t, cur_end) in enumerate(windows, start=1):
+        for segment_index, (window_start, window_end) in enumerate(windows, start=1):
             if progress_callback:
-                progress_callback(t, end_time)
+                progress_callback(window_start, end_time)
 
-            start_sample = int(t * sr)
-            end_sample = min(int(cur_end * sr), len(audio))
-            seg_audio = audio[start_sample:end_sample]
+            start_sample = int(window_start * sr)
+            end_sample = min(int(window_end * sr), len(audio))
+            segment_audio = audio[start_sample:end_sample]
 
-            if len(seg_audio) < sr * 0.5:
+            if len(segment_audio) < sr * 0.5:
                 continue
-            seg_rms = np.sqrt(np.mean(seg_audio ** 2))
-            if seg_rms < 0.002:
+            segment_rms = np.sqrt(np.mean(segment_audio ** 2))
+            if segment_rms < 0.002:
                 continue
 
             try:
                 results = self._model.transcribe(
-                    audio=(seg_audio, sr),
+                    audio=(segment_audio, sr),
                     language="Chinese",
-                    return_time_stamps=bool(self.aligner_path and os.path.exists(self.aligner_path)),
+                    return_time_stamps=bool(
+                        self.aligner_path and os.path.exists(self.aligner_path)
+                    ),
                 )
-                normalized = normalize_qwen_results(results, duration_seconds=len(seg_audio)/sr)
+                normalized = normalize_qwen_results(
+                    results, duration_seconds=len(segment_audio) / sr
+                )
 
                 try:
                     from opencc import OpenCC
-                    cc = OpenCC("t2s")
+                    converter = OpenCC("t2s")
                 except ImportError:
-                    cc = None
+                    converter = None
 
-                seg_words = []
-                for seg in normalized:
-                    txt = seg.get("text", "").strip()
-                    if cc is not None:
-                        txt = cc.convert(txt)
-                    if txt:
-                        if "words" in seg and seg["words"]:
-                            for w in seg["words"]:
-                                seg_words.append({
-                                    "start": round(t + float(w.get("start", 0.0)), 3),
-                                    "end": round(t + float(w.get("end", 0.0)), 3),
-                                    "word": w.get("word") or w.get("text") or "",
+                segment_words = []
+                for segment in normalized:
+                    text = segment.get("text", "").strip()
+                    if converter is not None:
+                        text = converter.convert(text)
+                    if text:
+                        if "words" in segment and segment["words"]:
+                            for word_item in segment["words"]:
+                                segment_words.append({
+                                    "start": round(
+                                        window_start + float(word_item.get("start", 0.0)), 3
+                                    ),
+                                    "end": round(
+                                        window_start + float(word_item.get("end", 0.0)), 3
+                                    ),
+                                    "word": word_item.get("word")
+                                    or word_item.get("text")
+                                    or "",
                                 })
                         else:
-                            st = round(t + float(seg.get("start", 0.0)), 3)
-                            et = round(t + float(seg.get("end", 0.0)), 3)
-                            seg_words.append({
-                                "word": txt,
-                                "start": st,
-                                "end": et
+                            start_sec = round(
+                                window_start + float(segment.get("start", 0.0)), 3
+                            )
+                            end_sec = round(
+                                window_start + float(segment.get("end", 0.0)), 3
+                            )
+                            segment_words.append({
+                                "word": text,
+                                "start": start_sec,
+                                "end": end_sec
                             })
 
                 # midpoint去重: 平铺模式下，只需直接保留字词起始时间大于 midpoint 的项
-                if overlap_sec > 0 and i > 1 and all_words:
-                    mid = t + overlap_sec / 2
-                    seg_words = [w for w in seg_words if w["start"] >= mid]
+                if overlap_sec > 0 and segment_index > 1 and all_words:
+                    mid = window_start + overlap_sec / 2
+                    segment_words = [
+                        word_item for word_item in segment_words
+                        if word_item["start"] >= mid
+                    ]
 
-                all_words.extend(seg_words)
+                all_words.extend(segment_words)
 
                 if progress_callback:
-                    progress_callback(cur_end, end_time)
+                    progress_callback(window_end, end_time)
 
-                if seg_words and on_segment:
+                if segment_words and on_segment:
                     # 单字无须应用多字纠错，直接将平铺词表传递给 downstream 回调即可
-                    on_segment(seg_words, t, cur_end, end_time)
+                    on_segment(segment_words, window_start, window_end, end_time)
 
             except Exception as e:
-                logger.warning("segment failed (%.1f-%.1fs): %s", t, cur_end, e)
+                logger.warning("segment failed (%.1f-%.1fs): %s", window_start, window_end, e)
 
         return all_words
 
+    def _detect_speech_end(
+        self,
+        audio: np.ndarray,
+        sr: int,
+        frame_len: int = 2048,
+        hop: int = 512,
+        rms_threshold: float = 0.005,
+    ) -> float:
+        """从音频尾部向前扫描，定位最后一个有效语音帧的结束时间（秒）.
 
-    def _detect_speech_end(self, audio: np.ndarray, sr: int, frame_len=2048, hop=512, rms_threshold=0.005) -> float:
-        """从音频尾部向前扫描，找到最后一个 RMS > threshold 的位置（秒."""
+        Args:
+            audio: 一维音频波形数组.
+            sr: 采样率（Hz）.
+            frame_len: 帧长（样本数）.
+            hop: 帧移（样本数）.
+            rms_threshold: 判定为语音的 RMS 能量阈值.
+
+        Returns:
+            语音结束时间（秒），上限为音频总时长.
+        """
         n_frames = 1 + (len(audio) - frame_len) // hop
         if n_frames <= 0:
             return len(audio) / sr
         rms = np.array([
-            np.sqrt(np.mean(audio[i*hop : i*hop+frame_len] ** 2))
-            for i in range(n_frames)
+            np.sqrt(np.mean(audio[frame_index*hop : frame_index*hop+frame_len] ** 2))
+            for frame_index in range(n_frames)
         ])
         last_active = n_frames - 1
-        for i in range(n_frames - 1, -1, -1):
-            if rms[i] > rms_threshold:
-                last_active = i
+        for frame_index in range(n_frames - 1, -1, -1):
+            if rms[frame_index] > rms_threshold:
+                last_active = frame_index
                 break
         end_sec = (last_active * hop + frame_len) / sr
         return min(end_sec, len(audio) / sr)
@@ -387,8 +501,19 @@ LETTER_WORDS = {
     "诶": "A",
 }
 
-def _convert_cn_number(token):
-    """转换cnnumber."""
+
+def _convert_cn_number(token: str) -> str:
+    """把中文数字串转换为阿拉伯数字字符串.
+
+    含十/百/千等量词时按位权累加（如"一百二十三"→"123"），纯个位数时
+    逐字映射（如"幺三五"→"135"）；无法识别的字符直接丢弃。
+
+    Args:
+        token: 中文数字文本片段.
+
+    Returns:
+        转换后的阿拉伯数字字符串，无有效字符时为空字符串.
+    """
     if not token:
         return ""
     if any(ch in CN_UNITS for ch in token):
@@ -411,8 +536,19 @@ def _convert_cn_number(token):
             chars.append(str(CN_DIGITS[ch]))
     return "".join(chars)
 
-def normalize_spoken_text(text):
-    """把口语化的设备码文本归一化为纯英文+数字格式."""
+
+def normalize_spoken_text(text: str) -> str:
+    """把口语化的设备码文本归一化为纯英文+数字格式.
+
+    依次做全角转半角、大小写统一、小数点归一、字母音译还原、中文数字
+    转阿拉伯数字、前缀补齐与 RPR→RPA 纠错，最后只保留字母数字和小数点。
+
+    Args:
+        text: 可能含中文数字与音译字母的设备码文本.
+
+    Returns:
+        归一化后的设备码文本；输入为空时返回空字符串.
+    """
     if not text:
         return ""
     text = unicodedata.normalize("NFKC", str(text)).upper()
@@ -424,7 +560,7 @@ def normalize_spoken_text(text):
         text = text.replace(word, letter)
     text = re.sub(
         r"[零〇洞一幺腰二两三四五六七八九十百千]+",
-        lambda m: _convert_cn_number(m.group(0)),
+        lambda match: _convert_cn_number(match.group(0)),
         text,
     )
     # 常用音译前缀和数字归一化
@@ -462,8 +598,7 @@ LOOSE_DEVICE_PATTERN = re.compile(
 
 
 def normalize_devices_in_text(text: str) -> str:
-    """
-    把文本中的设备码片段归一化为纯英文+数字格式（保留其他中文）.
+    """把文本中的设备码片段归一化为纯英文+数字格式（保留其他中文）.
 
     严格校验不同类型设备码的正确长度：
       - 九字码 (1EAS) 必须为 9 字符
@@ -471,6 +606,12 @@ def normalize_devices_in_text(text: str) -> str:
       - RPA 必须为 7 字符
       - LCO 必须为 8 字符
       - SM 必须为 3 字符
+
+    Args:
+        text: 可能混有设备码片段的整句文本.
+
+    Returns:
+        设备码已被替换为规范形式的文本；输入为空时返回空字符串.
     """
     if not text:
         return ""
@@ -478,9 +619,16 @@ def normalize_devices_in_text(text: str) -> str:
     # 预处理：去除所有的空格和制表符，以匹配 ASR 偶发的空格分割（如 "E E S" 或 "T 1 R P A"）
     cleaned_text = re.sub(r"\s+", "", text)
 
-    def _norm(m):
-        """norm."""
-        normalized = normalize_spoken_text(m.group(0))
+    def _normalize_device_code(match):
+        """归一化单个设备码匹配片段并校验其长度合法性.
+
+        Args:
+            match: 宽松设备码模式的单个匹配对象.
+
+        Returns:
+            长度合法时返回归一化结果，否则原样返回.
+        """
+        normalized = normalize_spoken_text(match.group(0))
         # 根据前缀严格校验其各自正确的字符长度
         is_valid = False
         if normalized.startswith("1EAS"):
@@ -496,18 +644,28 @@ def normalize_devices_in_text(text: str) -> str:
 
         if is_valid:
             return normalized
-        return m.group(0)  # 长度或格式不符，不予归一化，保留原样
+        return match.group(0)  # 长度或格式不符，不予归一化，保留原样
 
-    return LOOSE_DEVICE_PATTERN.sub(_norm, cleaned_text)
+    return LOOSE_DEVICE_PATTERN.sub(_normalize_device_code, cleaned_text)
 
 
 # 拼音模糊编辑距离（Levenshtein 距离）匹配算法
-def match_keyword_by_pinyin_levenshtein(text: str, keyword: str, max_distance: int = 1) -> bool:
-    """
-    利用拼音序列滑动窗口编辑距离，在 ASR 文本中寻找发音高度相似的关键词.
+def match_keyword_by_pinyin_levenshtein(
+    text: str,
+    keyword: str,
+    max_distance: int = 1,
+) -> bool:
+    """利用拼音序列滑动窗口编辑距离，在 ASR 文本中寻找发音高度相似的关键词.
 
-    - max_distance: 允许的最大单字拼音不同数量，1 表示最多允许错一个字音
-    - 相比 Syllable Intersection 比例比对，能极大地避免字词交集造成的误判，并提供优秀的 ASR 音似容错
+    相比音节交集比例比对，能极大避免字词交集造成的误判，并提供优秀的 ASR 音似容错.
+
+    Args:
+        text: 待匹配的 ASR 识别文本.
+        keyword: 目标关键词.
+        max_distance: 允许的最大单字拼音不同数量，1 表示最多允许错一个字音.
+
+    Returns:
+        滑动窗口内存在拼音编辑距离不超过 max_distance 的子序列时返回 True.
     """
     try:
         import pypinyin
@@ -517,32 +675,39 @@ def match_keyword_by_pinyin_levenshtein(text: str, keyword: str, max_distance: i
     keyword_pinyins = pypinyin.lazy_pinyin(keyword)
     text_pinyins = pypinyin.lazy_pinyin(text)
 
-    n, m = len(text_pinyins), len(keyword_pinyins)
-    if n < m:
+    text_count, keyword_count = len(text_pinyins), len(keyword_pinyins)
+    if text_count < keyword_count:
         return False
 
     # 滑动窗口比对拼音序列
-    for i in range(n - m + 1):
-        sub_pinyins = text_pinyins[i:i+m]
-        dist = sum(1 for p1, p2 in zip(sub_pinyins, keyword_pinyins) if p1 != p2)
-        if dist <= max_distance:
+    for window_offset in range(text_count - keyword_count + 1):
+        sub_pinyins = text_pinyins[window_offset:window_offset+keyword_count]
+        distance = sum(1 for p1, p2 in zip(sub_pinyins, keyword_pinyins) if p1 != p2)
+        if distance <= max_distance:
             return True
     return False
 
 
 def match_keyword_by_pinyin(text: str, keyword: str) -> bool:
-    """
-    综合文本精准匹配与拼音编辑距离匹配.
+    """综合文本精准匹配与拼音编辑距离匹配.
 
-    - 对于长度 <= 3 的短关键词（如“监护”、“核对”、“收到”），拼音必须严格 100% 匹配（max_distance = 0）
-    - 对于长度 >= 4 的长关键词（如“请求监护”、“信息通报”），允许 1 位字音偏差（max_distance = 1）以容忍 ASR 偶发的字词偏差
+    短关键词（长度 <= 3，如"监护"、"核对"、"收到"）要求拼音严格 100% 匹配；
+    长关键词（长度 >= 4，如"请求监护"、"信息通报"）允许 1 位字音偏差以容忍
+    ASR 偶发的字词偏差.
+
+    Args:
+        text: 待匹配的 ASR 识别文本.
+        keyword: 目标关键词.
+
+    Returns:
+        文本包含关键词原文，或存在符合长度规则编辑距离的拼音相似子序列时返回 True.
     """
     if keyword in text:
         return True
 
     # 动态设定最大编辑距离
-    max_dist = 1 if len(keyword) >= 4 else 0
-    return match_keyword_by_pinyin_levenshtein(text, keyword, max_distance=max_dist)
+    max_distance = 1 if len(keyword) >= 4 else 0
+    return match_keyword_by_pinyin_levenshtein(text, keyword, max_distance=max_distance)
 
 
 # 关键词识别：(关键词, 标签) 列表 - 标签是发送给规则模块的 key_moment 值
@@ -561,50 +726,66 @@ KEYWORD_LABELS = [
 ]
 
 
-def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) -> List[Dict]:
-    """
-    对字/词按停顿切分出段落，并提取关键事件.
+def process_transcribed_words(
+    words: List[Dict[str, Any]],
+    sentence_gap_sec: float = 1.0,
+) -> List[Dict[str, Any]]:
+    """对字/词按停顿切分出句子，并提取关键事件.
 
-    - 每个句子推送一条事件（带完整 text）
-    - 检测到的关键词和 9 字符设备码作为 key_moment
-    - 没有关键词的句子也推送（key_moment 为空字符串）
+    每个句子推送一条事件（带完整 text）；检测到的关键词与 9 字符设备码作为
+    key_moment；没有关键词的句子也推送（key_moment 为空字符串）.
+
+    Args:
+        words: 带 start/end/word 字段的时间戳词表.
+        sentence_gap_sec: 判定句子边界的词间停顿阈值（秒）.
+
+    Returns:
+        关键事件列表，每项包含 localSec、key_moment、keys，首条含 text.
     """
     if not words:
         return []
 
-    words = [w for w in words if w is not None and w.get("word")]
+    words = [
+        word_item for word_item in words
+        if word_item is not None and word_item.get("word")
+    ]
     if not words:
         return []
 
     # 分句：按停顿切分
     sentences = []
-    cur = []
-    for w in words:
-        if cur and w["start"] - cur[-1]["end"] > sentence_gap_sec:
-            sentences.append(cur)
-            cur = [w]
+    current_sentence = []
+    for word_item in words:
+        if current_sentence and (
+            word_item["start"] - current_sentence[-1]["end"] > sentence_gap_sec
+        ):
+            sentences.append(current_sentence)
+            current_sentence = [word_item]
         else:
-            cur.append(w)
-    if cur:
-        sentences.append(cur)
+            current_sentence.append(word_item)
+    if current_sentence:
+        sentences.append(current_sentence)
 
     events = []
-    for sent_words in sentences:
-        raw_text = "".join(w["word"] for w in sent_words)
+    for sentence_words in sentences:
+        raw_text = "".join(word_item["word"] for word_item in sentence_words)
         if not raw_text.strip():
             continue
 
-        text = apply_corrections(raw_text) # 关键纠错：让比对和最终通知文本均使用纠错后的规范汉字，以便能够正确匹配并上报“请求监护”等关键事件
-        audio_ts = round(sent_words[0]["start"], 2)
+        # 关键纠错：让比对和最终通知文本均使用纠错后的规范汉字，以便能够正确匹配并上报“请求监护”等关键事件
+        text = apply_corrections(raw_text)
+        audio_timestamp = round(sentence_words[0]["start"], 2)
 
         # 设备码提取：用 finditer 拆分串联码，提取所有合法 9 字符设备码
-        norm_text = normalize_spoken_text(text)
-        devices = [m.group(1) for m in NORM_DEVICE_PATTERN.finditer(norm_text)]
+        normalized_text = normalize_spoken_text(text)
+        device_codes = [
+            match.group(1) for match in NORM_DEVICE_PATTERN.finditer(normalized_text)
+        ]
 
         # 收集所有匹配的关键字（严格拼音匹配，要求所有音节都出现）
         found_keywords = []
-        for device in devices:
-            found_keywords.append(device)
+        for device_code in device_codes:
+            found_keywords.append(device_code)
         for keyword, label in KEYWORD_LABELS:
             if keyword == "收到":
                 # "收到" 容易在长段落中误报，仅在完全一致或满足拼音相似度时才上报
@@ -616,23 +797,32 @@ def process_transcribed_words(words: List[Dict], sentence_gap_sec: float = 1.0) 
         # 去重（保持顺序）
         seen = set()
         unique_keywords = []
-        for km in found_keywords:
-            if km not in seen:
-                seen.add(km)
-                unique_keywords.append(km)
+        for key_moment in found_keywords:
+            if key_moment not in seen:
+                seen.add(key_moment)
+                unique_keywords.append(key_moment)
 
         # 每句推一条事件（带完整 text + key_moment 列表）
         # 如果有关键词/设备码，第一个事件带 text，后续事件只带 key_moment
         if unique_keywords:
             first = True
-            for km in unique_keywords:
-                ev = {"localSec": audio_ts, "key_moment": km, "keys": unique_keywords}
+            for key_moment in unique_keywords:
+                event = {
+                    "localSec": audio_timestamp,
+                    "key_moment": key_moment,
+                    "keys": unique_keywords,
+                }
                 if first:
-                    ev["text"] = text
+                    event["text"] = text
                     first = False
-                events.append(ev)
+                events.append(event)
         else:
             # 没有关键词也推送完整文本（用于推理流展示）
-            events.append({"localSec": audio_ts, "text": text, "key_moment": "", "keys": []})
+            events.append({
+                "localSec": audio_timestamp,
+                "text": text,
+                "key_moment": "",
+                "keys": [],
+            })
 
     return events
