@@ -11,6 +11,7 @@
 (5)收到“收到”等语音给予回应。
 """
 import logging
+from typing import Any, Dict, Optional
 
 from core.event_bus import EventBus, EventTopic
 from rules.rule_base import BaseRule
@@ -21,10 +22,14 @@ logger = logging.getLogger("rules.info_notice")
 class InfoNoticeRule(BaseRule):
     """信息通报制度."""
 
-    def __init__(self, config: dict = None):
-        """初始化."""
+    def __init__(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """初始化信息通报制度.
+
+        Args:
+            config: 制度配置字典，可为 None.
+        """
         self._config = config or {}
-        self._event_bus = None
+        self._event_bus: Optional[EventBus] = None
 
         self._active = False
         self._flow_id = 0
@@ -44,11 +49,15 @@ class InfoNoticeRule(BaseRule):
         }
 
     def name(self) -> str:
-        """名称."""
+        """制度名称."""
         return "info_notice"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
-        """订阅events."""
+        """订阅本制度关心的事件.
+
+        Args:
+            event_bus: 事件总线.
+        """
         self._event_bus = event_bus
         event_bus.subscribe(EventTopic.VOICE_KEY_MOMENT, self._on_voice_intent)
         event_bus.subscribe(EventTopic.BEHAVIOR_HAND_RAISED,
@@ -56,7 +65,12 @@ class InfoNoticeRule(BaseRule):
         event_bus.subscribe(EventTopic.GAZE_ATTENTION, self._on_gaze_status)
 
     def _start_flow(self, ts: float, source: str) -> None:
-        """启动流程."""
+        """启动信息通报流程.
+
+        Args:
+            ts: 流程开始时间（秒）.
+            source: 流程触发来源（如 voice）.
+        """
         self._active = True
         self._flow_id = self._next_flow_id()
         self._flow_start_sec = ts
@@ -85,8 +99,18 @@ class InfoNoticeRule(BaseRule):
             f"信息通报流程开始 flow_id={self._flow_id} @{ts:.1f}s 伴随举手={has_hand_raise} source={source}"
         )
 
-    def _close_flow(self, ts: float = 0, source: str = "unknown") -> dict:
-        """关闭流程."""
+    def _close_flow(
+        self, ts: float = 0, source: str = "unknown"
+    ) -> Dict[str, Any]:
+        """关闭信息通报流程并发布 FLOW_ENDED 事件.
+
+        Args:
+            ts: 流程结束时间（秒）.
+            source: 结束来源（如 normal_end）.
+
+        Returns:
+            流程事件字典；无活跃流程时返回 None.
+        """
         if not self._active:
             return None
 
@@ -112,20 +136,20 @@ class InfoNoticeRule(BaseRule):
 
         return flow
 
-    def _on_hand_raised(self, msg: dict) -> None:
-        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}."""
-        data = msg.get("data", {})
-        ts = data.get("localSec", msg.get("ts", 0))
+    def _on_hand_raised(self, event: Dict[str, Any]) -> None:
+        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}）."""
+        payload = event.get("data", {})
+        ts = payload.get("localSec", event.get("ts", 0))
 
         # 记录举手时间，用于 _start_flow 判定 5 秒内是否伴随举手
         self._last_hand_raise_ts = ts
         logger.debug(f"信息通报: 收到举手事件 @{ts:.1f}s（单独举手不触发信息通报流程）")
 
-    def _on_voice_intent(self, msg: dict) -> None:
-        """处理语音事件（仅包含 localSec 和 key_moment 字段."""
-        data = msg.get("data", {})
-        key_moment = data.get("key_moment", "")
-        ts = data.get("localSec", msg.get("ts", 0.0))
+    def _on_voice_intent(self, event: Dict[str, Any]) -> None:
+        """处理语音事件（事件流仅包含 localSec 和 key_moment 字段）."""
+        payload = event.get("data", {})
+        key_moment = payload.get("key_moment", "")
+        ts = payload.get("localSec", event.get("ts", 0.0))
         if not key_moment:
             return
 
@@ -148,13 +172,13 @@ class InfoNoticeRule(BaseRule):
                 self._checklist["received_acknowledged"] = True
                 logger.info(f"信息通报: 收到'收到'语音回应 @{ts:.1f}s")
 
-    def _on_gaze_status(self, msg: dict) -> None:
-        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}."""
+    def _on_gaze_status(self, event: Dict[str, Any]) -> None:
+        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}）."""
         if not self._active:
             return
-        data = msg.get("data", {})
-        ts = data.get("localSec", msg.get("ts", 0))
-        has_turned = data.get("has_turned", False)
+        payload = event.get("data", {})
+        ts = payload.get("localSec", event.get("ts", 0))
+        has_turned = payload.get("has_turned", False)
 
         if has_turned:
             self._checklist["others_attended"] = True
@@ -174,6 +198,10 @@ class InfoNoticeRule(BaseRule):
         self._last_hand_raise_ts = -999.0
 
 
-def register():
-    """注册."""
+def register() -> InfoNoticeRule:
+    """实例化并返回信息通报制度实例.
+
+    Returns:
+        可注册到注册表的信息通报制度实例.
+    """
     return InfoNoticeRule()
