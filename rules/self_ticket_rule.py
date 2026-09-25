@@ -41,7 +41,11 @@ class SelfTicketRule(BaseRule):
         self._confirm_closed = False
 
     def name(self) -> str:
-        """制度名称."""
+        """制度名称.
+
+        Returns:
+            制度名称字符串.
+        """
         return "self_ticket"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
@@ -124,7 +128,11 @@ class SelfTicketRule(BaseRule):
         return flow
 
     def _on_voice_intent(self, event: Dict[str, Any]) -> None:
-        """处理语音事件."""
+        """处理语音事件.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 key_moment 字段.
+        """
         payload = event.get("data", {})
         key_moment = payload.get("key_moment", "")
         if not key_moment:

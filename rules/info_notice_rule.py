@@ -49,7 +49,11 @@ class InfoNoticeRule(BaseRule):
         }
 
     def name(self) -> str:
-        """制度名称."""
+        """制度名称.
+
+        Returns:
+            制度名称字符串.
+        """
         return "info_notice"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
@@ -137,7 +141,11 @@ class InfoNoticeRule(BaseRule):
         return flow
 
     def _on_hand_raised(self, event: Dict[str, Any]) -> None:
-        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}）."""
+        """处理 Behavior 举手（BEHAVIOR_HAND_RAISED 事件流，payload={localSec, operator}）.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 operator 字段.
+        """
         payload = event.get("data", {})
         timestamp = payload.get("localSec", event.get("ts", 0))
 
@@ -146,7 +154,11 @@ class InfoNoticeRule(BaseRule):
         logger.debug(f"信息通报: 收到举手事件 @{timestamp:.1f}s（单独举手不触发信息通报流程）")
 
     def _on_voice_intent(self, event: Dict[str, Any]) -> None:
-        """处理语音事件（事件流仅包含 localSec 和 key_moment 字段）."""
+        """处理语音事件（事件流仅包含 localSec 和 key_moment 字段）.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 key_moment 字段.
+        """
         payload = event.get("data", {})
         key_moment = payload.get("key_moment", "")
         timestamp = payload.get("localSec", event.get("ts", 0.0))
@@ -173,7 +185,11 @@ class InfoNoticeRule(BaseRule):
                 logger.info(f"信息通报: 收到'收到'语音回应 @{timestamp:.1f}s")
 
     def _on_gaze_status(self, event: Dict[str, Any]) -> None:
-        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}）."""
+        """处理 Gaze 关注度状态（GAZE_ATTENTION 事件流，payload={localSec, has_turned, displacement, ...}）.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 has_turned 字段.
+        """
         if not self._active:
             return
         payload = event.get("data", {})

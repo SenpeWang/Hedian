@@ -20,16 +20,28 @@ class BaseRule(ABC):
 
     @abstractmethod
     def name(self) -> str:
-        """制度名称，如 'supervision', 'self_ticket'."""
+        """制度名称，如 'supervision', 'self_ticket'.
+
+        Returns:
+            制度名称字符串.
+        """
         pass
 
     @abstractmethod
     def subscribe_events(self, event_bus: EventBus) -> None:
-        """声明本制度关心哪些事件."""
+        """声明本制度关心哪些事件.
+
+        Args:
+            event_bus: 事件总线.
+        """
         pass
 
     def is_active(self) -> bool:
-        """当前是否有活跃流程."""
+        """当前是否有活跃流程.
+
+        Returns:
+            当前是否存在活跃流程.
+        """
         return getattr(self, "_active", False)
 
     def finalize(self) -> Optional[Dict[str, Any]]:

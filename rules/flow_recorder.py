@@ -59,7 +59,11 @@ class FlowEventRecorder:
         logger.info(f"FlowEventRecorder 结果目录设置为: {result_dir}")
 
     def _on_flow_started(self, event: Dict[str, Any]) -> None:
-        """处理流程开始事件."""
+        """处理流程开始事件.
+
+        Args:
+            event: 事件载荷, 含 flow_id 与 flow_type 等字段.
+        """
         payload = event.get("data", {})
         flow_id = payload.get("flow_id")
         if flow_id is None:
@@ -71,7 +75,11 @@ class FlowEventRecorder:
         logger.info(f"记录流程开始 flow_id={flow_id} type={payload.get('flow_type')}")
 
     def _on_flow_ended(self, event: Dict[str, Any]) -> None:
-        """处理流程结束事件：合并开始/结束信息并保存."""
+        """处理流程结束事件：合并开始/结束信息并保存.
+
+        Args:
+            event: 事件载荷, 含 flow_id 与流程起止时间等字段.
+        """
         payload = event.get("data", {})
         flow_id = payload.get("flow_id")
         if flow_id is None:
