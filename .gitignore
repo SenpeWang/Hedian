@@ -35,6 +35,9 @@ docs/
 # Frontend dependencies
 frontend/node_modules/
 
+# Frontend build output (不入版本库, 部署与本地运行前需自行构建)
+frontend/dist/
+
 # Backup files
 *.bak
 *.bak.*

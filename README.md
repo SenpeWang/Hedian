@@ -197,7 +197,7 @@ npm install
 npm run build
 ```
 
-构建产物由后端以静态文件兜底方式托管，无需独立部署 Web 服务器。
+构建产物**不入版本库**（`frontend/dist/` 已加入 `.gitignore`），克隆仓库后必须执行本步才能在浏览器访问页面。产物由后端以静态文件兜底方式托管，无需独立部署 Web 服务器。
 
 ### 6. 验证
 
@@ -260,7 +260,7 @@ pkill -f main.py                            # 直接结束服务
 | GET | `/api/video/front` | 流式下发正面视角视频（HTTP Range 206 硬解） |
 | GET | `/api/video/pop` | 流式下发操作盘视角视频 |
 
-静态资源兜底至前端 `dist/`，并强制 `no-cache` 响应头，避免部署后取到旧产物。
+静态资源兜底至前端 `dist/`（需先执行部署指南第 5 步构建），并强制 `no-cache` 响应头，避免部署后取到旧产物。
 
 ### WebSocket `ws://<host>:5002/ws/data`
 
@@ -452,7 +452,7 @@ git push origin feature/new-feature
 # 5. 创建 Pull Request
 ```
 
-提交前自查：前端改动需通过 `npx vue-tsc --noEmit` 类型检查；构建产物 `frontend/dist/` 随源码一并提交（仓库中已跟踪）；不要提交本地环境文件。
+提交前自查：前端改动需通过 `npx vue-tsc --noEmit` 类型检查；**不要提交构建产物 `frontend/dist/`**（已在 `.gitignore` 中），如需验证请本地 `npm run build` 后自测；不要提交本地环境文件。
 
 ---
 
