@@ -34,7 +34,7 @@ class BaseModule(ABC):
         config: dict,
         paths: PathConfig,
         inference_stream: Union[InferenceStream, InferenceSync],
-    ):
+    ) -> None:
         """初始化模块.
 
         Args:
@@ -51,7 +51,7 @@ class BaseModule(ABC):
         self.logger = logging.getLogger(f"module.{self.module_name}")
         self._running = False
         self._start_time = 0.0
-        self._run_id = None
+        self._run_id: Optional[str] = None
         # 本模块产出的 source 集合（push_display 自动登记）：用于退出时上报结束信号
         self._inference_sources: set = set()
         # 仅代推、不归属本模块的 source：退出时不标记结束（其生命周期归所属模块）

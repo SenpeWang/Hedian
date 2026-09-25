@@ -15,7 +15,7 @@ logger = logging.getLogger("core.storage")
 class BaseStorage:
     """结果存储抽象基类, 封装通用的原子性 JSON 保存逻辑."""
 
-    def __init__(self, paths: PathConfig, module_name: str):
+    def __init__(self, paths: PathConfig, module_name: str) -> None:
         """初始化.
 
         Args:

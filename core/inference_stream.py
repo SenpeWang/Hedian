@@ -67,7 +67,7 @@ class InferenceStream:
         redis_port: int = 6379,
         redis_db: int = 0,
         **kwargs
-    ):
+    ) -> None:
         """初始化写入端并验证 Redis 连通性.
 
         Args:

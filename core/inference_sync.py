@@ -40,8 +40,8 @@ class InferenceSync:
         redis_port: int = 6379,
         redis_db: int = 0,
         duration: float = 0.0,
-        event_bus=None,
-    ):
+        event_bus: Optional[Any] = None,
+    ) -> None:
         """初始化同步器并清理上一轮遗留数据.
 
         Args:
@@ -268,7 +268,11 @@ class InferenceSync:
             return set()
 
     def _all_sources_done(self) -> bool:
-        """判定所有预期 source 是否都已上报结束信号."""
+        """判定所有预期 source 是否都已上报结束信号.
+
+        Returns:
+            所有预期 source 均已上报结束信号时返回 True.
+        """
         if not self._expected_sources:
             return False
         # source_done 字段为 "大类.细粒度"，按细粒度名与 expected_sources 比对
@@ -353,8 +357,17 @@ class InferenceSync:
 
     # ── Stream 读取 ─────────────────────────────────────────────
 
-    def _read_stream_entries(self, count: Optional[int] = None) -> List[Tuple[str, Dict[str, Any]]]:
-        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过."""
+    def _read_stream_entries(
+        self, count: Optional[int] = None
+    ) -> List[Tuple[str, Dict[str, Any]]]:
+        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过.
+
+        Args:
+            count: 单次读取的最大条目数，None 表示不限制.
+
+        Returns:
+            条目列表，每项为 (entry_id, fields) 二元组.
+        """
         if self._last_stream_id == "0-0":
             entries = self._redis.xrange(self._event_stream_key, min="-", max="+", count=count)
         else:
@@ -367,7 +380,14 @@ class InferenceSync:
     def _parse_stream_entries(
         self, entries: List[Tuple[str, Dict[str, Any]]]
     ) -> Tuple[List[Tuple[float, Dict[str, Any], str]], List[str]]:
-        """解析 Stream 条目为 (local_sec, event, entry_id) 三元组."""
+        """解析 Stream 条目为 (local_sec, event, entry_id) 三元组.
+
+        Args:
+            entries: _read_stream_entries 返回的原始条目列表.
+
+        Returns:
+            (已解析的事件三元组列表, 待删除的 entry_id 列表).
+        """
         events: List[Tuple[float, Dict[str, Any], str]] = []
         ids_to_delete: List[str] = []
         for entry_id, fields in entries:
@@ -452,7 +472,11 @@ class InferenceSync:
             time.sleep(POLL_INTERVAL_SEC)
 
     def _try_finish_or_push(self, global_sec: float) -> None:
-        """流式直推模式：实时将已生成的结构化推理数据推向前端，由前端时序池进行视频时间帧同步渲染."""
+        """流式直推模式：实时将已生成的结构化推理数据推向前端，由前端时序池进行视频时间帧同步渲染.
+
+        Args:
+            global_sec: 当前全局时钟(秒)，为 float("inf") 时按无上限推送.
+        """
         if self._cycle_done:
             return
 
@@ -478,7 +502,11 @@ class InferenceSync:
             self._finish_cycle(effective_sec)
 
     def _finish_cycle(self, global_sec: float) -> None:
-        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态."""
+        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态.
+
+        Args:
+            global_sec: 收尾时的全局时钟(秒)，为 float("inf") 时跳过最后一帧推送.
+        """
         logger.info("所有 expected source 已上报结束信号，本轮推理完成，刷新剩余事件并推送 done")
         if global_sec != float("inf"):
             self._push_events_up_to(global_sec)
@@ -487,7 +515,11 @@ class InferenceSync:
         self._reset_cycle()
 
     def _push_events_up_to(self, global_sec: float) -> None:
-        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送."""
+        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送.
+
+        Args:
+            global_sec: 推送水位(秒)，只推送 local_sec 不超过该值的事件.
+        """
         try:
             entries = self._read_stream_entries(count=500)
             if not entries:

@@ -59,7 +59,7 @@ class EventBus:
                  redis_port: int = 6379,
                  redis_db: int = 0,
                  consumer_name: Optional[str] = None,
-                 **kwargs):
+                 **kwargs) -> None:
         """初始化总线并验证 Redis 连通性.
 
         每进程使用独立消费组实现跨进程广播.

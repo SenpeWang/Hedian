@@ -109,7 +109,7 @@ def _deep_merge(base: dict, override: dict) -> dict:
 class ConfigManager:
     """全局配置管理器: 从 config.yaml 加载配置, 提供统一访问接口."""
 
-    def __init__(self, config_path: Optional[str] = None):
+    def __init__(self, config_path: Optional[str] = None) -> None:
         """加载配置.
 
         Args:

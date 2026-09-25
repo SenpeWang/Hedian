@@ -78,7 +78,7 @@ class VisEncoder:
         redis_port: int = 6379,
         redis_db: int = 0,
         with_audio: bool = True,
-    ):
+    ) -> None:
         """初始化编码器.
 
         Args:
