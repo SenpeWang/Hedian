@@ -1,23 +1,43 @@
+/**
+ * 字幕事件池: voice 数据解析 + 严格同步取数(sec ≤ 主时钟, 全量保留=完整对话记录).
+ */
 // 字幕事件池: voice 数据解析 + 严格同步取数(sec ≤ 主时钟, 全量保留=完整对话记录)
 import { reactive, computed, type Ref } from 'vue'
 import type { VoiceEntry } from '../types'
 
+/**
+ * 创建字幕 store: 按秒归并语音条目, 仅暴露已播时刻的内容.
+ *
+ * @param currentPlaybackSec - 主时钟 ref(源视频秒), 用于严格同步过滤.
+ * @returns voiceEntries 只读列表, 以及 addVoice / reset.
+ */
 export function useTranscript(currentPlaybackSec: Ref<number>) {
   const rawVoiceMap = reactive<Record<number, VoiceEntry>>({})
 
+  /**
+   * 消费一条语音事件: 同秒已有条目则补全文本与关键词, 否则新建.
+   *
+   * @param d - batch 中的 voice 元素.
+   */
   function addVoice(d: unknown): void {
     const src = d as { localSec?: number; data?: { sec?: number; text?: string; keys?: string[] } }
     const dt = src.data || {}
     const sec = src.localSec || dt.sec || 0
     if (!rawVoiceMap[sec]) rawVoiceMap[sec] = { sec, text: dt.text || '', keys: dt.keys || [] }
-    else if (dt.text) { rawVoiceMap[sec].text = dt.text; if (dt.keys) rawVoiceMap[sec].keys = dt.keys }
+    else if (dt.text) {
+      rawVoiceMap[sec].text = dt.text
+      if (dt.keys) rawVoiceMap[sec].keys = dt.keys
+    }
   }
 
   // 严格同步: 与画面同一时刻, 无提前量
   const voiceEntries = computed(() =>
-    Object.values(rawVoiceMap).filter(v => v.sec <= currentPlaybackSec.value).sort((a, b) => a.sec - b.sec)
+    Object.values(rawVoiceMap)
+      .filter((v) => v.sec <= currentPlaybackSec.value)
+      .sort((a, b) => a.sec - b.sec)
   )
 
+  /** 清空语音池(重新推理时调用) */
   function reset(): void {
     for (const k in rawVoiceMap) delete rawVoiceMap[Number(k)]
   }

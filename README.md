@@ -22,6 +22,7 @@
 - [项目结构](#项目结构)
 - [故障排查](#故障排查)
 - [开发说明](#开发说明)
+- [贡献指南](#贡献指南)
 - [许可证](#许可证)
 
 ---
@@ -316,6 +317,36 @@ pkill -f main.py                            # 直接结束服务
 
 ---
 
-## 许可证
+## 贡献指南
 
-Internal project. 未经许可不得外传。
+### 开发规范
+
+- **代码风格**：Python 遵循 Google Python Style Guide（类型注解完整，docstring 使用 `Args` / `Returns` 段）；前端使用 ESLint + Prettier 统一风格，提交前确认 `npx eslint 'src/**/*.{ts,vue}'` 与 `npx prettier --check 'src/**/*.{ts,vue}'` 均无告警。
+- **组件命名**：Vue 组件使用 PascalCase（如 `VideoPanel.vue`）；组合式函数以 `use` 前缀驼峰命名（如 `usePlayback.ts`）；其余变量与函数统一 camelCase。
+- **提交规范**：遵循 Conventional Commits，格式为 `<type>(<scope>): <subject>`，如 `feat(rules): ...`、`fix(web): ...`、`docs(readme): ...`。
+- **文档注释**：Python 关键函数补 `Args` / `Returns` 段；前端导出的 API 使用 TSDoc（`@param` / `@returns`）。
+
+### 提交流程
+
+```bash
+# 1. Fork 项目并克隆到本地
+git clone https://github.com/SenpeWang/Hedian.git
+
+# 2. 创建功能分支
+git checkout -b feature/new-feature
+
+# 3. 提交更改
+git commit -m "feat: 添加新功能描述"
+
+# 4. 推送分支
+git push origin feature/new-feature
+
+# 5. 创建 Pull Request
+```
+
+提交前自查：前端改动需通过 `npx vue-tsc --noEmit` 类型检查；不要提交构建产物（`frontend/dist/`）与本地环境文件。
+
+---
+
+## 许可证
+未经课题组许可不得外传。

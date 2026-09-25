@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * ReportPanel: 流程评价面板(汇总计数 + 报告卡片列表).
+ *
+ * 卡片正文(思考过程 + 评价正文)由 useTypewriter 逐字揭示, 并随揭示进度自动滚底;
+ * 折叠态由父级 store 持有, 通过 toggle 事件上抛切换意图.
+ */
 import { ref, toRef } from 'vue'
 import type { SegCard } from '../types'
 import { useScrollBottom } from '../composables/useScrollBottom'
@@ -22,7 +28,9 @@ const { shownText } = useTypewriter(toRef(props, 'segCards'))
 
 // 滚底: 依赖打字机已揭示文本(think+report), 使逐字揭示的正文也能实时滚到最新
 // 仅依赖 streamBuffer/reportText 会在后端发完、打字机仍逐字揭示时停止滚动, 导致正文追不上
-useScrollBottom(cardsEl, () => props.segCards.map(c => shownText(c, 'think') + shownText(c, 'report')).join('\n'))
+useScrollBottom(cardsEl, () =>
+  props.segCards.map((c) => shownText(c, 'think') + shownText(c, 'report')).join('\n')
+)
 
 function scoreColor(score: number) {
   return score >= 8 ? '#00ff88' : score >= 5 ? '#ffaa00' : '#ff4d4d'
@@ -47,39 +55,78 @@ function cardLabel(flowType: string) {
 <template>
   <div class="panel">
     <div class="panel-title">📋 流程评价</div>
-    <div class="panel-body" ref="cardsEl">
+    <div ref="cardsEl" class="panel-body">
       <div class="summary-grid">
-        <div><div class="val">{{ supN }}</div><div class="lbl">监护制流程</div></div>
-        <div><div class="val">{{ ticketN }}</div><div class="lbl">自唱票流程</div></div>
-        <div><div class="val">{{ noticeN }}</div><div class="lbl">信息通报</div></div>
-        <div><div class="val">{{ avg }}</div><div class="lbl">平均分</div></div>
-        <div><div class="val">{{ total }}</div><div class="lbl">总分</div></div>
+        <div>
+          <div class="val">
+            {{ supN }}
+          </div>
+          <div class="lbl">监护制流程</div>
+        </div>
+        <div>
+          <div class="val">
+            {{ ticketN }}
+          </div>
+          <div class="lbl">自唱票流程</div>
+        </div>
+        <div>
+          <div class="val">
+            {{ noticeN }}
+          </div>
+          <div class="lbl">信息通报</div>
+        </div>
+        <div>
+          <div class="val">
+            {{ avg }}
+          </div>
+          <div class="lbl">平均分</div>
+        </div>
+        <div>
+          <div class="val">
+            {{ total }}
+          </div>
+          <div class="lbl">总分</div>
+        </div>
       </div>
       <div>
-        <div v-for="card in segCards" :key="card.flowId"
-             class="seg-card" :class="{ collapsed: card.collapsed }"
-             :style="{ borderLeftColor: card.streaming ? '#6b7a90' : borderColor(card.flowType) }">
+        <div
+          v-for="card in segCards"
+          :key="card.flowId"
+          class="seg-card"
+          :class="{ collapsed: card.collapsed }"
+          :style="{ borderLeftColor: card.streaming ? '#6b7a90' : borderColor(card.flowType) }"
+        >
           <div class="sc-head" @click="emit('toggle', card.flowId)">
             <span>
               {{ card.streaming ? '🤖' : cardIcon(card.flowType) }}
-              {{ cardLabel(card.flowType) }} #{{ card.flowId }}{{ card.streaming ? '' : ' [' + card.continueSec + 's]' }}
+              {{ cardLabel(card.flowType) }} #{{ card.flowId
+              }}{{ card.streaming ? '' : ' [' + card.continueSec + 's]' }}
               <span class="sc-toggle-icon">{{ card.collapsed ? '▶' : '▼' }}</span>
             </span>
-            <span v-if="!card.streaming" class="sc-score" :style="{ color: scoreColor(card.score) }">{{ card.score }}/10</span>
+            <span v-if="!card.streaming" class="sc-score" :style="{ color: scoreColor(card.score) }"
+              >{{ card.score }}/10</span
+            >
           </div>
 
-          <div class="sc-bar" v-if="!card.streaming">
-            <div class="sc-bar-fill" :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"></div>
+          <div v-if="!card.streaming" class="sc-bar">
+            <div
+              class="sc-bar-fill"
+              :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"
+            />
           </div>
 
           <!-- 🧠 大模型思考推理过程展示框 (打字中与打字完成全时段常驻显示) -->
           <div v-if="shownText(card, 'think')" class="think-block">
             <div class="think-title">🧠 思考推理过程</div>
-            <div class="think-body">{{ shownText(card, 'think') }}</div>
+            <div class="think-body">
+              {{ shownText(card, 'think') }}
+            </div>
           </div>
 
           <!-- 📋 正式评价报告正文 -->
-          <div class="sc-detail">{{ shownText(card, 'report') }}</div>
+          <div class="sc-detail">
+            {{ shownText(card, 'report') }}
+          </div>
         </div>
       </div>
     </div>
@@ -106,5 +153,4 @@ function cardLabel(flowType: string) {
   line-height: 1.35;
   white-space: pre-wrap;
 }
-
 </style>

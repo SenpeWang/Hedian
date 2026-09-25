@@ -1,29 +1,55 @@
+/**
+ * MediaBuffer: MSE SourceBuffer 封装(状态机 + append 队列 + trim + 背压 + EOS 宽限).
+ */
 // MediaBuffer: MSE SourceBuffer 封装(状态机 + append 队列 + trim + 背压 + EOS 宽限)
 import { PLAYBACK, type ViewId } from './types'
 import type { Logger } from './logger'
 import { metrics } from './metrics'
 
-const EOS_GRACE_MS = 3000   // end 后宽限, 期内新数据到达则取消收尾
+const EOS_GRACE_MS = 3000 // end 后宽限, 期内新数据到达则取消收尾
 
 type BufferState = 'created' | 'attaching' | 'ready' | 'closed'
 
+/**
+ * MediaBuffer 依赖注入对象.
+ */
 export interface MediaBufferDeps {
+  /** 该路视角对应的 MediaSource 实例 */
   mediaSource: MediaSource
+  /** MIME codec 串(front 含音频轨, pop 仅视频) */
   codec: string
+  /** 视角标识, 仅用于日志前缀 */
   view: ViewId
+  /** 取主时钟(源视频秒), 供 trim 与超前判定 */
   getClock: () => number
+  /** 注入的日志器(按 view 打标) */
   logger: Logger
 }
 
+/**
+ * 单路 MSE 缓冲句柄: 段入队、收尾、背压复位与销毁.
+ */
 export interface MediaBuffer {
+  /** 入队一个 fMP4 段(EOS 已触发时尝试复活接收) */
   push: (data: ArrayBuffer) => void
+  /** 标记供给终止: 排空队列后带宽限触发 endOfStream */
   end: () => void
+  /** 节流期无 updateend 事件时, 由调度 tick 兜底驱动出队重试 */
   kick: () => void
+  /** 取当前已缓冲末尾(媒体秒), 无缓冲返回 0 */
   getBufferedEnd: () => number
+  /** 取 append 队列深度(积压段数) */
   getQueueDepth: () => number
+  /** 销毁: 摘监听、停 EOS 定时器、清空队列 */
   destroy: () => void
 }
 
+/**
+ * 创建单路 MSE 缓冲封装.
+ *
+ * @param deps - 依赖注入对象, 含 MediaSource / codec / 视角 / 时钟 / 日志器.
+ * @returns MediaBuffer 实例, 提供 push / end / kick / destroy 等.
+ */
 export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
   const { mediaSource: ms, codec, view, getClock, logger } = deps
   const log = (level: 'debug' | 'info' | 'warn' | 'error', msg: string, ...args: unknown[]) =>
@@ -43,7 +69,7 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
     if (state !== 'attaching') return
     try {
       sb = ms.addSourceBuffer(codec)
-      sb.mode = 'segments'   // 时戳归位
+      sb.mode = 'segments' // 时戳归位
       state = 'ready'
       log('info', `addSourceBuffer OK ${codec} (segments)`)
       sb.addEventListener('updateend', onUpdateEnd)
@@ -56,23 +82,43 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
   }
 
   const triggerEOS = () => {
-    if (eosTimer) { clearTimeout(eosTimer); eosTimer = null }
+    if (eosTimer) {
+      clearTimeout(eosTimer)
+      eosTimer = null
+    }
     eosTimer = setTimeout(() => {
-      eosTimer = null; ended = true; state = 'closed'
-      try { if (ms.readyState === 'open') ms.endOfStream() } catch { /* 忽略 */ }
+      eosTimer = null
+      ended = true
+      state = 'closed'
+      try {
+        if (ms.readyState === 'open') ms.endOfStream()
+      } catch {
+        /* 忽略 */
+      }
     }, EOS_GRACE_MS)
     log('info', `EOS 宽限 ${EOS_GRACE_MS}ms 启动`)
   }
 
   const cancelEOS = () => {
-    if (eosTimer) { clearTimeout(eosTimer); eosTimer = null; endedWanted = false }
+    if (eosTimer) {
+      clearTimeout(eosTimer)
+      eosTimer = null
+      endedWanted = false
+    }
     log('info', 'EOS 宽限取消(新媒体段到达)')
   }
 
   const onUpdateEnd = () => {
     if (state !== 'ready') return
     pending = false
-    trimming ? (trimming = false, pump(), maybeTrim()) : (maybeTrim(), pump())
+    if (trimming) {
+      trimming = false
+      pump()
+      maybeTrim()
+    } else {
+      maybeTrim()
+      pump()
+    }
     if (endedWanted && !ended && queue.length === 0 && !pending && sb && !sb.updating) {
       triggerEOS()
     }
@@ -81,7 +127,13 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
   function tryRemove(start: number, end: number): boolean {
     if (!sb || sb.updating || end - start < 0.01) return false
     trimming = true
-    try { sb.remove(start, end); return true } catch { trimming = false; return false }
+    try {
+      sb.remove(start, end)
+      return true
+    } catch {
+      trimming = false
+      return false
+    }
   }
 
   // 常规维护只做头窗删已播 [*, t-8]。
@@ -96,9 +148,16 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
     if (n === 0) return
     const cutHead = t - PLAYBACK.TRIM_HEAD_KEEP_SEC
     for (let i = 0; i < n; i++) {
-      const s = sb.buffered.start(i), e = sb.buffered.end(i)
-      if (e <= cutHead) { if (tryRemove(s, e)) return; continue }
-      if (s < cutHead) { if (tryRemove(s, cutHead)) return; continue }
+      const s = sb.buffered.start(i),
+        e = sb.buffered.end(i)
+      if (e <= cutHead) {
+        if (tryRemove(s, e)) return
+        continue
+      }
+      if (s < cutHead) {
+        if (tryRemove(s, cutHead)) return
+        continue
+      }
       break
     }
   }
@@ -111,9 +170,16 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
     if (n === 0) return
     const cutTail = t + PLAYBACK.TRIM_TAIL_KEEP_SEC
     for (let i = 0; i < n; i++) {
-      const s = sb.buffered.start(i), e = sb.buffered.end(i)
-      if (s >= cutTail) { if (tryRemove(s, e)) return; continue }
-      if (e > cutTail) { if (tryRemove(cutTail, e)) return; continue }
+      const s = sb.buffered.start(i),
+        e = sb.buffered.end(i)
+      if (s >= cutTail) {
+        if (tryRemove(s, e)) return
+        continue
+      }
+      if (e > cutTail) {
+        if (tryRemove(cutTail, e)) return
+        continue
+      }
     }
   }
 
@@ -146,7 +212,11 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
       metrics.incr('appendFail')
       failCount++
       log('warn', 'appendBuffer 失败:', e)
-      if (failCount > 3) { queue.shift(); failCount = 0; metrics.incr('droppedSegments') }
+      if (failCount > 3) {
+        queue.shift()
+        failCount = 0
+        metrics.incr('droppedSegments')
+      }
     }
   }
 
@@ -166,25 +236,41 @@ export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
         endedWanted = false
       }
       if (eosTimer) cancelEOS()
-      queue.push(data); pump()
+      queue.push(data)
+      pump()
     },
     end: () => {
       if (ended || endedWanted) return
-      if (eosTimer) { clearTimeout(eosTimer); eosTimer = null }
+      if (eosTimer) {
+        clearTimeout(eosTimer)
+        eosTimer = null
+      }
       endedWanted = true
       // LEAD 节流可能在队列非空时暂停过出队, 这里主动驱动排空(队空则直接触发 EOS)
       pump()
       if (queue.length === 0 && !pending && sb && !sb.updating) triggerEOS()
     },
-    getBufferedEnd: () => sb && sb.buffered.length > 0 ? sb.buffered.end(sb.buffered.length - 1) : 0,
+    getBufferedEnd: () =>
+      sb && sb.buffered.length > 0 ? sb.buffered.end(sb.buffered.length - 1) : 0,
     getQueueDepth: () => queue.length,
-    kick: () => { pump() },
-    destroy: () => {
-      state = 'closed'; queue.length = 0
-      if (eosTimer) { clearTimeout(eosTimer); eosTimer = null }
-      ms.removeEventListener('sourceopen', onSourceOpen)
-      if (sb) try { sb.removeEventListener('updateend', onUpdateEnd) } catch { }
-      try { if (ms.readyState === 'open') ms.endOfStream() } catch { }
+    kick: () => {
+      pump()
     },
+    destroy: () => {
+      state = 'closed'
+      queue.length = 0
+      if (eosTimer) {
+        clearTimeout(eosTimer)
+        eosTimer = null
+      }
+      ms.removeEventListener('sourceopen', onSourceOpen)
+      if (sb)
+        try {
+          sb.removeEventListener('updateend', onUpdateEnd)
+        } catch {}
+      try {
+        if (ms.readyState === 'open') ms.endOfStream()
+      } catch {}
+    }
   }
 }

@@ -1,4 +1,10 @@
 <script setup lang="ts">
+/**
+ * 装配层(根组件): 组合播放编排 usePlayback 与业务 store(useTranscript/useNotify/useReports).
+ *
+ * 消息流: WS → media 内核 → usePlayback 路由 → 业务 store(延迟注册回调);
+ * 模板消费经由 ws 聚合壳(保持模板绑定零改动).
+ */
 // 装配层: 组合播放编排(usePlayback)与业务 store(useTranscript/useNotify/useReports)
 // 消息流: WS → media 内核 → usePlayback 路由 → 业务 store(延迟注册回调)
 // 模板消费经由 ws 聚合壳(保持模板绑定零改动)
@@ -52,7 +58,11 @@ const popPanelRef = ref<InstanceType<typeof VideoPanel> | null>(null)
 
 // 页面加载/刷新即重置:kill 推理子进程 + 清空状态,保证每次从干净状态开始
 onMounted(() => {
-  resetPipeline().catch(() => { /* 失败也继续本地重置 */ }).finally(resetAll)
+  resetPipeline()
+    .catch(() => {
+      /* 失败也继续本地重置 */
+    })
+    .finally(resetAll)
 })
 
 function handleStart() {
@@ -105,7 +115,7 @@ const ws = {
   totalScore: reports.totalScore,
   avgScore: reports.avgScore,
   toggleCard: reports.toggleCard,
-  resetState: resetAll,
+  resetState: resetAll
 }
 </script>
 

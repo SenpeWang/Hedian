@@ -1,3 +1,9 @@
+/**
+ * 从动锁步(伺服锁定模型 v5): pop 没有自己的播放进度, 每帧被主时钟(front)连续锁定.
+ *
+ * 核心不变量: pop 的内容位置永远 ≤ master 前方一帧, 且随时向 masterSec 收敛.
+ * 速率控制权: pop 的 playbackRate 完全归本模块(VideoPanel watch 只管 front).
+ */
 // 从动锁步(伺服锁定模型 v5): pop 没有自己的播放进度, 每帧被主时钟(front)连续锁定
 //
 // 核心不变量: pop 的内容位置永远 ≤ master 前方一帧, 且随时向 masterSec 收敛——
@@ -40,20 +46,39 @@ const MASTER_FROZEN_FRAMES = 30
 // 超前暂停阈值: pop 超前 master 超过此值且 master 不可达 → 暂停等待
 const AHEAD_PAUSE_SEC = 1.0
 
+/**
+ * 锁步状态(跨帧记忆): 冻结/越界/暂停/seek 冷却的观测标记.
+ */
 export interface SlaveSyncState {
-  overEndSince: number      // masterSec 越界计时起点(0=未越界)
-  lastMasterSec: number     // 上帧主时钟(冻结检测)
-  frozenFrames: number      // master 连续未动帧数
-  frozenPaused: boolean     // 因 master 冻结而暂停的标记
-  lastSeekAt: number        // 上次发起 seek 的时刻(防风暴冷却)
-  aheadPaused: boolean      // 因超前等待而暂停的标记
+  overEndSince: number // masterSec 越界计时起点(0=未越界)
+  lastMasterSec: number // 上帧主时钟(冻结检测)
+  frozenFrames: number // master 连续未动帧数
+  frozenPaused: boolean // 因 master 冻结而暂停的标记
+  lastSeekAt: number // 上次发起 seek 的时刻(防风暴冷却)
+  aheadPaused: boolean // 因超前等待而暂停的标记
 }
 
+/**
+ * 创建零值锁步状态(lastMasterSec 置 -1 以保证首帧不误判冻结).
+ *
+ * @returns 初始化的 SlaveSyncState.
+ */
 export function createSlaveSyncState(): SlaveSyncState {
-  return { overEndSince: 0, lastMasterSec: -1, frozenFrames: 0, frozenPaused: false, lastSeekAt: 0, aheadPaused: false }
+  return {
+    overEndSince: 0,
+    lastMasterSec: -1,
+    frozenFrames: 0,
+    frozenPaused: false,
+    lastSeekAt: 0,
+    aheadPaused: false
+  }
 }
 
-/** mediaUrl 重建(流重置)时清状态 */
+/**
+ * mediaUrl 重建(流重置)时清状态.
+ *
+ * @param state - 待复位的锁步状态(原地修改).
+ */
 export function resetSlaveSync(state: SlaveSyncState): void {
   state.overEndSince = 0
   state.lastMasterSec = -1
@@ -104,20 +129,30 @@ function catchUpSeek(vid: HTMLVideoElement, target: number, state: SlaveSyncStat
 }
 
 /**
- * 每帧驱动 pop 伺服锁定主时钟.
- * @param vid 从动 video(pop)
- * @param masterSec 主时钟(front currentTime)
- * @param isPlaying 应播放标记
- * @param baseRate 基准速率(与 front 同速; 伺服在其上微调)
- * @param state 锁步状态(跨帧记忆)
+ * 每帧驱动 pop 伺服锁定主时钟(按优先级链逐级判定, 见模块头注释).
+ *
+ * @param vid - 从动 video 元素(pop).
+ * @param masterSec - 主时钟(front currentTime).
+ * @param isPlaying - 应播放标记.
+ * @param baseRate - 基准速率(与 front 同速; 伺服在其上微调).
+ * @param state - 锁步状态(跨帧记忆).
  */
-export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: boolean, baseRate: number, state: SlaveSyncState): void {
+export function syncSlave(
+  vid: HTMLVideoElement,
+  masterSec: number,
+  isPlaying: boolean,
+  baseRate: number,
+  state: SlaveSyncState
+): void {
   // ── 1. master 冻结检测(front stall → pop 联动暂停, 恢复后跟随) ──
   if (Math.abs(masterSec - state.lastMasterSec) < 0.001) state.frozenFrames++
   else state.frozenFrames = 0
   state.lastMasterSec = masterSec
   if (state.frozenFrames > MASTER_FROZEN_FRAMES) {
-    if (!vid.paused) { vid.pause(); state.frozenPaused = true }
+    if (!vid.paused) {
+      vid.pause()
+      state.frozenPaused = true
+    }
     return
   }
   if (state.frozenPaused) {
@@ -125,14 +160,17 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
     if (isPlaying && !state.aheadPaused) vid.play().catch(() => {})
   }
 
-  const target = masterSec + CONTENT_OFFSET_SEC   // 内容校准后的锁定目标
-  const e = vid.currentTime - target              // 正=pop超前, 负=pop落后
+  const target = masterSec + CONTENT_OFFSET_SEC // 内容校准后的锁定目标
+  const e = vid.currentTime - target // 正=pop超前, 负=pop落后
   metrics.set('slaveDrift', e)
 
   // ── 2. 超前等待: pop 大幅超前且 masterSec 不可达(段丢失/断档) → 暂停等 master 追 ──
   // 绝不向前跳(v4 实测教训: 向前跳导致从动彻底失控); master 后方推进必然追上
   if (e > AHEAD_PAUSE_SEC && !inSafeZone(vid, target)) {
-    if (!vid.paused) { vid.pause(); state.aheadPaused = true }
+    if (!vid.paused) {
+      vid.pause()
+      state.aheadPaused = true
+    }
     return
   }
   if (state.aheadPaused) {
@@ -141,7 +179,7 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
       state.aheadPaused = false
       if (isPlaying) vid.play().catch(() => {})
     } else {
-      return   // 继续等
+      return // 继续等
     }
   }
 
@@ -158,7 +196,10 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
       return
     }
     // 超前且播放头脱离缓冲(极端态): 也按等待处理
-    if (!vid.paused) { vid.pause(); state.aheadPaused = true }
+    if (!vid.paused) {
+      vid.pause()
+      state.aheadPaused = true
+    }
     return
   }
 
@@ -167,8 +208,14 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
     if (isPlaying && vid.buffered.length > 0) {
       const bufEnd = vid.buffered.end(vid.buffered.length - 1)
       if (Math.abs(e) > HARD_SYNC_SEC) {
-        if (e < 0 && catchUpSeek(vid, target, state)) { setRate(vid, baseRate); return }
-        if (e > 0 && seek(vid, target, state)) { setRate(vid, baseRate); return }
+        if (e < 0 && catchUpSeek(vid, target, state)) {
+          setRate(vid, baseRate)
+          return
+        }
+        if (e > 0 && seek(vid, target, state)) {
+          setRate(vid, baseRate)
+          return
+        }
       }
       if (bufEnd - vid.currentTime > 0.3) vid.play().catch(() => {})
     }
@@ -184,7 +231,13 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
     else if (now - state.overEndSince > 1000) {
       const tail = bufEnd - 0.1
       if (tail > vid.currentTime) {
-        try { vid.currentTime = tail; state.lastSeekAt = now; metrics.incr('seekCount') } catch { /* 忽略 */ }
+        try {
+          vid.currentTime = tail
+          state.lastSeekAt = now
+          metrics.incr('seekCount')
+        } catch {
+          /* 忽略 */
+        }
       }
     }
     return
@@ -193,13 +246,17 @@ export function syncSlave(vid: HTMLVideoElement, masterSec: number, isPlaying: b
 
   // ── 6. 硬同步: 瞬态失锁(>0.3s) → 带冷却 seek 直接拉回 ──
   if (Math.abs(e) > HARD_SYNC_SEC) {
-    if (seek(vid, target, state)) {          // masterSec 可达: 无论超前落后都拉回
+    if (seek(vid, target, state)) {
+      // masterSec 可达: 无论超前落后都拉回
       setRate(vid, baseRate)
       return
     }
     if (e < 0) {
       // 落后且 masterSec 不可达: 贴播前方 range; 无 range 则急伺服追赶
-      if (catchUpSeek(vid, target, state)) { setRate(vid, baseRate); return }
+      if (catchUpSeek(vid, target, state)) {
+        setRate(vid, baseRate)
+        return
+      }
       const urgency = Math.max(0.5, Math.min(3.0, Math.abs(e)))
       setRate(vid, baseRate * Math.min(URGENT_MAX, 1 + urgency * SERVO_GAIN * 0.5))
       return

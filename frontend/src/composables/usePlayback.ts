@@ -1,3 +1,9 @@
+/**
+ * 播放编排核心: 组合 media 内核(WsClient/MediaBuffer/RateController/RetentionCenter/Scheduler).
+ *
+ * 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入).
+ * 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports).
+ */
 // 播放编排核心: 组合 media 内核(WsClient/MediaBuffer/RateController/RetentionCenter/Scheduler)
 // 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入)
 // 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports)
@@ -14,12 +20,18 @@ import { startPipeline as apiStart, stopPipeline as apiStop } from '../api/pipel
 
 const log = createLogger('playback')
 
+/**
+ * 创建播放编排: 建立 MSE / WS / 调度器, 对外暴露播放状态与控制方法.
+ *
+ * @param currentPlaybackSec - 主时钟 ref(源视频秒), 与业务 store 共享.
+ * @returns 播放状态与控制方法, 以及业务回调注册口(onBatch/onReport).
+ */
 export function usePlayback(currentPlaybackSec: Ref<number>) {
   // ── 播放状态(对外 reactive) ──
   const status = ref<PipelineStatus>('idle')
   const isPlaying = computed(() => status.value === 'running' || status.value === 'starting')
   const totalDuration = ref(0)
-  const globalSec = ref(0)                 // 后端推理进度(进度条用, 超前播放)
+  const globalSec = ref(0) // 后端推理进度(进度条用, 超前播放)
   const viewSecs = ref({ front: 0, pop: 0, voice: 0 })
   const playbackRate = ref(1.0)
   const frontMediaUrl = ref('')
@@ -32,7 +44,7 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
   const scheduler = new Scheduler(250)
   let frontBuf: MediaBuffer | null = null
   let popBuf: MediaBuffer | null = null
-  const _visInitSeen: Record<ViewId, boolean> = { front: false, pop: false }   // init 每路只入队一次
+  const _visInitSeen: Record<ViewId, boolean> = { front: false, pop: false } // init 每路只入队一次
 
   // 延迟注册的业务回调(App.vue 创建业务 store 后注入, 破解循环依赖)
   let batchHandler: ((raw: Record<string, unknown>) => void) | null = null
@@ -50,26 +62,49 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
 
   // ── MSE 生命周期(重建前显式销毁旧 buffer, 修泄漏) ──
   function initMSE(): void {
-    frontBuf?.destroy(); popBuf?.destroy()
-    if (frontMediaUrl.value) { try { URL.revokeObjectURL(frontMediaUrl.value) } catch { /* 忽略 */ } }
-    if (popMediaUrl.value) { try { URL.revokeObjectURL(popMediaUrl.value) } catch { /* 忽略 */ } }
+    frontBuf?.destroy()
+    popBuf?.destroy()
+    if (frontMediaUrl.value) {
+      try {
+        URL.revokeObjectURL(frontMediaUrl.value)
+      } catch {
+        /* 忽略 */
+      }
+    }
+    if (popMediaUrl.value) {
+      try {
+        URL.revokeObjectURL(popMediaUrl.value)
+      } catch {
+        /* 忽略 */
+      }
+    }
     // front:含音频轨;pop:仅视频
     const frontMS = new MediaSource()
     frontMediaUrl.value = URL.createObjectURL(frontMS)
     frontBuf = createMediaBuffer({
-      mediaSource: frontMS, codec: 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',
-      view: 'front', getClock: () => currentPlaybackSec.value, logger: log,
+      mediaSource: frontMS,
+      codec: 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',
+      view: 'front',
+      getClock: () => currentPlaybackSec.value,
+      logger: log
     })
     const popMS = new MediaSource()
     popMediaUrl.value = URL.createObjectURL(popMS)
     popBuf = createMediaBuffer({
-      mediaSource: popMS, codec: 'video/mp4; codecs="avc1.42E01E"',
-      view: 'pop', getClock: () => currentPlaybackSec.value, logger: log,
+      mediaSource: popMS,
+      codec: 'video/mp4; codecs="avc1.42E01E"',
+      view: 'pop',
+      getClock: () => currentPlaybackSec.value,
+      logger: log
     })
   }
 
   // ── 视频帧路由(init 去重/end 置完成/media 入 buffer) ──
-  function onVisFrame(frame: { view: ViewId; type: 'init' | 'media' | 'end'; data: ArrayBuffer }): void {
+  function onVisFrame(frame: {
+    view: ViewId
+    type: 'init' | 'media' | 'end'
+    data: ArrayBuffer
+  }): void {
     const buf = frame.view === 'front' ? frontBuf : popBuf
     if (!buf) {
       // 加载时序窗口(MSE 未建)丢段告警: media 段丢了不补发(时间轴从此断档)
@@ -113,16 +148,21 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
       if (totalDuration.value > 0) globalSec.value = totalDuration.value
       return
     }
-    if (isReportMsg(msg)) { reportHandler?.(msg); return }
+    if (isReportMsg(msg)) {
+      reportHandler?.(msg)
+      return
+    }
     // batch 事件(评估/flow/progress/语音/人数/凝视): globalSec/sourceTimes 本层消化, 其余回调
     if (msg.globalSec != null) globalSec.value = msg.globalSec as number
-    if (msg.totalDuration && (msg.totalDuration as number) > 0) totalDuration.value = msg.totalDuration as number
+    if (msg.totalDuration && (msg.totalDuration as number) > 0)
+      totalDuration.value = msg.totalDuration as number
     const st = msg.sourceTimes as Record<string, number> | undefined
-    if (st) viewSecs.value = {
-      front: st.front ?? viewSecs.value.front,
-      pop: st.pop ?? viewSecs.value.pop,
-      voice: st.voice ?? viewSecs.value.voice,
-    }
+    if (st)
+      viewSecs.value = {
+        front: st.front ?? viewSecs.value.front,
+        pop: st.pop ?? viewSecs.value.pop,
+        voice: st.voice ?? viewSecs.value.voice
+      }
     batchHandler?.(msg)
   }
 
@@ -130,7 +170,7 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
   const wsClient: WsClient = createWsClient({
     url: () => `${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/ws/data`,
     onVisFrame,
-    onJson,
+    onJson
   })
 
   // ── 水位速率 tick: 采水位 + 供给速率差分 → RateController(完成路移出限速) ──
@@ -174,7 +214,7 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
       const ends = {
         front: frontBuf && !visEnded.front ? frontBuf.getBufferedEnd() : null,
         pop: popBuf && !visEnded.pop ? popBuf.getBufferedEnd() : null,
-        voice: null,
+        voice: null
       } as Record<string, number | null>
       if (!_supplyLast) {
         _supplyLast = { front: ends.front ?? 0, pop: ends.pop ?? 0, voice: ends.voice ?? 0 }
@@ -190,7 +230,7 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
           }
         }
         if (rates.length) {
-          const bottleneck = Math.min(1.5, Math.min(...rates))   // clamp 上界防 voice 批量跳变
+          const bottleneck = Math.min(1.5, Math.min(...rates)) // clamp 上界防 voice 批量跳变
           _supplyEma = _supplyEma * 0.7 + bottleneck * 0.3
         }
         _supplyLast = { front: ends.front ?? 0, pop: ends.pop ?? 0, voice: ends.voice ?? 0 }
@@ -203,11 +243,11 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
     metrics.set('rate', playbackRate.value)
     metrics.set('bufferLevel', {
       front: frontBuf ? Math.max(0, frontBuf.getBufferedEnd() - currentPlaybackSec.value) : 0,
-      pop: popBuf ? Math.max(0, popBuf.getBufferedEnd() - currentPlaybackSec.value) : 0,
+      pop: popBuf ? Math.max(0, popBuf.getBufferedEnd() - currentPlaybackSec.value) : 0
     })
     metrics.set('queueDepth', {
       front: frontBuf?.getQueueDepth() ?? 0,
-      pop: popBuf?.getQueueDepth() ?? 0,
+      pop: popBuf?.getQueueDepth() ?? 0
     })
     metrics.flush()
   }
@@ -221,18 +261,24 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
     currentPlaybackSec.value = currentSec
     const now = performance.now()
     if (Math.abs(currentSec - lastReportSec) < 0.5 && now - lastReportReal < 500) return
-    lastReportSec = currentSec; lastReportReal = now
+    lastReportSec = currentSec
+    lastReportReal = now
     wsClient.sendReport(currentSec)
   }
 
   // ── 进度条 = globalSec/totalDuration(推理进度, 超前播放); 仅 done 强制 100 ──
   const progress = computed(() =>
-    status.value === 'done' ? 100
-      : (totalDuration.value > 0 ? Math.min(100, globalSec.value / totalDuration.value * 100) : 0))
+    status.value === 'done'
+      ? 100
+      : totalDuration.value > 0
+        ? Math.min(100, (globalSec.value / totalDuration.value) * 100)
+        : 0
+  )
 
   function fmt(s?: number): string {
     if (s === undefined || s === null || isNaN(s)) return '00:00'
-    const m = Math.floor(s / 60), sec = Math.floor(s % 60)
+    const m = Math.floor(s / 60),
+      sec = Math.floor(s % 60)
     return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`
   }
 
@@ -242,15 +288,18 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
     globalSec.value = 0
     playbackRate.value = 1.0
     viewSecs.value = { front: 0, pop: 0, voice: 0 }
-    visEnded.front = false; visEnded.pop = false
-    _visInitSeen.front = false; _visInitSeen.pop = false
+    visEnded.front = false
+    visEnded.pop = false
+    _visInitSeen.front = false
+    _visInitSeen.pop = false
     // 死源停滞观测表复位(新一轮推理的源重新获得限速资格)
     for (const k of Object.keys(_progSeen)) delete _progSeen[k]
     for (const k of Object.keys(_stallSince)) delete _stallSince[k]
     currentPlaybackSec.value = 0
-    lastReportSec = 0; lastReportReal = 0
+    lastReportSec = 0
+    lastReportReal = 0
     metrics.reset()
-    initMSE()   // 重建 MSE(新 objectURL, 清空 buffer)
+    initMSE() // 重建 MSE(新 objectURL, 清空 buffer)
   }
 
   async function startPipeline(): Promise<void> {
@@ -266,14 +315,21 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
   }
 
   async function stopPipeline(): Promise<void> {
-    try { await apiStop() }
-    catch (e) { log.error('停止请求失败:', e) }
-    setStatus('stopped')   // 用户停止不等于推理完成, 不跳 100%
+    try {
+      await apiStop()
+    } catch (e) {
+      log.error('停止请求失败:', e)
+    }
+    setStatus('stopped') // 用户停止不等于推理完成, 不跳 100%
   }
 
   // ── 业务层延迟注册(App.vue 创建 store 后调用) ──
-  function onBatch(fn: (raw: Record<string, unknown>) => void): void { batchHandler = fn }
-  function onReport(fn: (msg: Record<string, unknown>) => void): void { reportHandler = fn }
+  function onBatch(fn: (raw: Record<string, unknown>) => void): void {
+    batchHandler = fn
+  }
+  function onReport(fn: (msg: Record<string, unknown>) => void): void {
+    reportHandler = fn
+  }
 
   // ── 生命周期: 启动连接与调度; 卸载全清理 ──
   // setup 即建 MSE: WS connect 先于 App onMounted 的 resetAll, 不预建则加载时序窗口内
@@ -284,19 +340,43 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
   onBeforeUnmount(() => {
     scheduler.stop()
     wsClient.destroy()
-    frontBuf?.destroy(); popBuf?.destroy()
-    if (frontMediaUrl.value) { try { URL.revokeObjectURL(frontMediaUrl.value) } catch { /* 忽略 */ } }
-    if (popMediaUrl.value) { try { URL.revokeObjectURL(popMediaUrl.value) } catch { /* 忽略 */ } }
+    frontBuf?.destroy()
+    popBuf?.destroy()
+    if (frontMediaUrl.value) {
+      try {
+        URL.revokeObjectURL(frontMediaUrl.value)
+      } catch {
+        /* 忽略 */
+      }
+    }
+    if (popMediaUrl.value) {
+      try {
+        URL.revokeObjectURL(popMediaUrl.value)
+      } catch {
+        /* 忽略 */
+      }
+    }
   })
 
   return {
     // 状态
-    status, isPlaying, progress, fmt,
-    currentPlaybackSec, playbackRate, totalDuration, globalSec,
-    frontMediaUrl, popMediaUrl,
+    status,
+    isPlaying,
+    progress,
+    fmt,
+    currentPlaybackSec,
+    playbackRate,
+    totalDuration,
+    globalSec,
+    frontMediaUrl,
+    popMediaUrl,
     // 控制
-    startPipeline, stopPipeline, resetState, reportPlaybackProgress,
+    startPipeline,
+    stopPipeline,
+    resetState,
+    reportPlaybackProgress,
     // 业务层注册
-    onBatch, onReport,
+    onBatch,
+    onReport
   }
 }
