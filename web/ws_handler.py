@@ -67,6 +67,9 @@ class WSHandler:
 
         前端刷新页面后 JS 状态清零, 此快照让前端立即拿到稳定的 totalDuration
         (不依赖前端 video 是否加载) 与当前 globalSec, 推理进度条可正确恢复.
+
+        Args:
+            websocket: 客户端 WebSocket 连接.
         """
         total = self._total_duration or 0.0
         pipeline_status = (self._pipeline_state or {}).get("status", "idle")
@@ -97,7 +100,11 @@ class WSHandler:
             logger.debug(f"补发状态快照失败: {error}")
 
     async def connect(self, websocket: WebSocket) -> None:
-        """接受并注册新的客户端 WebSocket 连接,并补发已缓存的视频流 init 段."""
+        """接受并注册新的客户端 WebSocket 连接,并补发已缓存的视频流 init 段.
+
+        Args:
+            websocket: 客户端 WebSocket 连接.
+        """
         await websocket.accept()
         self._active_connections.append(websocket)
         logger.info(f"WebSocket 客户端已连接，当前在线: {len(self._active_connections)}")
@@ -191,13 +198,26 @@ class WSHandler:
 
     @staticmethod
     def _build_vis_payload(view: str, seg_type: str, data: bytes) -> bytes:
-        """构造视频流二进制帧:[channel][type_code] + fMP4 段."""
+        """构造视频流二进制帧:[channel][type_code] + fMP4 段.
+
+        Args:
+            view: 视角名, front 或 pop.
+            seg_type: 段类型, init/media/end.
+            data: fMP4 段原始字节.
+
+        Returns:
+            已构建的视频流二进制帧.
+        """
         channel = _CHANNEL_FRONT if view == "front" else _CHANNEL_POP
         type_code = _TYPE_CODE.get(seg_type, 1)
         return bytes([channel, type_code]) + data
 
     async def _send_cached_vis_inits(self, websocket: WebSocket) -> None:
-        """向新连接补发已缓存的 init 段(保证后到连接能从 init 解码)."""
+        """向新连接补发已缓存的 init 段(保证后到连接能从 init 解码).
+
+        Args:
+            websocket: 客户端 WebSocket 连接.
+        """
         for view, data in self._vis_init_cache.items():
             try:
                 await websocket.send_bytes(self._build_vis_payload(view, "init", data))
@@ -208,6 +228,11 @@ class WSHandler:
         """把一段 fMP4(init/media/end)以二进制帧推给所有在线客户端.
 
         由 VisStreamForwarder 后台线程调用;init 段同时缓存以备新连接补发.
+
+        Args:
+            view: 视角名, front 或 pop.
+            seg_type: 段类型, init/media/end.
+            data: fMP4 段原始字节.
         """
         # init 段先缓存(无论当前有无连接),保证后到连接能补发
         if seg_type == "init":
