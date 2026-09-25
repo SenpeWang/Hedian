@@ -51,11 +51,19 @@ class VoiceModule(BaseModule):
 
     @property
     def module_name(self) -> str:
-        """模块名称."""
+        """模块名称.
+
+        Returns:
+            模块唯一名称，用于推理流与事件署名.
+        """
         return "voice"
 
     def initialize(self) -> bool:
-        """初始化语音模块."""
+        """初始化语音模块.
+
+        Returns:
+            初始化成功返回 True；失败返回 False.
+        """
         try:
             # 初始化语音转文字器
             voice_config = self.config.get("voice", {})
@@ -162,7 +170,11 @@ class VoiceModule(BaseModule):
             logger.error("语音处理失败: %s", process_error, exc_info=True)
 
     def _extract_audio(self, video_path: str) -> Optional[str]:
-        """从视频提取音频."""
+        """从视频提取音频.
+
+        Returns:
+            提取出的音频文件路径；提取失败时返回 None.
+        """
         if not video_path:
             video_path = str(
                 self.paths.base_dir

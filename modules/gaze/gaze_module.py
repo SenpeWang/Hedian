@@ -47,9 +47,9 @@ class GazeModule:
         gaze_model_path: str,
         roi_json_path: str,
         config: Optional[Dict[str, Any]] = None,
-        inference_fn: Optional[Callable] = None,
+        inference_fn: Optional[Callable[..., Any]] = None,
         event_bus: Optional[Any] = None,
-        progress_fn: Optional[Callable] = None,
+        progress_fn: Optional[Callable[..., Any]] = None,
         paths: Optional[PathConfig] = None,
     ) -> None:
         """初始化凝视模块.
@@ -201,7 +201,7 @@ class GazeModule:
             exception = self._gaze_future.exception()  # 防止异常被静默吞掉
             if exception is not None:
                 logger.warning(f"异步凝视检测失败: {exception}")
-            self._gaze_future = None
+            self._gaze_future: Optional[Future[Any]] = None
 
     def _run_gaze_detection_safe(
         self,
@@ -380,7 +380,7 @@ class GazeModule:
                         },
                         timestamp=timestamp,
                     )
-            self._gaze_away_start_timestamp = None
+            self._gaze_away_start_timestamp: Optional[float] = None
             self._alerting = False
 
     def _on_flow_started(self, event: dict) -> None:
@@ -582,7 +582,7 @@ class GazeModule:
                 self._gaze_future.result(timeout=5.0)
             except Exception as error:
                 logger.warning(f"等待异步凝视检测完成时异常: {error}")
-            self._gaze_future = None
+            self._gaze_future: Optional[Future[Any]] = None
 
     def shutdown(self) -> None:
         """刷新后台任务并关闭凝视线程池."""

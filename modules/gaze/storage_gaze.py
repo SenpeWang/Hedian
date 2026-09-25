@@ -1,6 +1,6 @@
 """Gaze 结果存储：保存注视告警关键事件."""
 import logging
-from typing import Dict, List
+from typing import Any, Dict, List
 
 from core.base_storage import BaseStorage
 from core.path_manager import PathConfig
@@ -19,7 +19,7 @@ class GazeStorage(BaseStorage):
         """
         super().__init__(paths, "gaze")
 
-    def save_key_moments(self, run_id: str, events: List[Dict]) -> None:
+    def save_key_moments(self, run_id: str, events: List[Dict[str, Any]]) -> None:
         """保存关键事件.
 
         Args:

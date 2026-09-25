@@ -52,7 +52,7 @@ class ObjectDetector:
         self.model = YOLO(model_path)
         logger.info(f"加载目标检测模型: {os.path.basename(model_path)}")
 
-        self.pose_model = None
+        self.pose_model: Optional[Any] = None
         if pose_model_path and os.path.exists(pose_model_path):
             self.pose_model = YOLO(pose_model_path)
             logger.info(f"加载姿态估计模型: {os.path.basename(pose_model_path)}")

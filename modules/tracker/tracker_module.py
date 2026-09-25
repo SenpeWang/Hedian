@@ -5,7 +5,7 @@
 import logging
 from pathlib import Path
 import time
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 import cv2
 import numpy as np
@@ -54,7 +54,7 @@ class TrackerModule(BaseModule):
         self._hand_raiser: Optional[HandRaiser] = None
         self._gaze_processor: Optional[GazeModule] = None
         self._result_storage: Optional[TrackerStorage] = None
-        self._events: List[Dict] = []
+        self._events: List[Dict[str, Any]] = []
         self._identity_map: Dict[str, int] = {}
         self._vis_encoder: Optional[VisEncoder] = None
         self._last_supervision_states: Dict[str, str] = {}

@@ -238,7 +238,7 @@ class _FileLock:
             fcntl.flock(self._handle, fcntl.LOCK_EX)
         except BaseException:
             self._handle.close()
-            self._handle = None
+            self._handle: Optional[TextIO] = None
             raise
         return self
 
@@ -258,4 +258,4 @@ class _FileLock:
             except OSError as close_error:
                 logger.warning(f"关闭锁文件失败: {close_error}")
             finally:
-                self._handle = None
+                self._handle: Optional[TextIO] = None

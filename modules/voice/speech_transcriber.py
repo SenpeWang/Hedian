@@ -619,7 +619,7 @@ def normalize_devices_in_text(text: str) -> str:
     # 预处理：去除所有的空格和制表符，以匹配 ASR 偶发的空格分割（如 "E E S" 或 "T 1 R P A"）
     cleaned_text = re.sub(r"\s+", "", text)
 
-    def _normalize_device_code(match):
+    def _normalize_device_code(match) -> str:
         """归一化单个设备码匹配片段并校验其长度合法性.
 
         Args:

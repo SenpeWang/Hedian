@@ -223,4 +223,4 @@ class HandRaiser:
         self._event_cooldown.clear()
         self._last_seen_frame.clear()
         self._pose_filter.clear()
-        self._last_poses = None
+        self._last_poses: Optional[List[Dict[str, Any]]] = None

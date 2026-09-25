@@ -45,7 +45,11 @@ class STrack:
 
     @property
     def identity(self) -> Optional[str]:
-        """获取目标人员身份 (LEADER | ROAD1 | ROAD2 | None)."""
+        """获取目标人员身份 (LEADER | ROAD1 | ROAD2 | None).
+
+        Returns:
+            当前分配的身份名称；未分配或非法时返回 None.
+        """
         return self._identity
 
     @identity.setter
