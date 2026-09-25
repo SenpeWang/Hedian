@@ -11,9 +11,9 @@
 多进程架构:
   每个模块运行在独立进程中，通过 Redis 通信。
 """
-import sys
-import os
 import glob
+import os
+import sys
 
 # 让 onnxruntime-gpu 的 CUDA EP 能找到 pip 装的 nvidia cu12 运行时库
 # (库在 site-packages/nvidia/*/lib, 不在系统标准路径, 动态链接器默认不搜;
@@ -88,7 +88,7 @@ def _run_module_process(
     run_id: str,
     *,
     env_setup=None,
-):
+) -> None:
     """业务模块进程的通用模板（单次推理，完成后自动退出释放 VRAM）.
 
     Args:
@@ -165,7 +165,7 @@ def _run_module_process(
         f"{module_name} 进程完成本轮推理 run_id={run_id}，顺利退出并 100% 释放 GPU VRAM")
 
 
-def run_voice_process(config_dict, paths_dict, video_path, run_id):
+def run_voice_process(config_dict, paths_dict, video_path, run_id) -> None:
     """运行语音处理进程.
 
     Args:
@@ -178,7 +178,7 @@ def run_voice_process(config_dict, paths_dict, video_path, run_id):
     _run_module_process("voice", VoiceModule, config_dict, paths_dict, video_path, run_id)
 
 
-def run_tracker_process(config_dict, paths_dict, video_path, run_id):
+def run_tracker_process(config_dict, paths_dict, video_path, run_id) -> None:
     """运行跟踪器处理进程.
 
     Args:
@@ -188,7 +188,7 @@ def run_tracker_process(config_dict, paths_dict, video_path, run_id):
         run_id: 本轮运行标识.
     """
     # 清除 LD_LIBRARY_PATH，让 PyTorch 使用自带的 CUDA 库
-    def _env_setup():
+    def _env_setup() -> None:
         """清理 LD_LIBRARY_PATH, 避免 nvidia pip 运行时库被 PyTorch 误链接."""
         if "LD_LIBRARY_PATH" in os.environ:
             del os.environ["LD_LIBRARY_PATH"]
@@ -198,7 +198,7 @@ def run_tracker_process(config_dict, paths_dict, video_path, run_id):
                         video_path, run_id, env_setup=_env_setup)
 
 
-def run_behavior_process(config_dict, paths_dict, video_path, run_id):
+def run_behavior_process(config_dict, paths_dict, video_path, run_id) -> None:
     """运行行为处理进程.
 
     Args:
@@ -212,7 +212,7 @@ def run_behavior_process(config_dict, paths_dict, video_path, run_id):
                         video_path, run_id)
 
 
-def run_web_process(config_dict, paths_dict, run_id=None):
+def run_web_process(config_dict, paths_dict, run_id=None) -> None:
     """运行 web 进程.
 
     启动事件总线、推理同步器、规则与评估器, 并按需拉起推理子进程,
@@ -473,7 +473,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
         else:
             inference_sync.push_display(event_type, data)
 
-    def push_sync(event_type: str, data: dict):
+    def push_sync(event_type: str, data: dict) -> None:
         """系统通知推送.
 
         经过对齐中间件打包入 Batch meta, 与视频帧物理时间点同帧出屏.
@@ -497,7 +497,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
     )
     logger.info(f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}")
 
-    def push_inference_event(event):
+    def push_inference_event(event) -> None:
         """推理流推送回调.
 
         正常时把 batch 推给前端; 收到 None 或 source=="done" 信号时收尾本轮推理
@@ -558,7 +558,7 @@ def run_web_process(config_dict, paths_dict, run_id=None):
     event_bus.stop()
 
 
-def main():
+def main() -> None:
     """入口主控制进程：只启动 Web 服务进程（0 MB 显存占用），等待用户在前端点击'开始测试'按需启动推理子进程."""
     config_path = args.config or os.path.join(BASE_DIR, "config.yaml")
     config = ConfigManager(config_path)
