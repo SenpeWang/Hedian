@@ -1,0 +1,120 @@
+# 核电站监护制合规检测系统 — 全局配置
+# 此文件覆盖 config.py 中的默认值
+
+app:
+  # 视角级 GPU 分配: front(tracker+gaze)=0, voice/pop/evaluation=1
+  gpu_map:
+    tracker: "0"
+    voice: "1"
+    behavior: "1"
+    evaluation: "1"
+  gpu_default: "0"
+  fps: 30.0
+  port: 5002
+
+redis:
+  host: "localhost"
+  port: 6379
+  db: 0
+
+paths:
+  data_root: "data"
+  model_root: "models"
+  result_root: "data/results"
+
+videos:
+  front: "data/videos/camFRONT.mpg"
+  pop: "data/videos/camPOP.mpg"
+
+supervision:
+  bind_hold_sec: 10.0
+  unbind_hold_sec: 10.0
+  dist_close_px: 200
+  dist_near_px: 560
+  consec_raise: 3
+  consec_idle: 3
+  cooldown_sec: 1.5
+  hand_frame_step: 3  # 举手检测姿态推理跳帧(每3帧1次+EMA复用)
+
+tracker:
+  detection:
+    conf_threshold: 0.65
+    pose_confidence: 0.35
+    nms_threshold: 0.35
+    img_size: 640
+
+bus:
+  max_queue_size: 1024
+
+voice:
+  sample_rate: 16000
+  # 句边界停顿阈值（秒）。变更 12：0.6 -> 1.0，须 >= vad_min_silence_sec(0.8)
+  sentence_gap_sec: 1.0
+  # 关键词跨停顿匹配允许的最大时间跨度（秒），覆盖被说话人停顿拆开的关键词
+  keyword_span_sec: 8.0
+  asr_engine: "qwen3"
+  model_path: "models/voice/qwen/Qwen3-ASR-0.6B"
+  aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
+  torch_dtype: "bfloat16"
+  # VAD 分段参数（对齐 run_infer.py 评估链路）
+  vad_noise_db: -35.0
+  vad_min_silence_sec: 0.8
+  vad_speech_pad_sec: 0.2
+  vad_min_speech_sec: 0.35
+  vad_max_chunk_sec: 30.0
+  # ── 流式解码（变更 9）────────────────────────────────────────────
+  # pipeline: stream=流式流水线（默认）/ legacy=旧整文件批处理（A/B 对比与回退）
+  pipeline: "stream"
+  stream_block_sec: 0.2
+  segmenter: "silence_vad"
+  boundary_overlap_sec: 0.4
+  vad_split_search_sec: 1.0
+  vad_split_margin_db: 6.0
+  max_sentence_sec: 30.0
+  # 保护词（不可被句边界切开）；null = 自动派生（推荐）
+  protected_words: null
+  protected_hold_sec: 2.0
+  fixed_window_sec: 20.0
+  fixed_window_overlap_sec: 5.0
+  # ── 九字码结构矫正 ────────────────────────────────────────────
+  # 按 DCS 设备码结构（机组号+系统码+设备号+设备类型码）识别设备码，
+  # 并用 configs/system_code_rules.json 中的系统码/设备类型码表校验
+  system_code:
+    enabled: true
+    # 码表路径；相对路径按项目根目录解析
+    rules_path: "configs/system_code_rules.json"
+    # 允许 8 位（省略机组号，如 RIS208VP）设备码
+    allow_unit_omitted: true
+    # 相邻符号允许的最大停顿（秒）；<=0 表示不校验停顿
+    max_symbol_pause: 1.5
+
+gaze:
+  head_conf_th: 0.55
+  inout_th: 0.5
+  heatmap_th: 0.3
+  head_min_size: 20
+  head_max_size: 300
+
+behavior:
+  finger_screen:
+    detect_conf: 0.25
+    screen_overlap_threshold: 0.2
+    max_dist: 10
+    cooldown_sec: 1.5
+  finger_file:
+    detect_conf: 0.25
+    file_iou_threshold: 0.2
+    cooldown_sec: 1.5
+
+modules:
+  gaze: true
+  voice: true
+  tracker: true
+  personnel_status: true
+  info_notice: true
+  behavior: true
+
+rules:
+  supervision: true
+  personnel_status: true
+  info_notice: true
