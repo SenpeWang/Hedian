@@ -184,12 +184,22 @@ class PcmStream:
             pass
 
     def __enter__(self) -> "PcmStream":
-        """进入 with 块: 打开音频流并返回自身."""
+        """进入 with 块: 打开音频流并返回自身.
+
+        Returns:
+            自身, 供 with 语句绑定.
+        """
         self.open()
         return self
 
     def __exit__(self, exc_type, exc, tb) -> None:
-        """退出 with 块: 关闭音频流."""
+        """退出 with 块: 关闭音频流.
+
+        Args:
+            exc_type: 异常类型; 正常退出时为 None.
+            exc: 异常实例; 正常退出时为 None.
+            tb: 异常回溯对象; 正常退出时为 None.
+        """
         self.close()
 
     # ── 读取 ────────────────────────────────────────────────────
@@ -315,14 +325,26 @@ class PcmRing:
 
     @property
     def start_sec(self) -> float:
-        """缓冲中最早样本的绝对时间（秒），空时为 0."""
+        """缓冲中最早样本的绝对时间（秒），空时为 0.
+
+        Returns:
+            缓冲中最早样本的绝对时间(秒); 缓冲为空时为 0.0.
+        """
         return float(self._start_sec or 0.0)
 
     @property
     def end_sec(self) -> float:
-        """缓冲中最新样本之后的绝对时间（秒）."""
+        """缓冲中最新样本之后的绝对时间（秒）.
+
+        Returns:
+            缓冲中最新样本之后的绝对时间(秒).
+        """
         return float(self._end_sec)
 
     def __len__(self) -> int:
-        """缓冲内保留的采样数."""
+        """缓冲内保留的采样数.
+
+        Returns:
+            缓冲内保留的采样数.
+        """
         return sum(len(chunk) for _, chunk in self._chunks)

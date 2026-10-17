@@ -491,7 +491,14 @@ class SpeechTranscriber:
     # ======================== 媒体辅助 ========================
     @staticmethod
     def _probe_duration(path: str) -> float:
-        """用 ffprobe 获取媒体时长（秒）."""
+        """用 ffprobe 获取媒体时长（秒）.
+
+        Args:
+            path: 媒体文件路径.
+
+        Returns:
+            媒体时长(秒); ffprobe 输出无法解析时返回 0.0.
+        """
         result = subprocess.run(
             [
                 "ffprobe",

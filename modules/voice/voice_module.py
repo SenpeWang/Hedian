@@ -53,11 +53,19 @@ class VoiceModule(BaseModule):
 
     @property
     def module_name(self) -> str:
-        """模块名称."""
+        """模块名称.
+
+        Returns:
+            模块唯一名称，用于推理流与事件署名.
+        """
         return "voice"
 
     def initialize(self) -> bool:
-        """初始化语音模块."""
+        """初始化语音模块.
+
+        Returns:
+            初始化成功返回 True；失败返回 False.
+        """
         try:
             # 初始化语音转文字器
             voice_config = self.config.get("voice", {})
@@ -302,5 +310,9 @@ class VoiceModule(BaseModule):
         return video_path
 
     def save_results(self, run_id: str) -> None:
-        """保存语音结果（委托给 VoiceStorage）."""
+        """保存语音结果（委托给 VoiceStorage）.
+
+        Args:
+            run_id: 本轮运行标识, 用于结果目录命名.
+        """
         self._result_storage.save_results(run_id, self._events)

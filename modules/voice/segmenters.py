@@ -46,7 +46,11 @@ class Segment:
 
     @property
     def duration(self) -> float:
-        """区间时长（秒）."""
+        """区间时长（秒）.
+
+        Returns:
+            区间时长(秒).
+        """
         return self.end - self.start
 
 
