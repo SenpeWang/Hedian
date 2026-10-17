@@ -7,7 +7,7 @@ app:
     tracker: "0"
     voice: "1"
     behavior: "1"
-    evaluation: "1"
+    evaluation: "0"
   gpu_default: "0"
   fps: 30.0
   port: 5002
@@ -48,11 +48,47 @@ bus:
 
 voice:
   sample_rate: 16000
-  sentence_gap_sec: 0.6
+  # 句边界停顿阈值（秒）。变更 12：0.6 → 1.0，须 ≥ vad_min_silence_sec(0.8)，
+  # 否则"句边界比段边界更敏感"，会造成大量段内无意义断句（岗位词被切开的元凶之一）
+  sentence_gap_sec: 1.0
   asr_engine: "qwen3"
   model_path: "models/voice/qwen/Qwen3-ASR-0.6B"
   aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
   torch_dtype: "bfloat16"
+  # VAD 分段参数（对齐 run_infer.py 评估链路）
+  vad_noise_db: -35.0
+  vad_min_silence_sec: 0.8
+  vad_speech_pad_sec: 0.2
+  vad_min_speech_sec: 0.35
+  vad_max_chunk_sec: 30.0
+
+  # ── 流式解码（变更 9）────────────────────────────────────────────
+  # 管道单次读取块时长（秒）：越小首包延迟越低
+  stream_block_sec: 0.2
+  # 切片策略：silence_vad（在线 VAD，默认）| fixed_window（固定窗+重叠，旧版滑窗逻辑）
+  segmenter: "silence_vad"
+  # 段间左上下文重叠（秒）：给模型段首上下文，降低边界丢字与凭空补词（幻觉）；
+  # 重叠区被解码两次，重复词由全局词流按时间戳去重。
+  # 变更 15 曾实验 2.0s；变更 16 已回退为 0.4s（实测收益不明显、且关键词命中下降）
+  boundary_overlap_sec: 0.4
+  # 长语音强制切分时回看窗口（秒）：在窗口内挑能量最低点切分（词边界保护，
+  # 避免 "收到" 被硬切成 "收" / "到"）
+  vad_split_search_sec: 1.0
+  # 强制切分时"接近最低能量"的容差（dB）：越大越偏向切点靠近 max_chunk 位置
+  vad_split_margin_db: 6.0
+  # 跨段句子组装上限（秒）：超长强制封句，防止单句无限累积
+  max_sentence_sec: 30.0
+  # 保护词（不可被句边界切开，如 一回路/二回路/机组长/请讲/请监护/收到 等）
+  #   null        = 自动取 KEYWORD_LABELS 中长度 ≥2 的关键词（推荐）
+  #   []          = 关闭保护
+  #   [一回路, 二回路] = 自定义词表（覆盖自动派生）
+  protected_words: null
+  # 句尾是保护词未完成前缀（如 "二"、"请"）时，最多额外挂起该秒数等待后续，
+  # 超时后按普通规则封句，避免上屏被无限延迟（总挂起上限 ≈ 句阈值 + 该值）
+  protected_hold_sec: 2.0
+  # fixed_window 策略参数（仅 segmenter=fixed_window 时生效）
+  fixed_window_sec: 20.0
+  fixed_window_overlap_sec: 5.0
 
 gaze:
   head_conf_th: 0.55
@@ -85,3 +121,4 @@ rules:
   self_ticket: true
   personnel_status: true
   info_notice: true
+  normal_comm: true

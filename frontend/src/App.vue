@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * 装配层(根组件): 组合播放编排 usePlayback 与业务 store(useTranscript/useNotify/useReports).
- *
- * 消息流: WS → media 内核 → usePlayback 路由 → 业务 store(延迟注册回调);
- * 模板消费经由 ws 聚合壳(保持模板绑定零改动).
- */
 // 装配层: 组合播放编排(usePlayback)与业务 store(useTranscript/useNotify/useReports)
 // 消息流: WS → media 内核 → usePlayback 路由 → 业务 store(延迟注册回调)
 // 模板消费经由 ws 聚合壳(保持模板绑定零改动)

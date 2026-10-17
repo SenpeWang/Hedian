@@ -2,6 +2,7 @@
 
 基于 YOLO 目标检测输出的 pointing_hand 框与 file 框的 IoU 几何交叠判定手指向文件行为。
 """
+
 import logging
 from typing import Any, Dict, List
 

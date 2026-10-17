@@ -3,6 +3,7 @@
 从 config.yaml 加载配置, 与内置默认值深度合并后提供统一访问接口.
 所有硬编码值集中在此管理.
 """
+
 import logging
 import os
 from pathlib import Path
@@ -19,7 +20,12 @@ BASE_DIR = Path(__file__).parent.parent
 _DEFAULTS = {
     "app": {
         "gpu": "0",
-        "gpu_map": {"tracker": "0", "voice": "1", "behavior": "1", "evaluation": "1"},
+        "gpu_map": {
+            "tracker": "0",
+            "voice": "1",
+            "behavior": "1",
+            "evaluation": "1",
+        },
         "gpu_default": "0",
         "fps": 30.0,
         "port": 5002,
@@ -99,7 +105,11 @@ def _deep_merge(base: dict, override: dict) -> dict:
     """
     result = dict(base)
     for key, value in override.items():
-        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+        if (
+            key in result
+            and isinstance(result[key], dict)
+            and isinstance(value, dict)
+        ):
             result[key] = _deep_merge(result[key], value)
         else:
             result[key] = value
@@ -129,7 +139,9 @@ class ConfigManager:
     @property
     def gpu(self) -> str:
         """返回默认 GPU 编号(gpu_default 优先, 缺省时退回 gpu)."""
-        return self._config["app"].get("gpu_default") or self._config["app"].get("gpu", "0")
+        return self._config["app"].get("gpu_default") or self._config[
+            "app"
+        ].get("gpu", "0")
 
     @property
     def gpu_map(self) -> dict:

@@ -1,5 +1,4 @@
-"""
-OC-SORT + ByteTrack 融合跟踪器.
+"""OC-SORT + ByteTrack 融合跟踪器.
 
 核心改进：
   1. 速度预测位置匹配 - 同时使用卡尔曼预测和last_observation，取最小距离
@@ -19,9 +18,10 @@ OC-SORT + ByteTrack 融合跟踪器.
   阶段四：新轨迹初始化 - 先尝试恢复lost(含当前帧新丢失)，再创建tentative(空间过滤)
   阶段四.五：tentative轨迹确认 - 连续匹配confirm_frames帧后分配track_id
 """
+
 import warnings
 from collections import deque
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Dict, List, Optional
 
 import numpy as np
 from scipy.optimize import linear_sum_assignment
@@ -40,7 +40,9 @@ class OCSORTKalman:
     _shared_Q_vel = None
 
     @classmethod
-    def set_parameters(cls, R: float = 0.05, Q_pos: float = 0.01, Q_vel: float = 0.0001) -> None:
+    def set_parameters(
+        cls, R: float = 0.05, Q_pos: float = 0.01, Q_vel: float = 0.0001
+    ) -> None:
         """设置卡尔曼滤波器的测量噪声与过程噪声超参数.
 
         Args:
@@ -65,9 +67,21 @@ class OCSORTKalman:
         for i in range(self.dim_z):
             self.H[i, i] = 1
 
-        R = OCSORTKalman._shared_R if OCSORTKalman._shared_R is not None else 0.05
-        Q_pos = OCSORTKalman._shared_Q_pos if OCSORTKalman._shared_Q_pos is not None else 0.01
-        Q_vel = OCSORTKalman._shared_Q_vel if OCSORTKalman._shared_Q_vel is not None else 0.0001
+        R = (
+            OCSORTKalman._shared_R
+            if OCSORTKalman._shared_R is not None
+            else 0.05
+        )
+        Q_pos = (
+            OCSORTKalman._shared_Q_pos
+            if OCSORTKalman._shared_Q_pos is not None
+            else 0.01
+        )
+        Q_vel = (
+            OCSORTKalman._shared_Q_vel
+            if OCSORTKalman._shared_Q_vel is not None
+            else 0.0001
+        )
 
         self.R = np.eye(self.dim_z) * R
         self.P = np.eye(self.dim_x) * 10.0
@@ -86,7 +100,7 @@ class OCSORTKalman:
             初始状态均值向量与协方差矩阵.
         """
         mean = np.zeros(self.dim_x)
-        mean[:self.dim_z] = measurement
+        mean[: self.dim_z] = measurement
         covariance = self.P.copy()
         return mean, covariance
 
@@ -104,7 +118,9 @@ class OCSORTKalman:
         covariance = self.F @ covariance @ self.F.T + self.Q
         return mean, covariance
 
-    def update(self, mean: np.ndarray, covariance: np.ndarray, measurement: np.ndarray) -> tuple:
+    def update(
+        self, mean: np.ndarray, covariance: np.ndarray, measurement: np.ndarray
+    ) -> tuple:
         """使用最新测量值执行卡尔曼更新步骤.
 
         Args:
@@ -149,7 +165,9 @@ class Tracklet:
         self.state = TrackState.NEW
 
         self.kalman = OCSORTKalman()
-        self.mean, self.covariance = self.kalman.initiate(self.tlwh_to_xyah(self._tlwh))
+        self.mean, self.covariance = self.kalman.initiate(
+            self.tlwh_to_xyah(self._tlwh)
+        )
 
         self.track_id = 0
         self.frame_id = 0
@@ -158,7 +176,7 @@ class Tracklet:
         self.position_history = deque(maxlen=60)
         self.score_history = deque(maxlen=30)
 
-        self.last_observation: Optional[Tuple[int, np.ndarray, np.ndarray]] = None
+        self.last_observation = None
         self.observation_ages = []
         self.delta_t = deque(maxlen=60)
 
@@ -166,7 +184,9 @@ class Tracklet:
 
     @staticmethod
     def tlwh_to_xyah(tlwh: np.ndarray) -> np.ndarray:
-        """将 [top, left, width, height] 转换为中心坐标与宽高比格式 [cx, cy, aspect_ratio, height].
+        """将 [top, left, width, height] 转换为中心坐标与宽高比格式.
+
+        目标格式: [cx, cy, aspect_ratio, height].
 
         Args:
             tlwh: 边界框坐标 [x, y, w, h].
@@ -181,7 +201,9 @@ class Tracklet:
 
     @staticmethod
     def xyah_to_tlwh(xyah: np.ndarray) -> np.ndarray:
-        """将中心坐标与宽高比格式 [cx, cy, aspect_ratio, height] 转换为 [top, left, width, height].
+        """将中心坐标与宽高比格式 [cx, cy, aspect_ratio, height] 转换.
+
+        目标格式: [top, left, width, height].
 
         Args:
             xyah: 状态向量 [cx, cy, a, h].
@@ -196,38 +218,30 @@ class Tracklet:
 
     @property
     def tlwh(self) -> np.ndarray:
-        """获取当前估计的 [top_left_x, top_left_y, width, height] 边界框.
-
-        Returns:
-            当前估计的 [top_left_x, top_left_y, width, height] 边界框数组 (4,).
-        """
+        """获取当前估计的 [top_left_x, top_left_y, width, height] 边界框."""
         return self.xyah_to_tlwh(self.mean[:4])
 
     @property
     def tlbr(self) -> np.ndarray:
-        """获取当前估计的 [x1, y1, x2, y2] 边界框.
-
-        Returns:
-            当前估计的 [x1, y1, x2, y2] 边界框数组 (4,).
-        """
+        """获取当前估计的 [x1, y1, x2, y2] 边界框."""
         tlbr = self.tlwh.copy()
         tlbr[2:] += tlbr[:2]
         return tlbr
 
     @property
     def bbox(self) -> np.ndarray:
-        """获取标准包围盒坐标数组 [x1, y1, x2, y2].
-
-        Returns:
-            标准包围盒坐标数组 [x1, y1, x2, y2] (4,).
-        """
+        """获取标准包围盒坐标数组 [x1, y1, x2, y2]."""
         return self.tlbr
 
     def predict(self) -> None:
         """执行卡尔曼滤波前向预测步骤，更新内部状态均值与协方差."""
-        self.mean, self.covariance = self.kalman.predict(self.mean, self.covariance)
+        self.mean, self.covariance = self.kalman.predict(
+            self.mean, self.covariance
+        )
 
-    def update(self, tlwh: np.ndarray, score: float, frame_id: Optional[int] = None) -> None:
+    def update(
+        self, tlwh: np.ndarray, score: float, frame_id: Optional[int] = None
+    ) -> None:
         """使用新的检测框观测更新轨迹状态与卡尔曼滤波器.
 
         Args:
@@ -268,20 +282,12 @@ class Tracklet:
         self.state = TrackState.REMOVED
 
     def get_center(self) -> np.ndarray:
-        """获取轨迹当前的中心点坐标 [cx, cy].
-
-        Returns:
-            轨迹当前的中心点坐标 [cx, cy] (2,).
-        """
+        """获取轨迹当前的中心点坐标 [cx, cy]."""
         tlwh = self.tlwh
         return np.array([tlwh[0] + tlwh[2] / 2, tlwh[1] + tlwh[3] / 2])
 
     def get_velocity(self) -> np.ndarray:
-        """获取轨迹当前的估计速度矢量 [vx, vy].
-
-        Returns:
-            轨迹当前的估计速度矢量 [vx, vy] (2,)；位置历史不足时返回零向量.
-        """
+        """获取轨迹当前的估计速度矢量 [vx, vy]."""
         if len(self.position_history) < 2:
             return np.zeros(2)
         window = min(5, len(self.position_history))
@@ -289,7 +295,7 @@ class Tracklet:
         if len(positions) < 2:
             return np.zeros(2)
         velocity = np.array(positions[-1]) - np.array(positions[0])
-        velocity /= (len(positions) - 1)
+        velocity /= len(positions) - 1
         return velocity
 
     def oc_sort_recover(
@@ -309,7 +315,9 @@ class Tracklet:
         """
         if self.last_observation is not None:
             old_center = self.last_observation[1]
-            new_center = np.array([tlwh[0] + tlwh[2] / 2, tlwh[1] + tlwh[3] / 2])
+            new_center = np.array(
+                [tlwh[0] + tlwh[2] / 2, tlwh[1] + tlwh[3] / 2]
+            )
 
             if lost_frames > 0:
                 avg_velocity = (new_center - old_center) / lost_frames
@@ -406,8 +414,8 @@ class OCSORTByteTracker:
 
     def update(
         self,
-        high_detections: List[Dict[str, Any]],
-        low_detections: Optional[List[Dict[str, Any]]] = None,
+        high_detections: List[Dict],
+        low_detections: Optional[List[Dict]] = None,
     ) -> List[Tracklet]:
         """执行单帧多阶段匹配，返回本帧已确认的轨迹列表.
 
@@ -441,26 +449,40 @@ class OCSORTByteTracker:
         # ============================================================
         # 阶段一：confirmed tracked + tentative vs high_detections
         # ============================================================
-        tracked_pool = [t for t in self.tracked_tracks if t.state == TrackState.TRACKED]
-        tentative_pool = [t for t in self.tentative_tracks if t.state == TrackState.TRACKED]
+        tracked_pool = [
+            t for t in self.tracked_tracks if t.state == TrackState.TRACKED
+        ]
+        tentative_pool = [
+            t for t in self.tentative_tracks if t.state == TrackState.TRACKED
+        ]
         all_tracked_pool = tracked_pool + tentative_pool
 
         if len(all_tracked_pool) > 0 and len(high_measurements) > 0:
-            tracked_cost_matrix = self._compute_oc_sort_distance(all_tracked_pool, high_measurements)
+            tracked_cost_matrix = self._compute_oc_sort_distance(
+                all_tracked_pool, high_measurements
+            )
 
             for track_idx, track in enumerate(all_tracked_pool):
                 if track.last_observation is None:
                     continue
                 last_center = track.last_observation[1]
                 for det_idx, det in enumerate(high_measurements):
-                    det_center = np.array([det['tlwh'][0] + det['tlwh'][2] / 2,
-                                           det['tlwh'][1] + det['tlwh'][3] / 2])
-                    observation_distance = np.linalg.norm(det_center - last_center)
+                    det_center = np.array(
+                        [
+                            det["tlwh"][0] + det["tlwh"][2] / 2,
+                            det["tlwh"][1] + det["tlwh"][3] / 2,
+                        ]
+                    )
+                    observation_distance = np.linalg.norm(
+                        det_center - last_center
+                    )
                     if observation_distance > self.max_recover_distance:
                         tracked_cost_matrix[track_idx, det_idx] = 1.0
 
-            matches_tracked, unmatched_tracked_idx, unmatched_high_det_idx = self._linear_assignment(
-                tracked_cost_matrix, threshold=self.match_threshold
+            matches_tracked, unmatched_tracked_idx, unmatched_high_det_idx = (
+                self._linear_assignment(
+                    tracked_cost_matrix, threshold=self.match_threshold
+                )
             )
         else:
             matches_tracked = []
@@ -473,7 +495,7 @@ class OCSORTByteTracker:
         for track_idx, det_idx in matches_tracked:
             track = all_tracked_pool[track_idx]
             det = high_measurements[det_idx]
-            track.update(det['tlwh'], det['score'], frame_id=self.frame_id)
+            track.update(det["tlwh"], det["score"], frame_id=self.frame_id)
 
             if track.is_activated:
                 confirmed_activated.append(track)
@@ -488,33 +510,59 @@ class OCSORTByteTracker:
 
         activated_tracks.extend(confirmed_activated)
 
-        unmatched_tracked = [all_tracked_pool[track_idx] for track_idx in unmatched_tracked_idx]
+        unmatched_tracked = [
+            all_tracked_pool[track_idx] for track_idx in unmatched_tracked_idx
+        ]
         unmatched_confirmed = [t for t in unmatched_tracked if t.is_activated]
-        unmatched_tentative = [t for t in unmatched_tracked if not t.is_activated]
-        unmatched_high_measurements = [high_measurements[det_idx] for det_idx in unmatched_high_det_idx]
+        unmatched_tentative = [
+            t for t in unmatched_tracked if not t.is_activated
+        ]
+        unmatched_high_measurements = [
+            high_measurements[det_idx] for det_idx in unmatched_high_det_idx
+        ]
 
         # ============================================================
         # 阶段二：lost轨迹 vs 未匹配high_detections (中心距离+速度预测)
         # ============================================================
         unmatched_lost_tracks = []
         if len(self.lost_tracks) > 0 and len(unmatched_high_measurements) > 0:
-            lost_cost_matrix = self._compute_center_distance(self.lost_tracks, unmatched_high_measurements)
-            matches_lost, unmatched_lost_idx, unmatched_high_det_idx = self._linear_assignment(
-                lost_cost_matrix, threshold=self._center_distance_threshold
+            lost_cost_matrix = self._compute_center_distance(
+                self.lost_tracks, unmatched_high_measurements
+            )
+            matches_lost, unmatched_lost_idx, unmatched_high_det_idx = (
+                self._linear_assignment(
+                    lost_cost_matrix, threshold=self._center_distance_threshold
+                )
             )
 
             for lost_idx, det_idx in matches_lost:
                 track = self.lost_tracks[lost_idx]
                 det = unmatched_high_measurements[det_idx]
-                lost_frames = self.frame_id - track.last_observation[0] if track.last_observation else 0
+                lost_frames = (
+                    self.frame_id - track.last_observation[0]
+                    if track.last_observation
+                    else 0
+                )
                 if lost_frames > 5:
-                    track.oc_sort_recover(det['tlwh'], det['score'], lost_frames, frame_id=self.frame_id)
+                    track.oc_sort_recover(
+                        det["tlwh"],
+                        det["score"],
+                        lost_frames,
+                        frame_id=self.frame_id,
+                    )
                 else:
-                    track.update(det['tlwh'], det['score'], frame_id=self.frame_id)
+                    track.update(
+                        det["tlwh"], det["score"], frame_id=self.frame_id
+                    )
                 refound_tracks.append(track)
 
-            remaining_high_measurements = [unmatched_high_measurements[det_idx] for det_idx in unmatched_high_det_idx]
-            unmatched_lost_tracks = [self.lost_tracks[lost_idx] for lost_idx in unmatched_lost_idx]
+            remaining_high_measurements = [
+                unmatched_high_measurements[det_idx]
+                for det_idx in unmatched_high_det_idx
+            ]
+            unmatched_lost_tracks = [
+                self.lost_tracks[lost_idx] for lost_idx in unmatched_lost_idx
+            ]
         else:
             remaining_high_measurements = unmatched_high_measurements
             unmatched_lost_tracks = list(self.lost_tracks)
@@ -531,28 +579,51 @@ class OCSORTByteTracker:
         # ============================================================
         remaining_low_measurements = low_measurements
         if len(unmatched_lost_tracks) > 0 and len(low_measurements) > 0:
-            lost_low_cost_matrix = self._compute_center_distance(unmatched_lost_tracks, low_measurements)
-            matches_lost_low, unmatched_lost_idx, unmatched_low_det_idx = self._linear_assignment(
-                lost_low_cost_matrix, threshold=self._center_distance_threshold
+            lost_low_cost_matrix = self._compute_center_distance(
+                unmatched_lost_tracks, low_measurements
+            )
+            matches_lost_low, unmatched_lost_idx, unmatched_low_det_idx = (
+                self._linear_assignment(
+                    lost_low_cost_matrix,
+                    threshold=self._center_distance_threshold,
+                )
             )
 
             for lost_idx, det_idx in matches_lost_low:
                 track = unmatched_lost_tracks[lost_idx]
                 det = low_measurements[det_idx]
-                lost_frames = self.frame_id - track.last_observation[0] if track.last_observation else 0
+                lost_frames = (
+                    self.frame_id - track.last_observation[0]
+                    if track.last_observation
+                    else 0
+                )
                 if lost_frames > 5:
-                    track.oc_sort_recover(det['tlwh'], det['score'], lost_frames, frame_id=self.frame_id)
+                    track.oc_sort_recover(
+                        det["tlwh"],
+                        det["score"],
+                        lost_frames,
+                        frame_id=self.frame_id,
+                    )
                 else:
-                    track.update(det['tlwh'], det['score'], frame_id=self.frame_id)
+                    track.update(
+                        det["tlwh"], det["score"], frame_id=self.frame_id
+                    )
                 refound_tracks.append(track)
 
-            remaining_low_measurements = [low_measurements[det_idx] for det_idx in unmatched_low_det_idx]
+            remaining_low_measurements = [
+                low_measurements[det_idx] for det_idx in unmatched_low_det_idx
+            ]
 
         # ============================================================
         # 阶段三：ByteTrack级匹配 - 未匹配tracked vs 剩余low_detections
         # ============================================================
-        if len(unmatched_confirmed) > 0 and len(remaining_low_measurements) > 0:
-            confirmed_low_cost_matrix = self._compute_iou_distance(unmatched_confirmed, remaining_low_measurements)
+        if (
+            len(unmatched_confirmed) > 0
+            and len(remaining_low_measurements) > 0
+        ):
+            confirmed_low_cost_matrix = self._compute_iou_distance(
+                unmatched_confirmed, remaining_low_measurements
+            )
 
             for track_idx, track in enumerate(unmatched_confirmed):
                 if track.last_observation is None:
@@ -561,60 +632,88 @@ class OCSORTByteTracker:
                 elapsed = self.frame_id - track.last_observation[0]
                 max_allowed_distance = min(
                     self.max_recover_distance,
-                    self.max_speed_per_frame * max(elapsed, 1)
+                    self.max_speed_per_frame * max(elapsed, 1),
                 )
                 for det_idx, det in enumerate(remaining_low_measurements):
-                    det_center = np.array([det['tlwh'][0] + det['tlwh'][2] / 2,
-                                           det['tlwh'][1] + det['tlwh'][3] / 2])
-                    observation_distance = np.linalg.norm(det_center - last_center)
+                    det_center = np.array(
+                        [
+                            det["tlwh"][0] + det["tlwh"][2] / 2,
+                            det["tlwh"][1] + det["tlwh"][3] / 2,
+                        ]
+                    )
+                    observation_distance = np.linalg.norm(
+                        det_center - last_center
+                    )
                     predicted = self._get_predicted_center(track)
                     predicted_distance = np.linalg.norm(det_center - predicted)
-                    if observation_distance > max_allowed_distance and predicted_distance > max_allowed_distance:
+                    if (
+                        observation_distance > max_allowed_distance
+                        and predicted_distance > max_allowed_distance
+                    ):
                         confirmed_low_cost_matrix[track_idx, det_idx] = 1.0
 
-            matches_low, unmatched_tracked_idx, unmatched_low_det_idx = self._linear_assignment(
-                confirmed_low_cost_matrix, threshold=0.5
+            matches_low, unmatched_tracked_idx, unmatched_low_det_idx = (
+                self._linear_assignment(
+                    confirmed_low_cost_matrix, threshold=0.5
+                )
             )
 
             for track_idx, det_idx in matches_low:
                 track = unmatched_confirmed[track_idx]
                 det = remaining_low_measurements[det_idx]
-                track.update(det['tlwh'], det['score'], frame_id=self.frame_id)
+                track.update(det["tlwh"], det["score"], frame_id=self.frame_id)
                 activated_tracks.append(track)
 
         # ============================================================
         # 阶段四：新轨迹初始化 - 先尝试恢复lost，再创建tentative
         # ============================================================
         still_lost_tracks = [
-            t for t in self.lost_tracks
+            t
+            for t in self.lost_tracks
             if t.state == TrackState.LOST and t not in refound_tracks
         ]
-        still_lost_tracks.extend([t for t in newly_lost_tracks if t.state == TrackState.LOST])
+        still_lost_tracks.extend(
+            [t for t in newly_lost_tracks if t.state == TrackState.LOST]
+        )
 
         for det in remaining_high_measurements:
-            if det['score'] < self.track_threshold:
+            if det["score"] < self.track_threshold:
                 continue
 
-            det_center = np.array([det['tlwh'][0] + det['tlwh'][2] / 2,
-                                   det['tlwh'][1] + det['tlwh'][3] / 2])
+            det_center = np.array(
+                [
+                    det["tlwh"][0] + det["tlwh"][2] / 2,
+                    det["tlwh"][1] + det["tlwh"][3] / 2,
+                ]
+            )
 
-            recovered = self._try_recover_lost(det, det_center, still_lost_tracks)
+            recovered = self._try_recover_lost(
+                det, det_center, still_lost_tracks
+            )
             if recovered is not None:
                 refound_tracks.append(recovered)
-                still_lost_tracks = [t for t in still_lost_tracks if t.track_id != recovered.track_id]
+                still_lost_tracks = [
+                    t
+                    for t in still_lost_tracks
+                    if t.track_id != recovered.track_id
+                ]
                 continue
 
             too_close = self._check_spatial_filter(det_center)
             if too_close:
                 continue
 
-            new_track = Tracklet(det['tlwh'], det['score'])
+            new_track = Tracklet(det["tlwh"], det["score"])
             new_track.frame_id = self.frame_id
             new_track.start_frame = self.frame_id
             new_track.state = TrackState.TRACKED
             new_track.tracklet_len = 1
             new_track.is_activated = False
-            new_track.last_observation = (self.frame_id, det_center.copy(), det['tlwh'].copy())
+            new_track.last_observation = (
+                self.frame_id,
+                det_center.copy(),
+                det["tlwh"].copy(),
+            )
             new_track.observation_ages.append(self.frame_id)
             self.tentative_tracks.append(new_track)
 
@@ -653,7 +752,11 @@ class OCSORTByteTracker:
         tracked_ids = set()
         unique_tracked = []
         for t in self.tracked_tracks:
-            if t.state == TrackState.TRACKED and t.is_activated and t.track_id not in tracked_ids:
+            if (
+                t.state == TrackState.TRACKED
+                and t.is_activated
+                and t.track_id not in tracked_ids
+            ):
                 tracked_ids.add(t.track_id)
                 unique_tracked.append(t)
         self.tracked_tracks = unique_tracked
@@ -668,12 +771,18 @@ class OCSORTByteTracker:
                 self.tracked_tracks.append(t)
                 tracked_ids.add(t.track_id)
 
-        self.lost_tracks = [t for t in self.lost_tracks if t.state == TrackState.LOST]
+        self.lost_tracks = [
+            t for t in self.lost_tracks if t.state == TrackState.LOST
+        ]
         self.lost_tracks.extend(newly_lost_tracks)
 
         self.removed_tracks.extend(newly_removed_tracks)
 
-        return [t for t in self.tracked_tracks if t.state == TrackState.TRACKED and t.is_activated]
+        return [
+            t
+            for t in self.tracked_tracks
+            if t.state == TrackState.TRACKED and t.is_activated
+        ]
 
     def _try_recover_lost(
         self,
@@ -695,7 +804,7 @@ class OCSORTByteTracker:
             return None
 
         best_track = None
-        best_cost = float('inf')
+        best_cost = float("inf")
 
         for track in candidate_tracks:
             if track.last_observation is None:
@@ -708,7 +817,7 @@ class OCSORTByteTracker:
 
             max_allowed_distance = min(
                 self.max_recover_distance,
-                self.max_speed_per_frame * max(elapsed, 1)
+                self.max_speed_per_frame * max(elapsed, 1),
             )
 
             predicted_center = self._get_predicted_center(track)
@@ -716,20 +825,27 @@ class OCSORTByteTracker:
             observation_distance = np.linalg.norm(det_center - last_center)
             predicted_distance = np.linalg.norm(det_center - predicted_center)
 
-            if observation_distance > max_allowed_distance and predicted_distance > max_allowed_distance:
+            if (
+                observation_distance > max_allowed_distance
+                and predicted_distance > max_allowed_distance
+            ):
                 continue
 
             center_distance = min(observation_distance, predicted_distance)
 
-            det_area = det['tlwh'][2] * det['tlwh'][3]
+            det_area = det["tlwh"][2] * det["tlwh"][3]
             reference_size = max(np.sqrt(last_area), np.sqrt(det_area))
             if reference_size == 0:
                 continue
 
             normalized_distance = center_distance / reference_size
 
-            adaptive_threshold = self._center_norm_threshold * (1.0 + 0.01 * min(elapsed, 50))
-            adaptive_threshold = min(adaptive_threshold, self._center_norm_threshold * 2.0)
+            adaptive_threshold = self._center_norm_threshold * (
+                1.0 + 0.01 * min(elapsed, 50)
+            )
+            adaptive_threshold = min(
+                adaptive_threshold, self._center_norm_threshold * 2.0
+            )
 
             if normalized_distance < adaptive_threshold:
                 cost = normalized_distance / adaptive_threshold
@@ -738,11 +854,22 @@ class OCSORTByteTracker:
                     best_track = track
 
         if best_track is not None and best_cost < 0.99:
-            lost_frames = self.frame_id - best_track.last_observation[0] if best_track.last_observation else 0
+            lost_frames = (
+                self.frame_id - best_track.last_observation[0]
+                if best_track.last_observation
+                else 0
+            )
             if lost_frames > 5:
-                best_track.oc_sort_recover(det['tlwh'], det['score'], lost_frames, frame_id=self.frame_id)
+                best_track.oc_sort_recover(
+                    det["tlwh"],
+                    det["score"],
+                    lost_frames,
+                    frame_id=self.frame_id,
+                )
             else:
-                best_track.update(det['tlwh'], det['score'], frame_id=self.frame_id)
+                best_track.update(
+                    det["tlwh"], det["score"], frame_id=self.frame_id
+                )
             return best_track
 
         return None
@@ -756,27 +883,33 @@ class OCSORTByteTracker:
         Returns:
             检测框与已有轨迹过近、需被过滤时返回 True.
         """
-        all_active = self.tracked_tracks + self.lost_tracks + self.tentative_tracks
+        all_active = (
+            self.tracked_tracks + self.lost_tracks + self.tentative_tracks
+        )
         for track in all_active:
             if track.state in [TrackState.TRACKED, TrackState.LOST]:
                 if track.last_observation is not None:
                     reference_center = track.last_observation[1]
                     predicted = self._get_predicted_center(track)
 
-                    observation_distance = np.linalg.norm(det_center - reference_center)
+                    observation_distance = np.linalg.norm(
+                        det_center - reference_center
+                    )
                     predicted_distance = np.linalg.norm(det_center - predicted)
 
-                    min_distance = min(observation_distance, predicted_distance)
+                    min_distance = min(
+                        observation_distance, predicted_distance
+                    )
                 else:
-                    min_distance = np.linalg.norm(det_center - track.get_center())
+                    min_distance = np.linalg.norm(
+                        det_center - track.get_center()
+                    )
 
                 if min_distance < self.min_center_distance:
                     return True
         return False
 
-    def _convert_detections(
-        self, detections: List[Dict[str, Any]]
-    ) -> List[Dict[str, Any]]:
+    def _convert_detections(self, detections: List[Dict]) -> List[Dict]:
         """将输入检测字典列表转换为内部标准 [tlwh, score] 格式.
 
         Args:
@@ -787,14 +920,20 @@ class OCSORTByteTracker:
         """
         converted = []
         for det in detections:
-            box = det['box']
-            converted.append({
-                'tlwh': np.array([box[0], box[1], box[2] - box[0], box[3] - box[1]]),
-                'score': det['confidence']
-            })
+            box = det["box"]
+            converted.append(
+                {
+                    "tlwh": np.array(
+                        [box[0], box[1], box[2] - box[0], box[3] - box[1]]
+                    ),
+                    "score": det["confidence"],
+                }
+            )
         return converted
 
-    def _compute_oc_sort_distance(self, tracks: list, detections: list) -> np.ndarray:
+    def _compute_oc_sort_distance(
+        self, tracks: list, detections: list
+    ) -> np.ndarray:
         """计算轨迹与检测框之间的 OC-SORT 综合距离代价矩阵.
 
         Args:
@@ -807,30 +946,47 @@ class OCSORTByteTracker:
         if len(tracks) == 0 or len(detections) == 0:
             return np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
-        cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float32)
+        cost_matrix = np.zeros(
+            (len(tracks), len(detections)), dtype=np.float32
+        )
 
         for track_idx, track in enumerate(tracks):
             for det_idx, det in enumerate(detections):
-                iou = self._iou(track.tlbr, det['tlwh'])
+                iou = self._iou(track.tlbr, det["tlwh"])
 
                 direction_bonus = 0.0
-                if len(track.position_history) >= 2 and track.state == TrackState.TRACKED:
+                if (
+                    len(track.position_history) >= 2
+                    and track.state == TrackState.TRACKED
+                ):
                     direction = track.get_velocity()
-                    det_center = np.array([det['tlwh'][0] + det['tlwh'][2] / 2,
-                                           det['tlwh'][1] + det['tlwh'][3] / 2])
+                    det_center = np.array(
+                        [
+                            det["tlwh"][0] + det["tlwh"][2] / 2,
+                            det["tlwh"][1] + det["tlwh"][3] / 2,
+                        ]
+                    )
                     track_center = track.get_center()
                     predicted_center = track_center + direction
 
-                    predicted_error = np.linalg.norm(det_center - predicted_center)
-                    box_diagonal = np.sqrt(det['tlwh'][2] ** 2 + det['tlwh'][3] ** 2)
+                    predicted_error = np.linalg.norm(
+                        det_center - predicted_center
+                    )
+                    box_diagonal = np.sqrt(
+                        det["tlwh"][2] ** 2 + det["tlwh"][3] ** 2
+                    )
                     if box_diagonal > 0:
-                        direction_bonus = 0.2 * (1.0 - min(predicted_error / box_diagonal, 1.0))
+                        direction_bonus = 0.2 * (
+                            1.0 - min(predicted_error / box_diagonal, 1.0)
+                        )
 
                 cost_matrix[track_idx, det_idx] = 1.0 - iou - direction_bonus
 
         return cost_matrix
 
-    def _compute_center_distance(self, tracks: list, detections: list) -> np.ndarray:
+    def _compute_center_distance(
+        self, tracks: list, detections: list
+    ) -> np.ndarray:
         """计算轨迹与检测框之间的欧氏中心距离代价矩阵.
 
         Args:
@@ -858,18 +1014,27 @@ class OCSORTByteTracker:
 
             max_allowed_distance = min(
                 self.max_recover_distance,
-                self.max_speed_per_frame * max(elapsed, 1)
+                self.max_speed_per_frame * max(elapsed, 1),
             )
 
             for det_idx, det in enumerate(detections):
-                det_center = np.array([det['tlwh'][0] + det['tlwh'][2] / 2,
-                                       det['tlwh'][1] + det['tlwh'][3] / 2])
-                det_area = det['tlwh'][2] * det['tlwh'][3]
+                det_center = np.array(
+                    [
+                        det["tlwh"][0] + det["tlwh"][2] / 2,
+                        det["tlwh"][1] + det["tlwh"][3] / 2,
+                    ]
+                )
+                det_area = det["tlwh"][2] * det["tlwh"][3]
 
                 observation_distance = np.linalg.norm(det_center - last_center)
-                predicted_distance = np.linalg.norm(det_center - predicted_center)
+                predicted_distance = np.linalg.norm(
+                    det_center - predicted_center
+                )
 
-                if observation_distance > max_allowed_distance and predicted_distance > max_allowed_distance:
+                if (
+                    observation_distance > max_allowed_distance
+                    and predicted_distance > max_allowed_distance
+                ):
                     continue
 
                 center_distance = min(observation_distance, predicted_distance)
@@ -880,15 +1045,23 @@ class OCSORTByteTracker:
 
                 normalized_distance = center_distance / reference_size
 
-                adaptive_threshold = self._center_norm_threshold * (1.0 + 0.01 * min(elapsed, 50))
-                adaptive_threshold = min(adaptive_threshold, self._center_norm_threshold * 2.0)
+                adaptive_threshold = self._center_norm_threshold * (
+                    1.0 + 0.01 * min(elapsed, 50)
+                )
+                adaptive_threshold = min(
+                    adaptive_threshold, self._center_norm_threshold * 2.0
+                )
 
                 if normalized_distance < adaptive_threshold:
-                    cost_matrix[track_idx, det_idx] = normalized_distance / adaptive_threshold
+                    cost_matrix[track_idx, det_idx] = (
+                        normalized_distance / adaptive_threshold
+                    )
 
         return cost_matrix
 
-    def _compute_iou_distance(self, tracks: list, detections: list) -> np.ndarray:
+    def _compute_iou_distance(
+        self, tracks: list, detections: list
+    ) -> np.ndarray:
         """计算轨迹与检测框之间的纯 IoU 距离代价矩阵 (1 - IoU).
 
         Args:
@@ -901,11 +1074,13 @@ class OCSORTByteTracker:
         if len(tracks) == 0 or len(detections) == 0:
             return np.zeros((len(tracks), len(detections)), dtype=np.float32)
 
-        cost_matrix = np.zeros((len(tracks), len(detections)), dtype=np.float32)
+        cost_matrix = np.zeros(
+            (len(tracks), len(detections)), dtype=np.float32
+        )
 
         for track_idx, track in enumerate(tracks):
             for det_idx, det in enumerate(detections):
-                iou = self._iou(track.tlbr, det['tlwh'])
+                iou = self._iou(track.tlbr, det["tlwh"])
                 cost_matrix[track_idx, det_idx] = 1.0 - iou
 
         return cost_matrix
@@ -922,7 +1097,9 @@ class OCSORTByteTracker:
             交并比数值 (0.0 ~ 1.0).
         """
         if box2.shape[0] == 4:
-            box2 = np.array([box2[0], box2[1], box2[0] + box2[2], box2[1] + box2[3]])
+            box2 = np.array(
+                [box2[0], box2[1], box2[0] + box2[2], box2[1] + box2[3]]
+            )
 
         x1 = max(box1[0], box2[0])
         y1 = max(box1[1], box2[1])
@@ -953,8 +1130,16 @@ class OCSORTByteTracker:
             elif cost_matrix.ndim == 1:
                 return [], list(range(cost_matrix.shape[0])), []
             else:
-                unmatched_rows = list(range(cost_matrix.shape[0])) if cost_matrix.shape[0] > 0 else []
-                unmatched_cols = list(range(cost_matrix.shape[1])) if cost_matrix.shape[1] > 0 else []
+                unmatched_rows = (
+                    list(range(cost_matrix.shape[0]))
+                    if cost_matrix.shape[0] > 0
+                    else []
+                )
+                unmatched_cols = (
+                    list(range(cost_matrix.shape[1]))
+                    if cost_matrix.shape[1] > 0
+                    else []
+                )
                 return [], unmatched_rows, unmatched_cols
 
         matches = []

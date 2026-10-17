@@ -2,6 +2,7 @@
 
 供各业务算法模块进程使用, 只负责向 Redis 写入进度和推理结果.
 """
+
 import json
 import logging
 from typing import Any, Dict, Set
@@ -66,7 +67,7 @@ class InferenceStream:
         redis_host: str = "localhost",
         redis_port: int = 6379,
         redis_db: int = 0,
-        **kwargs
+        **kwargs,
     ) -> None:
         """初始化写入端并验证 Redis 连通性.
 
@@ -79,7 +80,10 @@ class InferenceStream:
         """
         self.fps = fps
         from core.redis_conn import get_redis_client
-        self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
+
+        self._redis = get_redis_client(
+            host=redis_host, port=redis_port, db=redis_db
+        )
         self._redis.ping()
         logger.info("InferenceStream (推理流写入端) Redis 连接成功")
 
@@ -88,12 +92,14 @@ class InferenceStream:
         self._snapshot_key = KEY_SNAPSHOT
         self._event_stream_key = KEY_EVENT_STREAM
         self._clock_key = "inference:global_sec"
-        # per-source 结束信号：field=source, value=final local_sec（模块退出时写入，供中间件剔除已结束 source）
+        # per-source 结束信号：field=source, value=final local_sec
+        # （模块退出时写入，供中间件剔除已结束 source）
         self._source_done_key = KEY_SOURCE_DONE
 
         # 立即推送的事件类型
         self._immediate_types: Set[str] = {
-            "progress", "video_start",
+            "progress",
+            "video_start",
         }
 
         self._event_counter = 0
@@ -110,11 +116,15 @@ class InferenceStream:
             sec: 当前进度(local_sec).
         """
         try:
-            self._redis.hset(self._progress_key, _progress_field(source), str(sec))
+            self._redis.hset(
+                self._progress_key, _progress_field(source), str(sec)
+            )
         except Exception as e:
             logger.error(f"更新 source 进度失败 {source}: {e}")
 
-    def update_module_snapshot(self, module_name: str, snapshot: Dict[str, Any]) -> None:
+    def update_module_snapshot(
+        self, module_name: str, snapshot: Dict[str, Any]
+    ) -> None:
         """更新模块的状态快照.
 
         Args:
@@ -122,8 +132,11 @@ class InferenceStream:
             snapshot: 快照内容, 序列化为 JSON 存储.
         """
         try:
-            self._redis.hset(self._snapshot_key, module_name,
-                             json.dumps(snapshot, ensure_ascii=False))
+            self._redis.hset(
+                self._snapshot_key,
+                module_name,
+                json.dumps(snapshot, ensure_ascii=False),
+            )
         except Exception as e:
             logger.error(f"更新模块快照失败 {module_name}: {e}")
 
@@ -170,7 +183,10 @@ class InferenceStream:
             data: 事件载荷, 时间对齐事件须含 "localSec".
         """
         event = {"source": event_type, **data}
-        logger.debug(f"InferenceStream 收到事件: source={event_type}, localSec={data.get('localSec', 'N/A')}")
+        logger.debug(
+            f"InferenceStream 收到事件: source={event_type}, "
+            f"localSec={data.get('localSec', 'N/A')}"
+        )
 
         try:
             if event_type in self._immediate_types:
@@ -178,15 +194,20 @@ class InferenceStream:
                     event["context"] = self._get_module_snapshots()
                 self._event_counter += 1
                 local_sec = event.get("localSec", 0)
-                self._redis.xadd(self._event_stream_key, {
-                    "local_sec": str(local_sec),
-                    "counter": str(self._event_counter),
-                    "payload": json.dumps(event, ensure_ascii=False),
-                })
+                self._redis.xadd(
+                    self._event_stream_key,
+                    {
+                        "local_sec": str(local_sec),
+                        "counter": str(self._event_counter),
+                        "payload": json.dumps(event, ensure_ascii=False),
+                    },
+                )
                 return
 
             if "localSec" not in event:
-                logger.error(f"时间对齐事件类型 '{event_type}' 必须包含 'localSec' 字段")
+                logger.error(
+                    f"时间对齐事件类型 '{event_type}' 必须包含 'localSec' 字段"
+                )
                 return
 
             # 记录该 source 的最近 local_sec，供模块退出时上报结束信号
@@ -195,11 +216,14 @@ class InferenceStream:
             # 普通事件直接写入 Stream
             self._event_counter += 1
             local_sec = event["localSec"]
-            self._redis.xadd(self._event_stream_key, {
-                "local_sec": str(local_sec),
-                "counter": str(self._event_counter),
-                "payload": json.dumps(event, ensure_ascii=False),
-            })
+            self._redis.xadd(
+                self._event_stream_key,
+                {
+                    "local_sec": str(local_sec),
+                    "counter": str(self._event_counter),
+                    "payload": json.dumps(event, ensure_ascii=False),
+                },
+            )
         except Exception as e:
             logger.error(f"推送推理事件失败: {event_type}, {e}")
 
@@ -211,8 +235,12 @@ class InferenceStream:
             final_sec: 该 source 的最终 local_sec.
         """
         try:
-            self._redis.hset(self._source_done_key, _progress_field(source), str(final_sec))
-            logger.info(f"source '{source}' 推理结束，final local_sec={final_sec:.2f}")
+            self._redis.hset(
+                self._source_done_key, _progress_field(source), str(final_sec)
+            )
+            logger.info(
+                f"source '{source}' 推理结束，final local_sec={final_sec:.2f}"
+            )
         except Exception as e:
             logger.error(f"标记 source 结束失败 {source}: {e}")
 
@@ -229,7 +257,11 @@ class InferenceStream:
         try:
             pipe = self._redis.pipeline()
             for source, final_sec in source_final_map.items():
-                pipe.hset(self._source_done_key, _progress_field(source), str(final_sec))
+                pipe.hset(
+                    self._source_done_key,
+                    _progress_field(source),
+                    str(final_sec),
+                )
             pipe.execute()
             logger.info(f"批量标记 source 结束: {source_final_map}")
         except Exception as e:
@@ -254,7 +286,10 @@ class InferenceStream:
         """
         if not sources:
             return
-        final_map = {source: self._source_last_sec.get(source, default_sec) for source in sources}
+        final_map = {
+            source: self._source_last_sec.get(source, default_sec)
+            for source in sources
+        }
         self.mark_sources_done(final_map)
 
     def start(self) -> None:

@@ -1,9 +1,4 @@
 <script setup lang="ts">
-/**
- * VoicePanel: 人员对话记录面板(关键词高亮 + 自动滚底).
- *
- * 按主时钟过滤后的字幕条目逐行展示, 命中关键词以 kw-red 样式高亮.
- */
 import { ref } from 'vue'
 import type { VoiceEntry } from '../types'
 import { useScrollBottom } from '../composables/useScrollBottom'
@@ -60,7 +55,7 @@ function renderText(entry: VoiceEntry) {
     <div ref="scrollEl" class="panel-body">
       <div v-for="entry in entries" :key="entry.sec" class="text-item">
         <span class="ts">[{{ fmt(entry.sec) }}]</span>
-        <span v-html="renderText(entry)" />
+        <span v-html="renderText(entry)"></span>
       </div>
     </div>
   </div>

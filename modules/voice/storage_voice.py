@@ -3,6 +3,7 @@
 从转录产出的事件列表中筛选出带 key_moment 的条目落盘为关键事件，
 并把全部事件文本拼接后落盘为完整转写文本。
 """
+
 import logging
 from typing import Any, Dict, List
 
@@ -38,18 +39,22 @@ class VoiceStorage(BaseStorage):
         for event in events:
             key_moment = event.get("key_moment")
             if key_moment:
-                key_moment_events.append({
-                    "localSec": event.get("localSec"),
-                    "key_moment": key_moment,
-                    "source": "voice",
-                })
+                key_moment_events.append(
+                    {
+                        "localSec": event.get("localSec"),
+                        "key_moment": key_moment,
+                        "source": "voice",
+                    }
+                )
 
         full_text = " ".join(event.get("text", "") for event in events)
 
         self.save_key_moments(run_id, key_moment_events)
         self.save_full_text(run_id, full_text)
 
-    def save_key_moments(self, run_id: str, events: List[Dict[str, Any]]) -> None:
+    def save_key_moments(
+        self, run_id: str, events: List[Dict[str, Any]]
+    ) -> None:
         """把关键时刻事件原子写入 voice_key_moments.json.
 
         Args:
@@ -68,7 +73,11 @@ class VoiceStorage(BaseStorage):
             run_id: 本次运行标识.
             full_text: 拼接后的完整转写文本.
         """
-        self._save_json_atomic("voice_full_text.json", run_id, {
-            "full_text": full_text,
-            "word_count": len(full_text),
-        })
+        self._save_json_atomic(
+            "voice_full_text.json",
+            run_id,
+            {
+                "full_text": full_text,
+                "word_count": len(full_text),
+            },
+        )

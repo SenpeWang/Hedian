@@ -1,8 +1,3 @@
-/**
- * WS 客户端: 指数退避重连 + 有界播放点上报缓冲 + 消息分发(二进制/文本双通道).
- *
- * 语义与重构前一致(重连退避/onopen flush), 增加: 有界缓冲(丢旧留新)+显式销毁+重连计数.
- */
 // WS 客户端: 指数退避重连 + 有界播放点上报缓冲 + 消息分发(二进制/文本双通道)
 // 语义与重构前一致(重连退避/onopen flush), 增加: 有界缓冲(丢旧留新)+显式销毁+重连计数
 import { parseVisFrame, type VisFrame } from './protocol'
@@ -12,35 +7,25 @@ import { metrics } from './metrics'
 
 const log = createLogger('ws')
 
-/**
- * WS 客户端依赖注入对象(context 由调用方提供, 便于替换与测试).
- */
+/** WsClient 依赖注入(连接地址与两条消息分发回调) */
 export interface WsClientDeps {
-  /** 返回当前 WS 地址(每次重连时实时求值) */
   url: () => string
-  /** 视频流二进制帧回调(解析后的 init/media/end 帧) */
   onVisFrame: (frame: VisFrame) => void
-  /** 文本 JSON 消息回调(状态快照/batch/报告等) */
   onJson: (msg: Record<string, unknown>) => void
 }
 
-/**
- * WS 客户端句柄: 连接生命周期 + 播放点上报.
- */
+/** WS 客户端句柄(连接/上报/销毁) */
 export interface WsClient {
-  /** 建立连接(幂等: 已连接或连接中直接返回) */
   connect: () => void
   /** 播放点上报(供后端 wait_playback_reached); 非 OPEN 时入有界缓冲 */
   sendReport: (sec: number) => void
-  /** 显式销毁: 摘监听、关连接、清空缓冲, 此后不再重连 */
   destroy: () => void
 }
 
 /**
- * 创建 WS 客户端: 指数退避重连 + 有界播放点上报缓冲 + 二进制/文本双通道消息分发.
- *
- * @param deps - 依赖注入对象, 含 url 提供者与两个消息回调.
- * @returns WS 客户端实例, 提供 connect / sendReport / destroy.
+ * 创建 WS 客户端: 指数退避重连 + 有界播放点上报缓冲 + 消息分发(二进制/文本双通道).
+ * @param deps 连接地址工厂与消息分发回调
+ * @returns 客户端句柄; `destroy` 后不再重连(显式生命周期)
  */
 export function createWsClient(deps: WsClientDeps): WsClient {
   const { url, onVisFrame, onJson } = deps

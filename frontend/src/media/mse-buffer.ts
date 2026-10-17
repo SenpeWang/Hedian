@@ -1,6 +1,3 @@
-/**
- * MediaBuffer: MSE SourceBuffer 封装(状态机 + append 队列 + trim + 背压 + EOS 宽限).
- */
 // MediaBuffer: MSE SourceBuffer 封装(状态机 + append 队列 + trim + 背压 + EOS 宽限)
 import { PLAYBACK, type ViewId } from './types'
 import type { Logger } from './logger'
@@ -10,45 +7,29 @@ const EOS_GRACE_MS = 3000 // end 后宽限, 期内新数据到达则取消收尾
 
 type BufferState = 'created' | 'attaching' | 'ready' | 'closed'
 
-/**
- * MediaBuffer 依赖注入对象.
- */
+/** MediaBuffer 依赖注入(MSE 源/编解码/视角/主时钟/日志) */
 export interface MediaBufferDeps {
-  /** 该路视角对应的 MediaSource 实例 */
   mediaSource: MediaSource
-  /** MIME codec 串(front 含音频轨, pop 仅视频) */
   codec: string
-  /** 视角标识, 仅用于日志前缀 */
   view: ViewId
-  /** 取主时钟(源视频秒), 供 trim 与超前判定 */
   getClock: () => number
-  /** 注入的日志器(按 view 打标) */
   logger: Logger
 }
 
-/**
- * 单路 MSE 缓冲句柄: 段入队、收尾、背压复位与销毁.
- */
+/** MediaBuffer 句柄(入队/终止/背压查询/销毁) */
 export interface MediaBuffer {
-  /** 入队一个 fMP4 段(EOS 已触发时尝试复活接收) */
   push: (data: ArrayBuffer) => void
-  /** 标记供给终止: 排空队列后带宽限触发 endOfStream */
   end: () => void
-  /** 节流期无 updateend 事件时, 由调度 tick 兜底驱动出队重试 */
   kick: () => void
-  /** 取当前已缓冲末尾(媒体秒), 无缓冲返回 0 */
   getBufferedEnd: () => number
-  /** 取 append 队列深度(积压段数) */
   getQueueDepth: () => number
-  /** 销毁: 摘监听、停 EOS 定时器、清空队列 */
   destroy: () => void
 }
 
 /**
- * 创建单路 MSE 缓冲封装.
- *
- * @param deps - 依赖注入对象, 含 MediaSource / codec / 视角 / 时钟 / 日志器.
- * @returns MediaBuffer 实例, 提供 push / end / kick / destroy 等.
+ * 创建 MSE SourceBuffer 封装(状态机 + append 队列 + trim + 背压 + EOS 宽限).
+ * @param deps MSE 源与运行依赖
+ * @returns 缓冲句柄; 重复 init 段由调用方去重后 `push`
  */
 export function createMediaBuffer(deps: MediaBufferDeps): MediaBuffer {
   const { mediaSource: ms, codec, view, getClock, logger } = deps

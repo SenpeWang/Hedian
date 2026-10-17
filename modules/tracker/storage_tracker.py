@@ -1,4 +1,5 @@
 """Tracker 结果存储：统一管理与原子落盘多目标跟踪的关键事件、角色分配与关键帧."""
+
 import logging
 import os
 from pathlib import Path
@@ -50,7 +51,9 @@ class TrackerStorage(BaseStorage):
             sanitized_events.append(sanitized_item)
         self._save_json_atomic(KEY_MOMENTS_FILENAME, run_id, sanitized_events)
 
-    def save_role_info(self, run_id: str, identity_map: Dict[str, int]) -> None:
+    def save_role_info(
+        self, run_id: str, identity_map: Dict[str, int]
+    ) -> None:
         """原子保存角色与工位分配映射信息.
 
         Args:
@@ -75,7 +78,9 @@ class TrackerStorage(BaseStorage):
         Returns:
             关键帧所在目录的 Path 对象.
         """
-        key_frames_dir = self._paths.get_result_dir(run_id, "tracker") / "key_frames"
+        key_frames_dir = (
+            self._paths.get_result_dir(run_id, "tracker") / "key_frames"
+        )
         key_frames_dir.mkdir(parents=True, exist_ok=True)
         return key_frames_dir
 
@@ -108,5 +113,7 @@ class TrackerStorage(BaseStorage):
                 logger.error(f"cv2.imwrite 编码写入关键帧失败: {target_path}")
                 return None
         except Exception as write_error:
-            logger.error(f"保存关键帧异常 {filename}: {write_error}", exc_info=True)
+            logger.error(
+                f"保存关键帧异常 {filename}: {write_error}", exc_info=True
+            )
             return None

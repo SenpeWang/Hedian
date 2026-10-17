@@ -1,4 +1,5 @@
 """MOT 跟踪可视化模块：在视频帧上绘制人员边界框、全局 ID 与身份标签."""
+
 from typing import Dict, List, Optional
 
 import cv2
@@ -7,9 +8,9 @@ import numpy as np
 from modules.tracker.multi_object_tracker import STrack
 
 IDENTITY_COLORS: Dict[str, tuple] = {
-    "LEADER": (0, 0, 255),    # 红色 (BGR)
-    "ROAD1": (0, 255, 0),     # 绿色
-    "ROAD2": (0, 200, 0),     # 深绿色
+    "LEADER": (0, 0, 255),  # 红色 (BGR)
+    "ROAD1": (0, 255, 0),  # 绿色
+    "ROAD2": (0, 200, 0),  # 深绿色
 }
 DEFAULT_COLOR: tuple = (0, 255, 0)
 

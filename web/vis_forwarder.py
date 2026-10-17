@@ -1,4 +1,6 @@
-"""视觉流转发器 — Web 进程后台线程,消费 Redis Stream 中的 fMP4 段,
+"""视觉流转发器 — Web 进程后台线程.
+
+消费 Redis Stream 中的 fMP4 段,
 经 WebSocket 二进制帧推给前端 MSE.
 
 独立于 InferenceSync(推理流 JSON 推送):本转发器只处理"带标注的视频流",
@@ -7,6 +9,7 @@
 两条流(front/pop)各一个消费线程,从各自 Stream 末尾持续 xread,
 按 init/media/end 段类型调 ws_handler.send_vis_chunk 转发.
 """
+
 import logging
 import threading
 import time
@@ -40,7 +43,10 @@ class VisStreamForwarder:
         self._ws = ws_handler
         # 二进制 payload,decode_responses=False
         self._redis = redis.Redis(
-            host=redis_host, port=redis_port, db=redis_db, decode_responses=False
+            host=redis_host,
+            port=redis_port,
+            db=redis_db,
+            decode_responses=False,
         )
         self._views = ("front", "pop")
         self._stop = threading.Event()
@@ -51,7 +57,10 @@ class VisStreamForwarder:
         self._stop.clear()  # 重启时清停止信号,否则 _consume 线程 while 条件立即为假秒退
         for view in self._views:
             thread = threading.Thread(
-                target=self._consume, args=(view,), daemon=True, name=f"vis_fwd_{view}"
+                target=self._consume,
+                args=(view,),
+                daemon=True,
+                name=f"vis_fwd_{view}",
             )
             thread.start()
             self._threads.append(thread)
@@ -67,13 +76,17 @@ class VisStreamForwarder:
         last_id = "0-0"
         while not self._stop.is_set():
             try:
-                stream_entries = self._redis.xread({key: last_id}, count=64, block=500)
+                stream_entries = self._redis.xread(
+                    {key: last_id}, count=64, block=500
+                )
                 if not stream_entries:
                     continue
                 for _stream_key, entries in stream_entries:
                     for entry_id, fields in entries:
                         last_id = (
-                            entry_id.decode() if isinstance(entry_id, bytes) else entry_id
+                            entry_id.decode()
+                            if isinstance(entry_id, bytes)
+                            else entry_id
                         )
                         seg_type = fields.get(b"type", b"").decode()
                         data = fields.get(b"data", b"")

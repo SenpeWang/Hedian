@@ -11,6 +11,7 @@
 
 可视化风格：统一黄色半透明填充 + 实线闭合边框 + 质心标签（对齐 gaze_roi_app/visualizer）。
 """
+
 from typing import Any, List, Optional, Tuple
 
 import cv2
@@ -18,8 +19,13 @@ import numpy as np
 
 # 机箱(ROI)区域定义（唯一真源，相对 camPOP 1920x1080）
 SCREEN_POLYGONS: List[List[Tuple[int, int]]] = [
-    [(1715, 473), (1737, 473), (1680, 802), (1578, 715),
-     (1543, 539)],  # case_A
+    [
+        (1715, 473),
+        (1737, 473),
+        (1680, 802),
+        (1578, 715),
+        (1543, 539),
+    ],  # case_A
     [(1070, 1014), (1592, 699), (1692, 786), (1216, 1081)],  # case_B
     # case_C_visible
     [(884, 1081), (1025, 982), (1113, 1081)],
@@ -35,8 +41,10 @@ def screen_polygons_as_tuples() -> List[Tuple[str, np.ndarray]]:
         与 SCREEN_POLYGONS 顺序对应的 (标签, 顶点数组) 元组列表，
         顶点数组为 int32 类型.
     """
-    return [(label, np.array(polygon, dtype=np.int32))
-            for label, polygon in zip(SCREEN_POLYGON_LABELS, SCREEN_POLYGONS)]
+    return [
+        (label, np.array(polygon, dtype=np.int32))
+        for label, polygon in zip(SCREEN_POLYGON_LABELS, SCREEN_POLYGONS)
+    ]
 
 
 # 可视化绘制
@@ -69,8 +77,15 @@ def draw_roi_overlay(
         cv2.fillPoly(overlay, [flat_vertices], color)
         cv2.polylines(image, [flat_vertices], True, color, thickness)
         centroid = flat_vertices.mean(axis=0).astype(int)
-        cv2.putText(image, label, tuple(centroid), cv2.FONT_HERSHEY_SIMPLEX,
-                    font_scale, color, thickness)
+        cv2.putText(
+            image,
+            label,
+            tuple(centroid),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            font_scale,
+            color,
+            thickness,
+        )
 
     cv2.addWeighted(overlay, alpha, image, 1 - alpha, 0, image)
     return image
@@ -91,8 +106,15 @@ def draw_detection_boxes(
     for box in files or []:
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
-        cv2.putText(frame, "file", (x1, y1 - 6), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.5, (255, 255, 0), 1)
+        cv2.putText(
+            frame,
+            "file",
+            (x1, y1 - 6),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            (255, 255, 0),
+            1,
+        )
     for box in hands or []:
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 2)
@@ -113,5 +135,12 @@ def draw_trigger(
     for box in hands or []:
         x1, y1, x2, y2 = map(int, box)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
-        cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX,
-                    0.7, (0, 0, 255), 2)
+        cv2.putText(
+            frame,
+            label,
+            (x1, y1 - 10),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.7,
+            (0, 0, 255),
+            2,
+        )

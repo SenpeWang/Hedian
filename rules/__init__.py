@@ -1,5 +1,4 @@
-"""
-制度层.
+"""制度层.
 
 包含所有制度：
 - SupervisionRule: 监护制度
@@ -7,6 +6,7 @@
 
 所有制度继承 BaseRule，实现统一接口。
 """
+
 from rules.rule_base import BaseRule, RuleRegistry
 from rules.supervision_rule import SupervisionRule
 from rules.self_ticket_rule import SelfTicketRule

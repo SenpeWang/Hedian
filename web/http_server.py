@@ -1,8 +1,8 @@
-"""
-HTTP 服务器模块 (FastAPI).
+"""HTTP 服务器模块 (FastAPI).
 
 负责 FastAPI 路由和 Web 服务。
 """
+
 import asyncio
 import json
 import logging
@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 from fastapi import FastAPI, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from web.ws_handler import WSHandler
@@ -45,12 +45,9 @@ def create_app(
     pipeline_state = {"status": "idle"}
 
     def _get_redis() -> Any:
-        """新建 Redis 连接（连接参数从 config 注入）.
-
-        Returns:
-            已连接的 Redis 客户端实例.
-        """
+        """新建 Redis 连接（连接参数从 config 注入）."""
         from core.redis_conn import get_redis_client
+
         return get_redis_client(
             host=config.get("redis_host", "localhost"),
             port=config.get("redis_port", 6379),
@@ -62,18 +59,13 @@ def create_app(
     app.state.pipeline_state = pipeline_state
     app.state.inference_sync = inference_sync
     # 注入总时长/状态/同步器, 供 WSHandler connect 补发状态快照(前端刷新即恢复进度)
-    ws_handler.set_state_refs(config.get("duration", 0.0), pipeline_state, inference_sync)
+    ws_handler.set_state_refs(
+        config.get("duration", 0.0), pipeline_state, inference_sync
+    )
 
     @app.post("/start")
     async def start(request: Request) -> Dict[str, Any]:
-        """启动流水线（幂等：已在运行时拒绝重复启动）.
-
-        Args:
-            request: 当前 HTTP 请求对象, 用于记录启动来源主机.
-
-        Returns:
-            启动结果, status 为 started 或 already_running.
-        """
+        """启动流水线（幂等：已在运行时拒绝重复启动）."""
         if pipeline_state["status"] == "running":
             logger.warning("拒绝重复启动：流水线已在运行")
             return {"status": "already_running"}
@@ -88,30 +80,27 @@ def create_app(
         redis_client.set("pipeline:start_signal", str(sig_time), ex=3600)
 
         from datetime import datetime
+
         new_run_id = datetime.fromtimestamp(sig_time).strftime("%Y%m%d_%H%M%S")
         config["run_id"] = new_run_id
 
         if inference_sync:
             inference_sync.reset()
 
-        event_bus.publish("pipeline.start", {"run_id": new_run_id},
-                          timestamp=sig_time)
+        event_bus.publish(
+            "pipeline.start", {"run_id": new_run_id}, timestamp=sig_time
+        )
 
         pipeline_state["status"] = "running"
         client_host = request.client.host if request.client else "unknown"
-        logger.info(f"启动信号已设置，run_id={new_run_id}，来源: {client_host}")
+        logger.info(
+            f"启动信号已设置，run_id={new_run_id}，来源: {client_host}"
+        )
         return {"status": "started"}
 
     @app.post("/stop")
     async def stop(request: Request) -> Dict[str, Any]:
-        """停止流水线并清理 Redis 中残留的推理/模块/流水线状态.
-
-        Args:
-            request: 当前 HTTP 请求对象.
-
-        Returns:
-            停止结果, 含 status 与被终止的推理子进程数.
-        """
+        """停止流水线并清理 Redis 中残留的推理/模块/流水线状态."""
         stop_fn = getattr(app.state, "stop_pipeline", None)
         stopped_count = 0
         if stop_fn:
@@ -129,26 +118,21 @@ def create_app(
             inference_sync.reset()
 
         pipeline_state["status"] = "idle"
-        ws_handler.push({
-            "source": "done",
-            "tag": "stop",
-            "data": {
-                "reason": "user_stopped"
+        ws_handler.push(
+            {
+                "source": "done",
+                "tag": "stop",
+                "data": {"reason": "user_stopped"},
             }
-        })
-        logger.info(f"收到主动停止请求，已终止 {stopped_count} 个运行中的推理子进程，显存与状态切回 idle")
+        )
+        logger.info(
+            f"收到主动停止请求，已终止 {stopped_count} 个运行中的推理子进程，显存与状态切回 idle"
+        )
         return {"status": "stopped", "terminated_processes": stopped_count}
 
     @app.post("/reset")
     async def reset(request: Request) -> Dict[str, Any]:
-        """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存.
-
-        Args:
-            request: 当前 HTTP 请求对象.
-
-        Returns:
-            重置结果, 含 status 与被终止的推理子进程数.
-        """
+        """页面刷新时调用:kill 推理子进程 + 清空 Redis 状态 + 清 init 缓存."""
         stop_fn = getattr(app.state, "stop_pipeline", None)
         stopped_count = stop_fn() if stop_fn else 0
         # 彻底清空所有 Redis 残留(与 /start 一致), 不遗漏非前缀 key
@@ -158,16 +142,14 @@ def create_app(
             inference_sync.reset()
         ws_handler.clear_vis_cache()
         pipeline_state["status"] = "idle"
-        logger.info(f"页面刷新重置:已终止 {stopped_count} 个推理子进程,清空状态,切回 idle")
+        logger.info(
+            f"页面刷新重置:已终止 {stopped_count} 个推理子进程,清空状态,切回 idle"
+        )
         return {"status": "reset", "terminated_processes": stopped_count}
 
     @app.websocket("/ws/data")
     async def websocket_data(websocket: WebSocket) -> None:
-        """处理 WebSocket 双工连接:接收心跳与播放进度,断开时注销连接.
-
-        Args:
-            websocket: 客户端 WebSocket 连接.
-        """
+        """处理 WebSocket 双工连接:接收心跳与播放进度,断开时注销连接."""
         ws_handler.set_event_loop(asyncio.get_running_loop())
         await ws_handler.connect(websocket)
         try:
@@ -176,8 +158,11 @@ def create_app(
                 client_text = await websocket.receive_text()
                 try:
                     client_msg = json.loads(client_text)
-                    if isinstance(client_msg, dict) and client_msg.get('type') == 'playback_progress':
-                        current_sec = client_msg.get('current_sec', 0.0)
+                    if (
+                        isinstance(client_msg, dict)
+                        and client_msg.get("type") == "playback_progress"
+                    ):
+                        current_sec = client_msg.get("current_sec", 0.0)
                         ws_handler.update_playback_sec(current_sec)
                 except Exception:
                     pass
@@ -187,49 +172,30 @@ def create_app(
             logger.debug(f"WebSocket 非预期断开: {error}")
             ws_handler.disconnect(websocket)
 
-    async def _video_response(prefix: str, name: str) -> Any:
-        """流式提供视角视频文件（支持 HTTP Range 206 硬解与原生声音）.
-
-        Args:
-            prefix: 视角前缀, 用于错误提示, front 或 pop.
-            name: 视频文件名（不含扩展名）.
-
-        Returns:
-            命中的视频文件响应; 未找到时返回 404 JSON 响应.
-        """
+    async def _video_response(prefix: str, name: str) -> Response:
+        """流式提供视角视频文件（支持 HTTP Range 206 硬解与原生声音）."""
         base_dir = Path(__file__).resolve().parent.parent
         for ext in ("mp4", "mpg"):
             candidate = base_dir / "data/videos" / f"{name}.{ext}"
             if candidate.is_file():
                 return FileResponse(str(candidate), media_type="video/mp4")
-        return JSONResponse({"error": f"{prefix} video not found"},
-                            status_code=404)
+        return JSONResponse(
+            {"error": f"{prefix} video not found"}, status_code=404
+        )
 
     @app.get("/api/video/front")
-    async def get_video_front() -> Any:
-        """流式提供前置视角视频流.
-
-        Returns:
-            前置视角视频文件响应; 未找到时返回 404 JSON 响应.
-        """
+    async def get_video_front() -> Response:
+        """流式提供前置视角视频流."""
         return await _video_response("front", "camFRONT")
 
     @app.get("/api/video/pop")
-    async def get_video_pop() -> Any:
-        """流式提供俯视视角视频流.
-
-        Returns:
-            俯视视角视频文件响应; 未找到时返回 404 JSON 响应.
-        """
+    async def get_video_pop() -> Response:
+        """流式提供俯视视角视频流."""
         return await _video_response("pop", "camPOP")
 
     @app.get("/status")
     async def status() -> Dict[str, Any]:
-        """获取流水线状态与在线 WebSocket 客户端数.
-
-        Returns:
-            含 pipeline 状态与 ws_clients 在线数的字典.
-        """
+        """获取流水线状态与在线 WebSocket 客户端数."""
         return {
             "pipeline": pipeline_state["status"],
             "ws_clients": ws_handler.get_client_count(),
@@ -237,26 +203,18 @@ def create_app(
 
     @app.get("/api/config")
     async def get_config() -> Dict[str, Any]:
-        """获取运行时配置.
-
-        Returns:
-            当前运行时配置字典.
-        """
+        """获取运行时配置."""
         return config
 
     @app.get("/api/modules")
     async def get_modules() -> Dict[str, Any]:
-        """获取启用的模块配置.
-
-        Returns:
-            含 modules 字段的模块配置字典.
-        """
+        """获取启用的模块配置."""
         return {"modules": config.get("modules", {})}
 
     class NoCacheStaticFiles(StaticFiles):
         """禁用浏览器缓存的静态文件服务."""
 
-        async def get_response(self, path: str, scope: Any) -> Any:
+        async def get_response(self, path: str, scope: Any) -> Response:
             """生成带禁用缓存响应头的静态文件响应.
 
             Args:
@@ -267,8 +225,9 @@ def create_app(
                 已附加 Cache-Control/Pragma/Expires 响应头的文件响应.
             """
             response = await super().get_response(path, scope)
-            response.headers[
-                "Cache-Control"] = "no-cache, no-store, must-revalidate"
+            response.headers["Cache-Control"] = (
+                "no-cache, no-store, must-revalidate"
+            )
             response.headers["Pragma"] = "no-cache"
             response.headers["Expires"] = "0"
             return response
@@ -276,8 +235,10 @@ def create_app(
     # 静态文件兜底（所有未匹配路由 → dist/）
     dist_dir = Path(__file__).parent.parent / "frontend" / "dist"
     if dist_dir.is_dir():
-        app.mount("/",
-                  NoCacheStaticFiles(directory=str(dist_dir), html=True),
-                  name="static")
+        app.mount(
+            "/",
+            NoCacheStaticFiles(directory=str(dist_dir), html=True),
+            name="static",
+        )
 
     return app

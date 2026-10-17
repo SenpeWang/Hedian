@@ -4,6 +4,7 @@
 串行运行手指指向屏幕（FingerScreenDetector）与手指指向文件（FingerFileDetector）两个判定器，
 举手检测由 tracker 模块在前置视角调用 HandRaiser，本模块通过 BehaviorStorage 共享事件落盘。
 """
+
 import logging
 import threading
 import time
@@ -112,7 +113,9 @@ class BehaviorModule(BaseModule):
             return True
 
         except Exception as init_error:
-            logger.error(f"行为检测模块初始化失败: {init_error}", exc_info=True)
+            logger.error(
+                f"行为检测模块初始化失败: {init_error}", exc_info=True
+            )
             return False
 
     def _read_video_fps(self, video_key: str) -> float:
@@ -134,11 +137,15 @@ class BehaviorModule(BaseModule):
         abs_path = str(self.paths.base_dir / rel_path)
         cap = cv2.VideoCapture(abs_path)
         if not cap.isOpened():
-            raise RuntimeError(f"无法打开视频读取帧率 ({video_key}): {abs_path}")
+            raise RuntimeError(
+                f"无法打开视频读取帧率 ({video_key}): {abs_path}"
+            )
         fps = cap.get(cv2.CAP_PROP_FPS)
         cap.release()
         if not fps or fps <= 0:
-            raise RuntimeError(f"读取视频帧率失败 ({video_key}, CAP_PROP_FPS={fps}): {abs_path}")
+            raise RuntimeError(
+                f"读取视频帧率失败 ({video_key}, CAP_PROP_FPS={fps}): {abs_path}"
+            )
         return float(fps)
 
     def _append_event(self, local_sec: float, key_moment: str) -> None:
@@ -196,7 +203,9 @@ class BehaviorModule(BaseModule):
 
             raw_fps = video_capture.get(cv2.CAP_PROP_FPS)
             if not raw_fps or raw_fps <= 0:
-                raise RuntimeError(f"读取 pop 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不再兜底")
+                raise RuntimeError(
+                    f"读取 pop 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不再兜底"
+                )
             fps = float(raw_fps)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_count = 0
@@ -204,7 +213,10 @@ class BehaviorModule(BaseModule):
             infer_every_n_frames = 5
             cached_results: Any = None
 
-            logger.info(f"[pop_view] 开始处理: {video_path} ({total_frames}帧, {fps:.1f}fps)")
+            logger.info(
+                f"[pop_view] 开始处理: {video_path} "
+                f"({total_frames}帧, {fps:.1f}fps)"
+            )
 
             # 视觉流编码器:pop 视角(无音频) -> fMP4 推 Redis Stream
             self._vis_encoder = VisEncoder(
@@ -225,7 +237,9 @@ class BehaviorModule(BaseModule):
                 timestamp = frame_count / fps
                 frame_count += 1
 
-                self.inference_stream.update_module_time(video_source, timestamp)
+                self.inference_stream.update_module_time(
+                    video_source, timestamp
+                )
                 if total_frames > 0:
                     current_time = time.time()
                     if current_time - self._last_progress_push >= 0.3:
@@ -233,16 +247,22 @@ class BehaviorModule(BaseModule):
                         progress_percentage = min(
                             100.0, timestamp / (total_frames / fps) * 100
                         )
-                        self.push_display("progress", {
-                            "localSec": round(timestamp, 2),
-                            "tag": "progress",
-                            "data": {
-                                "label": "pop",
-                                "pct": round(progress_percentage, 1),
+                        self.push_display(
+                            "progress",
+                            {
+                                "localSec": round(timestamp, 2),
+                                "tag": "progress",
+                                "data": {
+                                    "label": "pop",
+                                    "pct": round(progress_percentage, 1),
+                                },
                             },
-                        })
+                        )
 
-                if frame_count % infer_every_n_frames == 0 or cached_results is None:
+                if (
+                    frame_count % infer_every_n_frames == 0
+                    or cached_results is None
+                ):
                     cached_results = model.track(
                         frame,
                         conf=0.2,
@@ -256,8 +276,12 @@ class BehaviorModule(BaseModule):
                 if self._vis_encoder is not None:
                     draw_roi_overlay(frame, screen_polygons_as_tuples())
                 events: List[Dict[str, Any]] = []
-                events += screen_detector.detect(frame, results, frame_count, fps)
-                events += file_detector.detect(frame, results, frame_count, fps)
+                events += screen_detector.detect(
+                    frame, results, frame_count, fps
+                )
+                events += file_detector.detect(
+                    frame, results, frame_count, fps
+                )
 
                 # POP 视角标注已由 detector 在 detect 中画进帧(检测框+触发),
                 # 此处把带标注帧喂入视觉流编码器 -> fMP4 -> 前端 MSE
@@ -283,16 +307,21 @@ class BehaviorModule(BaseModule):
                     self.push_display(tag, payload)
                     topic = _EVENT_TOPIC_MAP.get(event.get("event", ""))
                     if topic is None:
-                        logger.warning(f"未知行为事件类型: {event.get('event')}，跳过事件流推送")
+                        logger.warning(
+                            f"未知行为事件类型: {event.get('event')}，跳过事件流推送"
+                        )
                         continue
                     self.push_event(topic, payload, timestamp=event_sec)
 
                 if frame_count % 300 == 0:
                     progress_percentage = (
-                        frame_count * 100 // total_frames if total_frames else 0
+                        frame_count * 100 // total_frames
+                        if total_frames
+                        else 0
                     )
                     logger.info(
-                        f"[pop_view] {frame_count}/{total_frames}帧 {progress_percentage}%"
+                        f"[pop_view] {frame_count}/{total_frames}帧 "
+                        f"{progress_percentage}%"
                     )
 
             video_capture.release()
@@ -301,7 +330,9 @@ class BehaviorModule(BaseModule):
             logger.info(f"[pop_view] 完成，共 {frame_count} 帧")
 
         except Exception as pop_error:
-            logger.error(f"[pop_view] 视频处理失败: {pop_error}", exc_info=True)
+            logger.error(
+                f"[pop_view] 视频处理失败: {pop_error}", exc_info=True
+            )
 
     def process_video(self, video_path: str) -> None:
         """在单一 pop 视角上处理行为检测.
@@ -315,7 +346,9 @@ class BehaviorModule(BaseModule):
             base_dir / videos_config.get("pop", "data/videos/camPOP.mpg")
         )
 
-        model_path = str(self.paths.get_model_path("behavior", "behavior_yolo.pt"))
+        model_path = str(
+            self.paths.get_model_path("behavior", "behavior_yolo.pt")
+        )
         model = YOLO(model_path)
 
         logger.info("在 pop 视角上共享一次推理运行两个行为检测器:")

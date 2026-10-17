@@ -3,6 +3,7 @@
 基于 modules.behavior.behavior_utils 提供的姿态平滑、几何计算与空间匹配工具，
 结合连续帧积分累加器与冷却去重机制，实现高精度、无抖动的举手行为识别。
 """
+
 import logging
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -137,16 +138,22 @@ class HandRaiser:
             best_pose: Optional[Dict[str, Any]] = None
             best_score = 0.0
             track_bbox_width = max(1.0, float(track_bbox[2] - track_bbox[0]))
-            track_center_x = (float(track_bbox[0]) + float(track_bbox[2])) / 2.0
+            track_center_x = (
+                float(track_bbox[0]) + float(track_bbox[2])
+            ) / 2.0
 
             for pose in poses:
                 pose_bbox = pose["box"]
                 iou = bbox_iou(track_bbox, pose_bbox)
-                pose_center_x = (float(pose_bbox[0]) + float(pose_bbox[2])) / 2.0
+                pose_center_x = (
+                    float(pose_bbox[0]) + float(pose_bbox[2])
+                ) / 2.0
                 center_distance = abs(track_center_x - pose_center_x)
 
                 if center_distance < track_bbox_width * 0.8:
-                    score = iou * 2.0 + (1.0 - center_distance / track_bbox_width)
+                    score = iou * 2.0 + (
+                        1.0 - center_distance / track_bbox_width
+                    )
                     if score > best_score:
                         best_score = score
                         best_pose = pose
@@ -177,18 +184,29 @@ class HandRaiser:
             if is_hand_raised:
                 raise_state["score"] += 1
             else:
-                raise_state["score"] = max(raise_state["score"] - 1, -self._consec_idle)
+                raise_state["score"] = max(
+                    raise_state["score"] - 1, -self._consec_idle
+                )
 
-            if raise_state["score"] >= self._consec_raise and not raise_state["raised"]:
+            if (
+                raise_state["score"] >= self._consec_raise
+                and not raise_state["raised"]
+            ):
                 raise_state["raised"] = True
-            elif raise_state["score"] <= -self._consec_idle and raise_state["raised"]:
+            elif (
+                raise_state["score"] <= -self._consec_idle
+                and raise_state["raised"]
+            ):
                 raise_state["raised"] = False
 
             # 7. 冷却期判定与事件触发
-            frames_since_last_event = (
-                frame_count - self._event_cooldown.get(track_id, -99999)
+            frames_since_last_event = frame_count - self._event_cooldown.get(
+                track_id, -99999
             )
-            if raise_state["raised"] and frames_since_last_event > self._cooldown_frames:
+            if (
+                raise_state["raised"]
+                and frames_since_last_event > self._cooldown_frames
+            ):
                 self._event_cooldown[track_id] = frame_count
                 raised_targets.append((track_id, track.identity))
 
@@ -208,7 +226,8 @@ class HandRaiser:
             expire_frames: 判定过期的未见帧数阈值，默认 600 帧.
         """
         expired_track_ids = [
-            track_id for track_id, last_frame in self._last_seen_frame.items()
+            track_id
+            for track_id, last_frame in self._last_seen_frame.items()
             if current_frame - last_frame > expire_frames
         ]
         for track_id in expired_track_ids:
@@ -223,4 +242,4 @@ class HandRaiser:
         self._event_cooldown.clear()
         self._last_seen_frame.clear()
         self._pose_filter.clear()
-        self._last_poses: Optional[List[Dict[str, Any]]] = None
+        self._last_poses = None

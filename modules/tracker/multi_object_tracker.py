@@ -1,4 +1,5 @@
 """多目标跟踪器：基于 OC-SORT 与 ByteTrack 算法实现人员跟踪与工位身份分配."""
+
 import logging
 from typing import Any, Dict, List, Optional, Set
 
@@ -45,11 +46,7 @@ class STrack:
 
     @property
     def identity(self) -> Optional[str]:
-        """获取目标人员身份 (LEADER | ROAD1 | ROAD2 | None).
-
-        Returns:
-            当前分配的身份名称；未分配或非法时返回 None.
-        """
+        """获取目标人员身份 (LEADER | ROAD1 | ROAD2 | None)."""
         return self._identity
 
     @identity.setter
@@ -59,9 +56,7 @@ class STrack:
         Args:
             identity: 待设置的身份字符串.
         """
-        self._identity = (
-            identity if identity in VALID_IDENTITIES else None
-        )
+        self._identity = identity if identity in VALID_IDENTITIES else None
 
     def get_center(self) -> np.ndarray:
         """计算并获取目标中心点坐标 [center_x, center_y].
@@ -69,10 +64,12 @@ class STrack:
         Returns:
             中心点坐标一维数组 (2,).
         """
-        return np.array([
-            (self.bbox[0] + self.bbox[2]) / 2.0,
-            (self.bbox[1] + self.bbox[3]) / 2.0,
-        ])
+        return np.array(
+            [
+                (self.bbox[0] + self.bbox[2]) / 2.0,
+                (self.bbox[1] + self.bbox[3]) / 2.0,
+            ]
+        )
 
     def to_dict(self) -> Dict[str, Any]:
         """将实体序列化为标准化字典结构.
@@ -176,13 +173,19 @@ class MultiObjectTracker:
 
         # 分离高低置信度检测（0.5 为 ByteTrack 双阈值分界）
         high_conf_detections = [
-            detection for detection in detections if detection["confidence"] >= 0.5
+            detection
+            for detection in detections
+            if detection["confidence"] >= 0.5
         ]
         low_conf_detections = [
-            detection for detection in detections if detection["confidence"] < 0.5
+            detection
+            for detection in detections
+            if detection["confidence"] < 0.5
         ]
 
-        raw_tracks = self.tracker.update(high_conf_detections, low_conf_detections)
+        raw_tracks = self.tracker.update(
+            high_conf_detections, low_conf_detections
+        )
 
         tracks: List[STrack] = []
         self._track_map.clear()

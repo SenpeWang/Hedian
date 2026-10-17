@@ -1,10 +1,4 @@
 <script setup lang="ts">
-/**
- * ReportPanel: 流程评价面板(汇总计数 + 报告卡片列表).
- *
- * 卡片正文(思考过程 + 评价正文)由 useTypewriter 逐字揭示, 并随揭示进度自动滚底;
- * 折叠态由父级 store 持有, 通过 toggle 事件上抛切换意图.
- */
 import { ref, toRef } from 'vue'
 import type { SegCard } from '../types'
 import { useScrollBottom } from '../composables/useScrollBottom'
@@ -58,33 +52,23 @@ function cardLabel(flowType: string) {
     <div ref="cardsEl" class="panel-body">
       <div class="summary-grid">
         <div>
-          <div class="val">
-            {{ supN }}
-          </div>
+          <div class="val">{{ supN }}</div>
           <div class="lbl">监护制流程</div>
         </div>
         <div>
-          <div class="val">
-            {{ ticketN }}
-          </div>
+          <div class="val">{{ ticketN }}</div>
           <div class="lbl">自唱票流程</div>
         </div>
         <div>
-          <div class="val">
-            {{ noticeN }}
-          </div>
+          <div class="val">{{ noticeN }}</div>
           <div class="lbl">信息通报</div>
         </div>
         <div>
-          <div class="val">
-            {{ avg }}
-          </div>
+          <div class="val">{{ avg }}</div>
           <div class="lbl">平均分</div>
         </div>
         <div>
-          <div class="val">
-            {{ total }}
-          </div>
+          <div class="val">{{ total }}</div>
           <div class="lbl">总分</div>
         </div>
       </div>
@@ -112,21 +96,17 @@ function cardLabel(flowType: string) {
             <div
               class="sc-bar-fill"
               :style="{ width: card.score * 10 + '%', background: scoreColor(card.score) }"
-            />
+            ></div>
           </div>
 
           <!-- 🧠 大模型思考推理过程展示框 (打字中与打字完成全时段常驻显示) -->
           <div v-if="shownText(card, 'think')" class="think-block">
             <div class="think-title">🧠 思考推理过程</div>
-            <div class="think-body">
-              {{ shownText(card, 'think') }}
-            </div>
+            <div class="think-body">{{ shownText(card, 'think') }}</div>
           </div>
 
           <!-- 📋 正式评价报告正文 -->
-          <div class="sc-detail">
-            {{ shownText(card, 'report') }}
-          </div>
+          <div class="sc-detail">{{ shownText(card, 'report') }}</div>
         </div>
       </div>
     </div>

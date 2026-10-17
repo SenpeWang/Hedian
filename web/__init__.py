@@ -1,8 +1,8 @@
-"""
-前端层.
+"""前端层.
 
 负责 Web 服务和前端展示。
 """
+
 from web.http_server import create_app
 from web.ws_handler import WSHandler
 

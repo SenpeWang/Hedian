@@ -1,6 +1,3 @@
-/**
- * 水位速率引擎(纯逻辑, 可单测): 防断供的直接信号是各路"存储余量"(水位), 非增速统计.
- */
 // 水位速率引擎(纯逻辑, 可单测): 防断供的直接信号是各路"存储余量"(水位), 非增速统计
 // v3 贴供给模型(实测教训: 共享 GPU 供给剧烈波动 0.5x~7x):
 //   速率贴供给估计走 → 供给降速率提前跟降(不撞缓冲墙, 音视频同流不卡顿), 供给升稳定回 1.0
@@ -14,12 +11,10 @@ const RATE_DEADBAND = RATE_STEP
 
 export class RateController {
   /**
-   * 依据各路水位与供给速率估计, 决策下一播放速率.
-   *
-   * @param levels - 有效水位数组(未完成路的 bufferEnd/viewSec - 主时钟); 空数组=全部完成.
-   * @param currentRate - 当前速率(EMA 基准).
-   * @param supplyEstimate - 供给速率估计(媒体秒/真实秒, 编排层差分采样; 默认 1.0=未知不限制).
-   * @returns 新速率(clamp [RATE_MIN, RATE_MAX], 量化 0.05 档).
+   * @param levels 有效水位数组(未完成路的 bufferEnd/viewSec - 主时钟); 空数组=全部完成
+   * @param currentRate 当前速率(EMA 基准)
+   * @param supplyEstimate 供给速率估计(媒体秒/真实秒, 编排层差分采样; 默认 1.0=未知不限制)
+   * @returns 新速率(clamp [RATE_MIN, RATE_MAX], 量化 0.05 档)
    */
   update(levels: number[], currentRate: number, supplyEstimate = 1.0): number {
     let target: number

@@ -10,6 +10,7 @@
   event_bus.publish("voice.intent", {"text": "..."}, timestamp=1.5)
   event_bus.stop()
 """
+
 import json
 import logging
 import threading
@@ -54,12 +55,14 @@ class EventBus:
 
     STREAM_PREFIX = "module:events:"
 
-    def __init__(self,
-                 redis_host: str = "localhost",
-                 redis_port: int = 6379,
-                 redis_db: int = 0,
-                 consumer_name: Optional[str] = None,
-                 **kwargs) -> None:
+    def __init__(
+        self,
+        redis_host: str = "localhost",
+        redis_port: int = 6379,
+        redis_db: int = 0,
+        consumer_name: Optional[str] = None,
+        **kwargs,
+    ) -> None:
         """初始化总线并验证 Redis 连通性.
 
         每进程使用独立消费组实现跨进程广播.
@@ -72,10 +75,13 @@ class EventBus:
             **kwargs: 预留扩展参数.
         """
         from core.redis_conn import get_redis_client
-        self._redis = get_redis_client(host=redis_host,
-                                       port=redis_port,
-                                       db=redis_db)
-        self._consumer_name = consumer_name or f"consumer_{int(time.time() * 1000)}"
+
+        self._redis = get_redis_client(
+            host=redis_host, port=redis_port, db=redis_db
+        )
+        self._consumer_name = (
+            consumer_name or f"consumer_{int(time.time() * 1000)}"
+        )
         # 每进程独立消费组实现跨进程广播
         self._consumer_group = f"{self._consumer_name}_group"
         self._subscribers: Dict[str, List[Callable]] = {}
@@ -88,7 +94,8 @@ class EventBus:
         try:
             self._redis.ping()
             logger.info(
-                f"Redis 连接成功: {redis_host}:{redis_port}/{redis_db}, 消费组: {self._consumer_group}"
+                f"Redis 连接成功: {redis_host}:{redis_port}/{redis_db}, "
+                f"消费组: {self._consumer_group}"
             )
         except redis.ConnectionError as e:
             logger.error(f"Redis 连接失败: {e}")
@@ -114,16 +121,19 @@ class EventBus:
             stream_key: Redis Stream key.
         """
         try:
-            self._redis.xgroup_create(stream_key,
-                                      self._consumer_group,
-                                      id="0",
-                                      mkstream=True)
-            logger.debug(f"创建消费者组: {stream_key} / {self._consumer_group}")
+            self._redis.xgroup_create(
+                stream_key, self._consumer_group, id="0", mkstream=True
+            )
+            logger.debug(
+                f"创建消费者组: {stream_key} / {self._consumer_group}"
+            )
         except redis.exceptions.ResponseError as e:
             if "BUSYGROUP" not in str(e):
                 raise
 
-    def publish(self, msg_type: str, data: dict, timestamp: float = 0.0) -> None:
+    def publish(
+        self, msg_type: str, data: dict, timestamp: float = 0.0
+    ) -> None:
         """发布一条消息.
 
         Args:
@@ -160,10 +170,12 @@ class EventBus:
         self._ensure_consumer_group(stream_key)
 
         # 若已 start 但 listener 未运行，现在补启动
-        if self._running and (self._listener is None
-                              or not self._listener.is_alive()):
-            self._listener = threading.Thread(target=self._listen_loop,
-                                              daemon=True)
+        if self._running and (
+            self._listener is None or not self._listener.is_alive()
+        ):
+            self._listener = threading.Thread(
+                target=self._listen_loop, daemon=True
+            )
             self._listener.start()
             logger.info(f"延迟启动 listener: {msg_type}")
 
@@ -186,10 +198,13 @@ class EventBus:
             for msg_type in subscribed_topics:
                 self._ensure_consumer_group(self._get_stream_key(msg_type))
 
-            self._listener = threading.Thread(target=self._listen_loop,
-                                              daemon=True)
+            self._listener = threading.Thread(
+                target=self._listen_loop, daemon=True
+            )
             self._listener.start()
-            logger.info(f"消息总线启动，订阅频道: {subscribed_topics}, 消费者: {self._consumer_name}")
+            logger.info(
+                f"消息总线启动，订阅频道: {subscribed_topics}, 消费者: {self._consumer_name}"
+            )
         else:
             logger.info("消息总线启动（无订阅频道）")
 
@@ -232,20 +247,25 @@ class EventBus:
 
                             with self._lock:
                                 callbacks = list(
-                                    self._subscribers.get(actual_msg_type, []))
+                                    self._subscribers.get(actual_msg_type, [])
+                                )
 
                             # 先执行回调全部成功后 xack：避免"先 ack 后回调"在进程退出/回调失败时事件永久丢失
                             for callback in callbacks:
-                                self._safe_call(callback, event, actual_msg_type)
+                                self._safe_call(
+                                    callback, event, actual_msg_type
+                                )
 
-                            self._redis.xack(stream_key, self._consumer_group,
-                                             entry_id)
+                            self._redis.xack(
+                                stream_key, self._consumer_group, entry_id
+                            )
 
                         except (json.JSONDecodeError, TypeError) as e:
                             logger.error(f"解析消息失败: {stream_key}, {e}")
                             # 确认消息，避免重复处理
-                            self._redis.xack(stream_key, self._consumer_group,
-                                             entry_id)
+                            self._redis.xack(
+                                stream_key, self._consumer_group, entry_id
+                            )
 
             except redis.exceptions.ConnectionError as e:
                 logger.error(f"Redis 连接断开: {e}")
@@ -258,14 +278,18 @@ class EventBus:
                         try:
                             self._ensure_consumer_group(stream_key)
                         except redis.RedisError as e:
-                            logger.warning(f"重建消费者组失败: {stream_key}, {e}")
+                            logger.warning(
+                                f"重建消费者组失败: {stream_key}, {e}"
+                            )
                     # 短暂休眠避免日志刷屏
                     time.sleep(0.5)
                 else:
                     logger.error(f"监听循环异常: {e}")
                     time.sleep(0.1)
 
-    def _safe_call(self, callback: Callable, event: dict, msg_type: str) -> None:
+    def _safe_call(
+        self, callback: Callable, event: dict, msg_type: str
+    ) -> None:
         """调用订阅者回调, 吞掉异常并记录日志.
 
         Args:

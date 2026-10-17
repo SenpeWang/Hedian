@@ -1,5 +1,4 @@
-"""
-业务模块层.
+"""业务模块层.
 
 包含所有业务模块：
 - voice: 语音模块（语音转文字 + 意图分类）
@@ -9,6 +8,7 @@
 
 所有模块继承 BaseModule，实现统一接口。
 """
+
 from modules.voice.voice_module import VoiceModule
 from modules.tracker.tracker_module import TrackerModule
 from modules.behavior.behavior_module import BehaviorModule

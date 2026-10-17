@@ -1,9 +1,9 @@
-"""
-流程数据提取模块.
+"""流程数据提取模块.
 
 负责从各模块的 JSON 文件中提取指定时间范围的事件数据。
 从 Redis 读取模块实时进度，等待所有模块处理完再提取。
 """
+
 import json
 import logging
 import os
@@ -18,14 +18,15 @@ logger = logging.getLogger("evaluation.data_extractor")
 
 
 class FlowDataExtractor:
-    """
-    流程数据提取器.
+    """流程数据提取器.
 
     从各模块的 JSON 文件中提取指定时间范围的事件数据。
     从 Redis 读取模块实时进度，等待所有模块处理完再提取。
     """
 
-    def __init__(self, result_dir: str, redis_client: Optional[Any] = None) -> None:
+    def __init__(
+        self, result_dir: str, redis_client: Optional[Any] = None
+    ) -> None:
         """初始化数据提取器.
 
         Args:
@@ -45,6 +46,7 @@ class FlowDataExtractor:
         if os.path.exists(config_path):
             try:
                 import yaml
+
                 with open(config_path, encoding="utf-8") as file_obj:
                     config = yaml.safe_load(file_obj) or {}
                 modules_cfg = config.get("modules", {})
@@ -70,8 +72,12 @@ class FlowDataExtractor:
         end_sec: float,
         wait: bool = True,
         timeout: int = 300,
-    ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]],
-               List[Dict[str, Any]], List[Dict[str, Any]]]:
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+        List[Dict[str, Any]],
+    ]:
         """提取指定时间范围的事件.
 
         Args:
@@ -86,7 +92,8 @@ class FlowDataExtractor:
         if wait:
             logger.info(f"等待所有模块处理到 {end_sec}s...")
             self._wait_all_modules(end_sec, timeout)
-            # 等 progress 后额外 sleep 等各模块 key_moments 文件写完(progress 是帧处理进度, 事件写盘滞后)
+            # 等 progress 后额外 sleep 等各模块 key_moments 文件写完
+            # (progress 是帧处理进度, 事件写盘滞后)
             time.sleep(2.0)
 
         events = {
@@ -95,8 +102,9 @@ class FlowDataExtractor:
         }
 
         logger.info(
-            f"提取事件完成: voice={len(events['voice'])}条, tracker={len(events['tracker'])}条, "
-            f"gaze={len(events['gaze'])}条, behavior={len(events['behavior'])}条, "
+            f"提取事件完成: voice={len(events['voice'])}条, "
+            f"tracker={len(events['tracker'])}条, gaze={len(events['gaze'])}条, "
+            f"behavior={len(events['behavior'])}条, "
             f"时间范围={start_sec:.2f}s ~ {end_sec:.2f}s"
         )
 
@@ -126,8 +134,7 @@ class FlowDataExtractor:
             logger.error(f"保存提取的流程数据失败: {error}", exc_info=True)
 
     def _wait_all_modules(self, target_sec: float, timeout: int) -> None:
-        """
-        等待所有模块都处理到目标时间.
+        """等待所有模块都处理到目标时间.
 
         从 Redis 读取 inference:progress（per-source 粒度，与 InferenceSync
         _compute_global_sec 一致），取所有未结束 source 的最小进度，当最小值
@@ -149,12 +156,16 @@ class FlowDataExtractor:
 
             # 无任何 source 进度：模块可能尚未启动或已全部退出，直接提取避免空等
             if not progress:
-                logger.warning("inference:progress 无可用 source 进度，跳过等待直接提取")
+                logger.warning(
+                    "inference:progress 无可用 source 进度，跳过等待直接提取"
+                )
                 return
 
             # 所有未结束 source 都已超过目标时间即可返回
             if min(progress.values()) >= target_sec:
-                logger.info(f"所有模块都已处理到 {target_sec}s，进度: {progress}")
+                logger.info(
+                    f"所有模块都已处理到 {target_sec}s，进度: {progress}"
+                )
                 return
 
             # 检查超时
@@ -168,8 +179,7 @@ class FlowDataExtractor:
             time.sleep(1)
 
     def _get_all_module_progress(self) -> Dict[str, float]:
-        """
-        从 Redis 获取所有未结束 source 的实时进度.
+        """从 Redis 获取所有未结束 source 的实时进度.
 
         读取 inference:progress 全部字段（per-source），剔除已写入
         inference:source_done 的结束 source。
@@ -207,7 +217,9 @@ class FlowDataExtractor:
         Returns:
             时间范围内的事件列表.
         """
-        path = os.path.join(self._result_dir, source, f"{source}_key_moments.json")
+        path = os.path.join(
+            self._result_dir, source, f"{source}_key_moments.json"
+        )
 
         if not os.path.exists(path):
             logger.warning(f"{source}事件文件不存在: {path}")
@@ -219,11 +231,11 @@ class FlowDataExtractor:
 
             # 按时间范围过滤
             return [
-                event for event in all_events
+                event
+                for event in all_events
                 if start_sec <= (event.get("localSec") or 0) <= end_sec
             ]
 
         except Exception as error:
             logger.error(f"加载{source}事件失败: {error}")
             return []
-

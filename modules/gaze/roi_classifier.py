@@ -2,6 +2,7 @@
 
 负责加载 ROI 配置，分类注视方向。
 """
+
 import json
 import logging
 import math
@@ -38,7 +39,9 @@ class ROIClassifier:
         self._heatmap_threshold = heatmap_threshold
 
         # 加载 ROI 配置
-        self._gaze_rois, self._head_zones = self._load_roi_polygons(roi_json_path)
+        self._gaze_rois, self._head_zones = self._load_roi_polygons(
+            roi_json_path
+        )
 
         logger.info(f"加载 ROI 配置: {len(self._gaze_rois)} 个 ROI 区域")
 
@@ -61,7 +64,9 @@ class ROIClassifier:
             head_zones = []
 
             # 支持 LabelMe 格式 (shapes 数组)
-            shapes = data.get("shapes", data) if isinstance(data, dict) else data
+            shapes = (
+                data.get("shapes", data) if isinstance(data, dict) else data
+            )
 
             for item in shapes:
                 if not isinstance(item, dict):
@@ -79,13 +84,18 @@ class ROIClassifier:
                 if shape_type == "circle":
                     center_x, center_y = points[0]
                     edge_x, edge_y = points[1]
-                    radius = math.sqrt((edge_x - center_x) ** 2
-                                       + (edge_y - center_y) ** 2)
-                    angles = [angle_index * 2 * math.pi / 64
-                              for angle_index in range(64)]
+                    radius = math.sqrt(
+                        (edge_x - center_x) ** 2 + (edge_y - center_y) ** 2
+                    )
+                    angles = [
+                        angle_index * 2 * math.pi / 64
+                        for angle_index in range(64)
+                    ]
                     points = [
-                        [center_x + radius * math.cos(angle),
-                         center_y + radius * math.sin(angle)]
+                        [
+                            center_x + radius * math.cos(angle),
+                            center_y + radius * math.sin(angle),
+                        ]
                         for angle in angles
                     ]
 
@@ -117,9 +127,12 @@ class ROIClassifier:
         filtered = []
         for head in heads:
             for _, contour in self._head_zones:
-                if cv2.pointPolygonTest(
-                    contour, (float(head.cx), float(head.cy)), False
-                ) >= 0:
+                if (
+                    cv2.pointPolygonTest(
+                        contour, (float(head.cx), float(head.cy)), False
+                    )
+                    >= 0
+                ):
                     filtered.append(head)
                     break
 
@@ -153,10 +166,16 @@ class ROIClassifier:
 
         weights = heatmap_2d[mask]
         rows, cols = np.where(mask)
-        gaze_x = int(np.average(cols, weights=weights)
-                      / heatmap_2d.shape[1] * image_width)
-        gaze_y = int(np.average(rows, weights=weights)
-                      / heatmap_2d.shape[0] * image_height)
+        gaze_x = int(
+            np.average(cols, weights=weights)
+            / heatmap_2d.shape[1]
+            * image_width
+        )
+        gaze_y = int(
+            np.average(rows, weights=weights)
+            / heatmap_2d.shape[0]
+            * image_height
+        )
 
         return gaze_x, gaze_y
 

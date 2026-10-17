@@ -4,6 +4,7 @@ per-source 模型：进度按 source 记录，结束信号由模块退出时主�
 global_sec = min(未结束且 expected 的 source 进度)；已结束 source 从 min 剔除、缺失视频帧用最后帧补全。
 done = 所有 expected_sources 已上报结束。对齐完即发不限速，播放节奏交由前端 30fps 队列。
 """
+
 import json
 import logging
 import threading
@@ -40,7 +41,7 @@ class InferenceSync:
         redis_port: int = 6379,
         redis_db: int = 0,
         duration: float = 0.0,
-        event_bus: Optional[Any] = None,
+        event_bus=None,
     ) -> None:
         """初始化同步器并清理上一轮遗留数据.
 
@@ -59,7 +60,10 @@ class InferenceSync:
         self._event_bus = event_bus
 
         from core.redis_conn import get_redis_client
-        self._redis = get_redis_client(host=redis_host, port=redis_port, db=redis_db)
+
+        self._redis = get_redis_client(
+            host=redis_host, port=redis_port, db=redis_db
+        )
         self._redis.ping()
         logger.info("InferenceSync (推理同步中间件) Redis 连接成功")
         self._subscribe_flow_events()
@@ -72,13 +76,19 @@ class InferenceSync:
         self._source_done_key = KEY_SOURCE_DONE
 
         # 主管理进程负责初始化时清理旧数据
-        self._redis.delete(self._progress_key, self._snapshot_key,
-                           self._event_stream_key, self._source_done_key)
+        self._redis.delete(
+            self._progress_key,
+            self._snapshot_key,
+            self._event_stream_key,
+            self._source_done_key,
+        )
 
         self._push_callback: Optional[Callable[[Dict[str, Any]], None]] = None
 
         # expected_sources：参与 global_sec min 计算的 source 集合（per-source 粒度）
-        self._expected_sources: Set[str] = expected_sources if expected_sources is not None else set()
+        self._expected_sources: Set[str] = (
+            expected_sources if expected_sources is not None else set()
+        )
 
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
@@ -97,10 +107,11 @@ class InferenceSync:
         # 死锁兜底：最近一次观察到的 global_sec（用于识别真实推进）
         self._last_progress_sec: float = 0.0
 
-
     # ── 对外接口 ────────────────────────────────────────────────
 
-    def set_push_callback(self, callback: Callable[[Dict[str, Any]], None]) -> None:
+    def set_push_callback(
+        self, callback: Callable[[Dict[str, Any]], None]
+    ) -> None:
         """设置推送回调函数.
 
         Args:
@@ -117,7 +128,9 @@ class InferenceSync:
                 self._event_stream_key,
                 self._source_done_key,
             )
-            logger.info("InferenceSync 已清理 Redis 推理流相关 key（含 source_done）")
+            logger.info(
+                "InferenceSync 已清理 Redis 推理流相关 key（含 source_done）"
+            )
         except Exception as e:
             logger.error(f"InferenceSync 重置 Redis 失败: {e}")
 
@@ -137,7 +150,9 @@ class InferenceSync:
         self._stop_event.clear()
         self._running = True
 
-        self._thread = threading.Thread(target=self._aggregation_loop, daemon=True)
+        self._thread = threading.Thread(
+            target=self._aggregation_loop, daemon=True
+        )
         self._thread.start()
         logger.info("InferenceSync 线程启动")
 
@@ -172,17 +187,24 @@ class InferenceSync:
             data: 事件载荷, 必须含 "localSec", 否则丢弃.
         """
         if "localSec" not in data:
-            logger.error(f"推送事件 '{event_type}' 缺少 localSec 字段，无法对齐，已丢弃")
+            logger.error(
+                f"推送事件 '{event_type}' 缺少 localSec 字段，无法对齐，已丢弃"
+            )
             return
         try:
             event = {"source": event_type, **data}
             self._event_counter += 1
-            self._redis.xadd(self._event_stream_key, {
-                "local_sec": str(event["localSec"]),
-                "counter": str(self._event_counter),
-                "payload": json.dumps(event, ensure_ascii=False),
-            })
-            logger.debug(f"事件写入Stream: {event_type}, localSec={event['localSec']}")
+            self._redis.xadd(
+                self._event_stream_key,
+                {
+                    "local_sec": str(event["localSec"]),
+                    "counter": str(self._event_counter),
+                    "payload": json.dumps(event, ensure_ascii=False),
+                },
+            )
+            logger.debug(
+                f"事件写入Stream: {event_type}, localSec={event['localSec']}"
+            )
         except Exception as e:
             logger.error(f"同步器写入事件失败: {event_type}, {e}")
 
@@ -194,11 +216,18 @@ class InferenceSync:
         """
         payload = event.get("data", event)
         timestamp = float(payload.get("flow_start_sec", event.get("ts", 0)))
-        self.push_display("flow_start", {
-            "localSec": timestamp, "tag": "flow_start",
-            "data": {"flow_id": payload.get("flow_id"), "flow_type": payload.get("flow_type"),
-                     "flow_start_sec": timestamp}
-        })
+        self.push_display(
+            "flow_start",
+            {
+                "localSec": timestamp,
+                "tag": "flow_start",
+                "data": {
+                    "flow_id": payload.get("flow_id"),
+                    "flow_type": payload.get("flow_type"),
+                    "flow_start_sec": timestamp,
+                },
+            },
+        )
 
     def _on_flow_ended(self, event: dict) -> None:
         """FLOW_ENDED → push_display flow_end 进 results:all.
@@ -208,20 +237,34 @@ class InferenceSync:
         """
         payload = event.get("data", event)
         timestamp = float(payload.get("flow_end_sec", event.get("ts", 0)))
-        self.push_display("flow_end", {
-            "localSec": timestamp, "tag": "flow_end",
-            "data": {"flow_id": payload.get("flow_id"), "flow_type": payload.get("flow_type"),
-                     "flow_end_sec": timestamp, "flow_continue_sec": payload.get("flow_continue_sec", 0)}
-        })
+        self.push_display(
+            "flow_end",
+            {
+                "localSec": timestamp,
+                "tag": "flow_end",
+                "data": {
+                    "flow_id": payload.get("flow_id"),
+                    "flow_type": payload.get("flow_type"),
+                    "flow_end_sec": timestamp,
+                    "flow_continue_sec": payload.get("flow_continue_sec", 0),
+                },
+            },
+        )
 
     def _subscribe_flow_events(self) -> None:
         """订阅 event_bus FLOW_STARTED/FLOW_ENDED, 转推 results:all 供前端事件流栏."""
         if not self._event_bus:
             return
         from core.event_bus import EventTopic
-        self._event_bus.subscribe(EventTopic.FLOW_STARTED, self._on_flow_started)
+
+        self._event_bus.subscribe(
+            EventTopic.FLOW_STARTED, self._on_flow_started
+        )
         self._event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
-        logger.info("InferenceSync 已订阅 FLOW_STARTED/FLOW_ENDED → flow_start/flow_end 推送")
+        logger.info(
+            "InferenceSync 已订阅 FLOW_STARTED/FLOW_ENDED "
+            "→ flow_start/flow_end 推送"
+        )
 
     def flush_remaining(self) -> None:
         """强制刷新 Stream 中所有剩余事件到前端(done 信号推送前调用, 确保评估结果不丢)."""
@@ -241,11 +284,16 @@ class InferenceSync:
             return {
                 "stream_size": stream_len,
                 "global_sec": self._compute_global_sec(),
-                "source_times": {field: float(value) for field, value in all_progress.items()},
+                "source_times": {
+                    field: float(value)
+                    for field, value in all_progress.items()
+                },
                 "done_sources": list(done_sources),
                 "all_done": self._all_sources_done(),
-                "module_snapshots": {module_name: json.loads(raw)
-                                     for module_name, raw in all_snapshots.items()},
+                "module_snapshots": {
+                    module_name: json.loads(raw)
+                    for module_name, raw in all_snapshots.items()
+                },
                 "running": self._running,
                 "fps": self.fps,
             }
@@ -268,11 +316,7 @@ class InferenceSync:
             return set()
 
     def _all_sources_done(self) -> bool:
-        """判定所有预期 source 是否都已上报结束信号.
-
-        Returns:
-            所有预期 source 均已上报结束信号时返回 True.
-        """
+        """判定所有预期 source 是否都已上报结束信号."""
         if not self._expected_sources:
             return False
         # source_done 字段为 "大类.细粒度"，按细粒度名与 expected_sources 比对
@@ -298,9 +342,11 @@ class InferenceSync:
                 #       改用大类比对, 使 pop 视角进度计入 global_sec
                 fine_source = _fine_source(source)
                 category = _SOURCE_CATEGORY.get(fine_source, fine_source)
-                if (self._expected_sources
-                        and category not in self._expected_sources
-                        and fine_source not in self._expected_sources):
+                if (
+                    self._expected_sources
+                    and category not in self._expected_sources
+                    and fine_source not in self._expected_sources
+                ):
                     continue
                 try:
                     sec = float(value)
@@ -326,7 +372,10 @@ class InferenceSync:
         """
         try:
             snapshots = self._redis.hgetall(self._snapshot_key)
-            return {module_name: json.loads(raw) for module_name, raw in snapshots.items()}
+            return {
+                module_name: json.loads(raw)
+                for module_name, raw in snapshots.items()
+            }
         except Exception as e:
             logger.error(f"获取上下文快照失败: {e}")
             return {}
@@ -338,9 +387,13 @@ class InferenceSync:
         self._last_stream_id = "0-0"
         self._pending_events = []
         try:
-            self._redis.delete(self._progress_key, self._snapshot_key, self._source_done_key)
+            self._redis.delete(
+                self._progress_key, self._snapshot_key, self._source_done_key
+            )
         except redis.RedisError as e:
-            logger.warning(f"_reset_cycle 清理 Redis key 失败（不影响下一轮）: {e}")
+            logger.warning(
+                f"_reset_cycle 清理 Redis key 失败（不影响下一轮）: {e}"
+            )
         self._last_progress_ts = time.time()
         self._last_progress_sec = 0.0
         logger.info("InferenceSync 已重置本轮状态，等待下一次推理触发")
@@ -353,26 +406,27 @@ class InferenceSync:
         Returns:
             触发死锁兜底返回 True.
         """
-        return time.time() - self._last_progress_ts > INFERENCE_DEADLOCK_TIMEOUT
+        return (
+            time.time() - self._last_progress_ts > INFERENCE_DEADLOCK_TIMEOUT
+        )
 
     # ── Stream 读取 ─────────────────────────────────────────────
 
     def _read_stream_entries(
         self, count: Optional[int] = None
     ) -> List[Tuple[str, Dict[str, Any]]]:
-        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过.
-
-        Args:
-            count: 单次读取的最大条目数，None 表示不限制.
-
-        Returns:
-            条目列表，每项为 (entry_id, fields) 二元组.
-        """
+        """从 Redis Stream 读取事件条目，自动处理 last_stream_id 跳过."""
         if self._last_stream_id == "0-0":
-            entries = self._redis.xrange(self._event_stream_key, min="-", max="+", count=count)
+            entries = self._redis.xrange(
+                self._event_stream_key, min="-", max="+", count=count
+            )
         else:
-            entries = self._redis.xrange(self._event_stream_key,
-                                         min=self._last_stream_id, max="+", count=count)
+            entries = self._redis.xrange(
+                self._event_stream_key,
+                min=self._last_stream_id,
+                max="+",
+                count=count,
+            )
             if entries and entries[0][0] == self._last_stream_id:
                 entries = entries[1:]
         return entries
@@ -380,14 +434,7 @@ class InferenceSync:
     def _parse_stream_entries(
         self, entries: List[Tuple[str, Dict[str, Any]]]
     ) -> Tuple[List[Tuple[float, Dict[str, Any], str]], List[str]]:
-        """解析 Stream 条目为 (local_sec, event, entry_id) 三元组.
-
-        Args:
-            entries: _read_stream_entries 返回的原始条目列表.
-
-        Returns:
-            (已解析的事件三元组列表, 待删除的 entry_id 列表).
-        """
+        """解析 Stream 条目为 (local_sec, event, entry_id) 三元组."""
         events: List[Tuple[float, Dict[str, Any], str]] = []
         ids_to_delete: List[str] = []
         for entry_id, fields in entries:
@@ -402,11 +449,14 @@ class InferenceSync:
 
     # ── Batch 构建与推送 ─────────────────────────────────────────
 
-    def _build_batch(self, events: List[Dict[str, Any]], global_sec: float) -> Dict[str, Any]:
+    def _build_batch(
+        self, events: List[Dict[str, Any]], global_sec: float
+    ) -> Dict[str, Any]:
         """把事件列表聚合成前端 batch（视频去重、最后帧补全）.
 
         携带 sourceTimes: 各视角整体进度(秒), 供前端按视角算实时速度取 min 决定播放倍率.
-        视角整体进度映射: front=tracker.tracking, pop=behavior.video_pop, voice=voice.voice.
+        视角整体进度映射: front=tracker.tracking, pop=behavior.video_pop,
+        voice=voice.voice.
         视频流走独立二进制通道(vis_stream→ws.send_bytes), 不进 results:all;
         此处只聚合结构化事件(progress/voice/tracking/gaze/flow/evaluation).
 
@@ -415,7 +465,8 @@ class InferenceSync:
             global_sec: 本次 batch 对应的全局时钟.
 
         Returns:
-            前端 batch 字典, 含 globalSec / totalDuration / sourceTimes 与各 source 事件组.
+            前端 batch 字典, 含 globalSec / totalDuration / sourceTimes
+            与各 source 事件组.
         """
         batch = {"globalSec": global_sec, "totalDuration": self.duration}
         # 各视角整体进度(供前端速率引擎)
@@ -430,9 +481,11 @@ class InferenceSync:
                 fine = _fine_source(field)
                 # 视角整体进度归类: tracking/gaze/video_front -> front(取最大, 视角已产出位置)
                 if fine in ("tracking", "gaze", "video_front"):
-                    if sec > view_secs.get("front", -1): view_secs["front"] = sec
+                    if sec > view_secs.get("front", -1):
+                        view_secs["front"] = sec
                 elif fine in ("video_pop", "behavior"):
-                    if sec > view_secs.get("pop", -1): view_secs["pop"] = sec
+                    if sec > view_secs.get("pop", -1):
+                        view_secs["pop"] = sec
                 elif fine == "voice":
                     view_secs["voice"] = sec
             batch["sourceTimes"] = view_secs
@@ -441,7 +494,11 @@ class InferenceSync:
 
         for event in events:
             source = event.get("source", "unknown")
-            item = {"localSec": event.get("localSec"), "tag": event.get("tag"), "data": event.get("data")}
+            item = {
+                "localSec": event.get("localSec"),
+                "tag": event.get("tag"),
+                "data": event.get("data"),
+            }
             batch.setdefault(source, []).append(item)
 
         return batch
@@ -472,11 +529,7 @@ class InferenceSync:
             time.sleep(POLL_INTERVAL_SEC)
 
     def _try_finish_or_push(self, global_sec: float) -> None:
-        """流式直推模式：实时将已生成的结构化推理数据推向前端，由前端时序池进行视频时间帧同步渲染.
-
-        Args:
-            global_sec: 当前全局时钟(秒)，为 float("inf") 时按无上限推送.
-        """
+        """流式直推模式：实时将已生成的结构化推理数据推向前端，由前端时序池进行视频时间帧同步渲染."""
         if self._cycle_done:
             return
 
@@ -498,16 +551,16 @@ class InferenceSync:
 
         # 死锁兜底
         if self._is_deadlocked():
-            logger.warning(f"推理死锁兜底触发（{INFERENCE_DEADLOCK_TIMEOUT:.0f}s 无推进），强制收尾推送 done")
+            logger.warning(
+                f"推理死锁兜底触发（{INFERENCE_DEADLOCK_TIMEOUT:.0f}s 无推进），强制收尾推送 done"
+            )
             self._finish_cycle(effective_sec)
 
     def _finish_cycle(self, global_sec: float) -> None:
-        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态.
-
-        Args:
-            global_sec: 收尾时的全局时钟(秒)，为 float("inf") 时跳过最后一帧推送.
-        """
-        logger.info("所有 expected source 已上报结束信号，本轮推理完成，刷新剩余事件并推送 done")
+        """本轮推理收尾：推送最后一帧、刷新剩余事件、发送 done 哨兵、重置状态."""
+        logger.info(
+            "所有 expected source 已上报结束信号，本轮推理完成，刷新剩余事件并推送 done"
+        )
         if global_sec != float("inf"):
             self._push_events_up_to(global_sec)
         self._flush_remaining_events()
@@ -515,11 +568,7 @@ class InferenceSync:
         self._reset_cycle()
 
     def _push_events_up_to(self, global_sec: float) -> None:
-        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送.
-
-        Args:
-            global_sec: 推送水位(秒)，只推送 local_sec 不超过该值的事件.
-        """
+        """对齐推送：把 local_sec <= global_sec 的事件聚成一个 batch 推送."""
         try:
             entries = self._read_stream_entries(count=500)
             if not entries:
@@ -527,14 +576,18 @@ class InferenceSync:
             self._last_stream_id = entries[-1][0]
 
             parsed, ids_to_delete = self._parse_stream_entries(entries)
-            ready, pending, more_ids = self._classify_events(parsed, global_sec)
+            ready, pending, more_ids = self._classify_events(
+                parsed, global_sec
+            )
             ids_to_delete.extend(more_ids)
             self._pending_events = pending
             self._delete_entries(ids_to_delete)
             # 滚动修剪已消费的高频视频帧与推理流，确保 Redis 极低内存水位（业务事件流保存在 module:events:* 永久保留）
             if self._event_counter % 20 == 0:
                 try:
-                    self._redis.xtrim(self._event_stream_key, maxlen=200000, approximate=True)  # 增大:保留整个推理期间数据，避免删未读条目导致前端数据缺失
+                    self._redis.xtrim(
+                        self._event_stream_key, maxlen=200000, approximate=True
+                    )  # 增大:保留整个推理期间数据，避免删未读条目导致前端数据缺失
                 except Exception:
                     pass
 
@@ -545,8 +598,14 @@ class InferenceSync:
             logger.error(f"对齐并推送事件失败: {e}")
 
     def _classify_events(
-        self, parsed: List[Tuple[float, Dict[str, Any], str]], global_sec: float
-    ) -> Tuple[List[Dict[str, Any]], List[Tuple[float, Dict[str, Any], Optional[str]]], List[str]]:
+        self,
+        parsed: List[Tuple[float, Dict[str, Any], str]],
+        global_sec: float,
+    ) -> Tuple[
+        List[Dict[str, Any]],
+        List[Tuple[float, Dict[str, Any], Optional[str]]],
+        List[str],
+    ]:
         """将 pending 事件与解析后的事件合并排序，按 global_sec 切分.
 
         Args:
@@ -590,7 +649,9 @@ class InferenceSync:
             if not events:
                 return
             events.sort(key=lambda event: float(event.get("localSec", 0)))
-            self._push_event(self._build_batch(events, self._pushed_global_sec))
+            self._push_event(
+                self._build_batch(events, self._pushed_global_sec)
+            )
         except Exception as e:
             logger.error(f"清理剩余事件失败: {e}")
 

@@ -1,9 +1,4 @@
 <script setup lang="ts">
-/**
- * HeaderBar: 顶部标题栏 + 开始/停止控制按钮 + 推理进度条.
- *
- * 通过 start / stop 事件上抛控制意图, 状态与进度由父组件下发.
- */
 defineProps<{
   status: 'idle' | 'starting' | 'running' | 'done' | 'stopped'
   progress: number
@@ -43,7 +38,7 @@ const emit = defineEmits<{ start: []; stop: [] }>()
         <div class="progress-row">
           <span class="plabel">推理进度</span>
           <div class="pbar">
-            <div class="pfill" :style="{ width: (progress || 0) + '%' }" />
+            <div class="pfill" :style="{ width: (progress || 0) + '%' }"></div>
           </div>
           <span class="pct">{{ (progress || 0).toFixed(1) }}%</span>
         </div>

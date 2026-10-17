@@ -3,6 +3,7 @@
 统一 Voice / Tracker / Gaze / Behavior 等业务模块的初始化、处理、保存接口,
 以及向推理流与消息总线的推送方式.
 """
+
 import logging
 import time
 from abc import ABC, abstractmethod
@@ -51,7 +52,7 @@ class BaseModule(ABC):
         self.logger = logging.getLogger(f"module.{self.module_name}")
         self._running = False
         self._start_time = 0.0
-        self._run_id: Optional[str] = None
+        self._run_id = None
         # 本模块产出的 source 集合（push_display 自动登记）：用于退出时上报结束信号
         self._inference_sources: set = set()
         # 仅代推、不归属本模块的 source：退出时不标记结束（其生命周期归所属模块）
@@ -78,9 +79,13 @@ class BaseModule(ABC):
         if self._run_id:
             try:
                 self.save_results(self._run_id)
-                self.logger.info(f"响应 SAVE_KEY_MOMENTS，已保存 {self.module_name} 结果")
+                self.logger.info(
+                    f"响应 SAVE_KEY_MOMENTS，已保存 {self.module_name} 结果"
+                )
             except Exception as e:
-                self.logger.error(f"响应 SAVE_KEY_MOMENTS 保存失败: {e}", exc_info=True)
+                self.logger.error(
+                    f"响应 SAVE_KEY_MOMENTS 保存失败: {e}", exc_info=True
+                )
 
     @property
     @abstractmethod
@@ -149,19 +154,25 @@ class BaseModule(ABC):
             self.save_results(run_id)
 
             elapsed = time.time() - self._start_time
-            self.logger.info(f"模块 {self.module_name} 完成，耗时 {elapsed:.1f}s")
+            self.logger.info(
+                f"模块 {self.module_name} 完成，耗时 {elapsed:.1f}s"
+            )
 
         except Exception as e:
-            self.logger.error(f"模块 {self.module_name} 错误: {e}", exc_info=True)
+            self.logger.error(
+                f"模块 {self.module_name} 错误: {e}", exc_info=True
+            )
         finally:
             self._running = False
             # 退出即上报所有归属 source 的结束信号（借用 source 排除，由所属模块负责）
             try:
-                if hasattr(self.inference_stream, 'mark_owned_done'):
+                if hasattr(self.inference_stream, "mark_owned_done"):
                     owned = self._inference_sources - self._borrowed_sources
                     self.inference_stream.mark_owned_done(owned)
             except Exception as e:
-                self.logger.warning(f"模块 {self.module_name} 上报 source 结束信号失败: {e}")
+                self.logger.warning(
+                    f"模块 {self.module_name} 上报 source 结束信号失败: {e}"
+                )
 
     def stop(self) -> None:
         """停止模块.
@@ -180,7 +191,9 @@ class BaseModule(ABC):
         """
         return self._running
 
-    def update_progress(self, current: float, total: Optional[float] = None) -> None:
+    def update_progress(
+        self, current: float, total: Optional[float] = None
+    ) -> None:
         """更新进度(per-source 写入).
 
         借用 source 与独立进度 source 跳过. 进度事件按 0.3 秒节流推送给前端.
@@ -190,7 +203,10 @@ class BaseModule(ABC):
             total: 进度总量; None 或非正数时不向前端推送.
         """
         for source in self._inference_sources:
-            if source in self._borrowed_sources or source in self._independent_progress_sources:
+            if (
+                source in self._borrowed_sources
+                or source in self._independent_progress_sources
+            ):
                 continue
             self.inference_stream.update_module_time(source, current)
         # 推送进度事件到前端（每 0.3 秒高频更新）
@@ -199,11 +215,17 @@ class BaseModule(ABC):
             if now - self._last_progress_push >= 0.3:
                 self._last_progress_push = now
                 pct = min(100.0, current / total * 100.0)
-                self.push_display("progress", {
-                    "localSec": round(current, 2),
-                    "tag": "progress",
-                    "data": {"label": self.module_name, "pct": round(pct, 1)},
-                })
+                self.push_display(
+                    "progress",
+                    {
+                        "localSec": round(current, 2),
+                        "tag": "progress",
+                        "data": {
+                            "label": self.module_name,
+                            "pct": round(pct, 1),
+                        },
+                    },
+                )
 
     def push_display(self, event_type: str, data: Dict[str, Any]) -> None:
         """推送数据到推理流.
@@ -218,7 +240,9 @@ class BaseModule(ABC):
             self._inference_sources.add(event_type)
         self.inference_stream.push_display(event_type, data)
 
-    def push_event(self, msg_type: str, data: Dict[str, Any], timestamp: float = 0.0) -> None:
+    def push_event(
+        self, msg_type: str, data: Dict[str, Any], timestamp: float = 0.0
+    ) -> None:
         """推送事件到跨进程消息总线.
 
         Args:

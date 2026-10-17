@@ -1,9 +1,3 @@
-/**
- * 从动锁步(伺服锁定模型 v5): pop 没有自己的播放进度, 每帧被主时钟(front)连续锁定.
- *
- * 核心不变量: pop 的内容位置永远 ≤ master 前方一帧, 且随时向 masterSec 收敛.
- * 速率控制权: pop 的 playbackRate 完全归本模块(VideoPanel watch 只管 front).
- */
 // 从动锁步(伺服锁定模型 v5): pop 没有自己的播放进度, 每帧被主时钟(front)连续锁定
 //
 // 核心不变量: pop 的内容位置永远 ≤ master 前方一帧, 且随时向 masterSec 收敛——
@@ -46,9 +40,6 @@ const MASTER_FROZEN_FRAMES = 30
 // 超前暂停阈值: pop 超前 master 超过此值且 master 不可达 → 暂停等待
 const AHEAD_PAUSE_SEC = 1.0
 
-/**
- * 锁步状态(跨帧记忆): 冻结/越界/暂停/seek 冷却的观测标记.
- */
 export interface SlaveSyncState {
   overEndSince: number // masterSec 越界计时起点(0=未越界)
   lastMasterSec: number // 上帧主时钟(冻结检测)
@@ -59,9 +50,8 @@ export interface SlaveSyncState {
 }
 
 /**
- * 创建零值锁步状态(lastMasterSec 置 -1 以保证首帧不误判冻结).
- *
- * @returns 初始化的 SlaveSyncState.
+ * 创建 pop 从动路锁步状态(跨帧记忆).
+ * @returns 全字段归零的初始状态对象
  */
 export function createSlaveSyncState(): SlaveSyncState {
   return {
@@ -76,8 +66,7 @@ export function createSlaveSyncState(): SlaveSyncState {
 
 /**
  * mediaUrl 重建(流重置)时清状态.
- *
- * @param state - 待复位的锁步状态(原地修改).
+ * @param state 待复位的锁步状态对象
  */
 export function resetSlaveSync(state: SlaveSyncState): void {
   state.overEndSince = 0
@@ -129,13 +118,12 @@ function catchUpSeek(vid: HTMLVideoElement, target: number, state: SlaveSyncStat
 }
 
 /**
- * 每帧驱动 pop 伺服锁定主时钟(按优先级链逐级判定, 见模块头注释).
- *
- * @param vid - 从动 video 元素(pop).
- * @param masterSec - 主时钟(front currentTime).
- * @param isPlaying - 应播放标记.
- * @param baseRate - 基准速率(与 front 同速; 伺服在其上微调).
- * @param state - 锁步状态(跨帧记忆).
+ * 每帧驱动 pop 伺服锁定主时钟.
+ * @param vid 从动 video(pop)
+ * @param masterSec 主时钟(front currentTime)
+ * @param isPlaying 应播放标记
+ * @param baseRate 基准速率(与 front 同速; 伺服在其上微调)
+ * @param state 锁步状态(跨帧记忆)
  */
 export function syncSlave(
   vid: HTMLVideoElement,

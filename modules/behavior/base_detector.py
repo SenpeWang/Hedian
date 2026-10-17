@@ -2,6 +2,7 @@
 
 封装行为检测公共能力，冷却期帧数控制与标准化事件结构封装。
 """
+
 from typing import Any, Dict
 
 

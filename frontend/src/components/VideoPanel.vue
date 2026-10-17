@@ -1,9 +1,4 @@
 <script setup lang="ts">
-/**
- * VideoPanel: MSE fMP4 流式播放展示组件(薄壳).
- *
- * front=主时钟(逐帧 emit progress); pop=从动(锁步算法在 media/slave-sync, 此处仅逐帧驱动).
- */
 // VideoPanel: MSE fMP4 流式播放展示组件(薄)
 // front=主时钟(emit currentTime); pop=从动(锁步算法在 media/slave-sync, 此处仅驱动)
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
@@ -81,9 +76,6 @@ function playVideo() {
   }
 }
 
-/**
- * 暂停播放(经 defineExpose 供父组件在停止/主视角结束时调用).
- */
 function pauseVideo() {
   if (videoRef.value) videoRef.value.pause()
 }
@@ -147,9 +139,7 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="panel" style="flex: 1">
-    <div class="panel-title">
-      {{ title }}
-    </div>
+    <div class="panel-title">{{ title }}</div>
     <div class="panel-body" style="padding: 0; flex: 1; position: relative">
       <video
         ref="videoRef"
@@ -159,7 +149,7 @@ onBeforeUnmount(() => {
         playsinline
         preload="auto"
         @ended="emit('ended')"
-      />
+      ></video>
     </div>
   </div>
 </template>

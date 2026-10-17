@@ -8,6 +8,7 @@
 所有函数均为无副作用纯函数，供 screen_detect / file_detector / hand_raiser /
 object_detector 等模块复用。
 """
+
 from typing import Dict, Optional, Tuple
 
 import numpy as np
@@ -32,8 +33,11 @@ def point_in_polygon(point: Tuple[float, float], polygon: np.ndarray) -> bool:
         current_x, current_y = polygon[current_index]
         previous_x, previous_y = polygon[previous_index]
         if ((current_y > point_y) != (previous_y > point_y)) and (
-            point_x < (previous_x - current_x) * (point_y - current_y) /
-            (previous_y - current_y + 1e-9) + current_x
+            point_x
+            < (previous_x - current_x)
+            * (point_y - current_y)
+            / (previous_y - current_y + 1e-9)
+            + current_x
         ):
             inside = not inside
         previous_index = current_index
@@ -72,7 +76,8 @@ def point_to_segment_distance(
 
 
 def point_to_polygon_distance(
-    point: Tuple[float, float], polygon: np.ndarray,
+    point: Tuple[float, float],
+    polygon: np.ndarray,
 ) -> float:
     """点到多边形轮廓的最短距离，点位于多边形内时返回 0.
 
@@ -88,9 +93,12 @@ def point_to_polygon_distance(
     vertices = polygon.reshape(-1, 2)
     return min(
         point_to_segment_distance(
-            point, tuple(vertices[index]), tuple(vertices[(index + 1) % len(vertices)])
+            point,
+            tuple(vertices[index]),
+            tuple(vertices[(index + 1) % len(vertices)]),
         )
-        for index in range(len(vertices)))
+        for index in range(len(vertices))
+    )
 
 
 def bbox_to_polygon_distance(bbox, polygon: np.ndarray) -> float:
@@ -105,7 +113,9 @@ def bbox_to_polygon_distance(bbox, polygon: np.ndarray) -> float:
     """
     x1, y1, x2, y2 = bbox
     corners = [(x1, y1), (x2, y1), (x2, y2), (x1, y2)]
-    return min(point_to_polygon_distance(corner, polygon) for corner in corners)
+    return min(
+        point_to_polygon_distance(corner, polygon) for corner in corners
+    )
 
 
 def bbox_polygon_overlap_ratio(bbox, polygon: np.ndarray) -> float:
@@ -188,9 +198,11 @@ class PoseTools:
         norm_bc = np.linalg.norm(vector_bc)
         if norm_ba < 1e-6 or norm_bc < 1e-6:
             return None
-        cos_angle = float(np.clip(
-            np.dot(vector_ba, vector_bc) / (norm_ba * norm_bc), -1.0, 1.0
-        ))
+        cos_angle = float(
+            np.clip(
+                np.dot(vector_ba, vector_bc) / (norm_ba * norm_bc), -1.0, 1.0
+            )
+        )
         return float(np.degrees(np.arccos(cos_angle)))
 
 
@@ -201,7 +213,9 @@ class PoseEMAFilter:
     低置信度关键点（confidence < conf_threshold）沿用历史值，避免噪声误判。
     """
 
-    def __init__(self, alpha: float = 0.5, conf_threshold: float = 0.25) -> None:
+    def __init__(
+        self, alpha: float = 0.5, conf_threshold: float = 0.25
+    ) -> None:
         """初始化 EMA 滤波器.
 
         Args:
@@ -229,12 +243,14 @@ class PoseEMAFilter:
         smoothed = np.zeros_like(keypoints)
         for keypoint_index in range(len(keypoints)):
             x, y, confidence = keypoints[keypoint_index]
-            previous_x, previous_y, previous_confidence = (
-                previous_keypoints[keypoint_index]
-            )
+            previous_x, previous_y, previous_confidence = previous_keypoints[
+                keypoint_index
+            ]
             if confidence < self.conf_threshold:
                 smoothed[keypoint_index] = [
-                    previous_x, previous_y, previous_confidence,
+                    previous_x,
+                    previous_y,
+                    previous_confidence,
                 ]
             else:
                 smoothed[keypoint_index] = [
@@ -244,3 +260,15 @@ class PoseEMAFilter:
                 ]
         self.history[track_id] = smoothed.copy()
         return smoothed
+
+    def remove(self, track_id: object) -> None:
+        """移除指定跟踪目标的关键点历史缓存.
+
+        Args:
+            track_id: 外部跟踪标识；不存在时静默忽略.
+        """
+        self.history.pop(track_id, None)
+
+    def clear(self) -> None:
+        """清空全部跟踪目标的关键点历史缓存."""
+        self.history.clear()

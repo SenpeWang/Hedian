@@ -2,6 +2,7 @@
 
 基于 YOLO 目标检测输出的 pointing_hand 框与预标注屏幕/机箱多边形区域的重叠比及最短距离判定。
 """
+
 import logging
 from typing import Any, Dict, List
 
@@ -26,7 +27,9 @@ logger = logging.getLogger("module.behavior.screen_detect")
 CLASS_POINTING_HAND: int = 4
 
 # 机箱多边形轮廓数组
-_SCREEN_CONTOURS = [np.array(polygon, dtype=np.int32) for polygon in SCREEN_POLYGONS]
+_SCREEN_CONTOURS = [
+    np.array(polygon, dtype=np.int32) for polygon in SCREEN_POLYGONS
+]
 
 
 class FingerScreenDetector(BaseDetector):
@@ -112,7 +115,9 @@ class FingerScreenDetector(BaseDetector):
         best_distance = 1e9
         for hand_box in hands:
             for screen_polygon in _SCREEN_CONTOURS:
-                overlap_ratio = bbox_polygon_overlap_ratio(hand_box, screen_polygon)
+                overlap_ratio = bbox_polygon_overlap_ratio(
+                    hand_box, screen_polygon
+                )
                 distance = bbox_to_polygon_distance(hand_box, screen_polygon)
                 best_overlap_ratio = max(best_overlap_ratio, overlap_ratio)
                 best_distance = min(best_distance, distance)
@@ -132,7 +137,9 @@ class FingerScreenDetector(BaseDetector):
                         "手指指向屏幕",
                         frame_count,
                         {
-                            "overlap_ratio": round(float(best_overlap_ratio), 3),
+                            "overlap_ratio": round(
+                                float(best_overlap_ratio), 3
+                            ),
                             "min_dist": round(float(best_distance), 1),
                         },
                     )

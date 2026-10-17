@@ -10,6 +10,7 @@ xadd 到 inference:vis_stream:{view},供 VisStreamForwarder 消费.
 注:标注已由各模块 draw_* 画进帧,本编码器只负责"帧→fMP4→Redis Stream",
 不做任何可视化样式,不依赖 InferenceSync/global_sec 对齐(标注与帧物理一体).
 """
+
 import logging
 import struct
 import subprocess
@@ -102,9 +103,13 @@ class VisEncoder:
         self._stream_key = KEY_PREFIX + view
 
         import redis
+
         # 二进制 payload,必须 decode_responses=False
         self._redis = redis.Redis(
-            host=redis_host, port=redis_port, db=redis_db, decode_responses=False
+            host=redis_host,
+            port=redis_port,
+            db=redis_db,
+            decode_responses=False,
         )
         self._proc: Optional[subprocess.Popen] = None
         self._reader: Optional[threading.Thread] = None
@@ -120,10 +125,18 @@ class VisEncoder:
             ffmpeg 命令行参数列表, stdin 为 rawvideo 输入, stdout 为 fMP4 输出.
         """
         cmd = [
-            "ffmpeg", "-y",
-            "-f", "rawvideo", "-pix_fmt", "bgr24",
-            "-s", f"{self.width}x{self.height}", "-r", str(self.fps),
-            "-i", "pipe:0",
+            "ffmpeg",
+            "-y",
+            "-f",
+            "rawvideo",
+            "-pix_fmt",
+            "bgr24",
+            "-s",
+            f"{self.width}x{self.height}",
+            "-r",
+            str(self.fps),
+            "-i",
+            "pipe:0",
         ]
         if self.with_audio:
             # 不用 -shortest:音频文件会被快速读完,shortest 令 ffmpeg 在音频 EOF 时立即退出不等视频
@@ -131,12 +144,22 @@ class VisEncoder:
         else:
             cmd += ["-map", "0:v", "-an"]
         cmd += [
-            "-c:v", "libx264", "-preset", "ultrafast",
-            "-profile:v", "baseline", "-level", "3.1",
-            "-pix_fmt", "yuv420p",
-            "-g", str(max(1, int(self.fps))),  # 每 ~1s 一个关键帧
-            "-f", "mp4",
-            "-movflags", "+frag_keyframe+empty_moov+default_base_moof",
+            "-c:v",
+            "libx264",
+            "-preset",
+            "ultrafast",
+            "-profile:v",
+            "baseline",
+            "-level",
+            "3.1",
+            "-pix_fmt",
+            "yuv420p",
+            "-g",
+            str(max(1, int(self.fps))),  # 每 ~1s 一个关键帧
+            "-f",
+            "mp4",
+            "-movflags",
+            "+frag_keyframe+empty_moov+default_base_moof",
             "pipe:1",
         ]
         return cmd
@@ -154,7 +177,9 @@ class VisEncoder:
         )
         self._reader = threading.Thread(target=self._read_loop, daemon=True)
         self._reader.start()
-        self._stderr_drain = threading.Thread(target=self._drain_stderr, daemon=True)
+        self._stderr_drain = threading.Thread(
+            target=self._drain_stderr, daemon=True
+        )
         self._stderr_drain.start()
         logger.info(
             f"VisEncoder[{self.view}] 启动 ffmpeg: "
@@ -227,9 +252,14 @@ class VisEncoder:
                 except Exception:
                     continue
             if return_code is not None:
-                logger.info(f"VisEncoder[{self.view}] ffmpeg 退出 rc={return_code}, 共喂 {self._frame_count} 帧")
+                logger.info(
+                    f"VisEncoder[{self.view}] ffmpeg 退出 rc={return_code}, "
+                    f"共喂 {self._frame_count} 帧"
+                )
             else:
-                logger.warning(f"VisEncoder[{self.view}] ffmpeg 15s 未退出, 强制收尾写 end")
+                logger.warning(
+                    f"VisEncoder[{self.view}] ffmpeg 15s 未退出, 强制收尾写 end"
+                )
             self._xadd("end", b"")
 
     def _xadd(self, segment_type: str, data: bytes) -> None:
@@ -247,7 +277,9 @@ class VisEncoder:
                 approximate=True,
             )
         except Exception as e:
-            logger.error(f"VisEncoder[{self.view}] xadd {segment_type} 失败: {e}")
+            logger.error(
+                f"VisEncoder[{self.view}] xadd {segment_type} 失败: {e}"
+            )
 
     def _drain_stderr(self) -> None:
         """排空 ffmpeg stderr(防管道满阻塞),记录非进度行用于诊断."""
@@ -256,7 +288,18 @@ class VisEncoder:
                 if self._stopped:
                     break
                 line = raw.decode("utf-8", "ignore").strip()
-                if line and not any(k in line for k in ("frame=", "fps=", "size=", "bitrate=", "speed=", "cpb:", "Side data")):
+                if line and not any(
+                    k in line
+                    for k in (
+                        "frame=",
+                        "fps=",
+                        "size=",
+                        "bitrate=",
+                        "speed=",
+                        "cpb:",
+                        "Side data",
+                    )
+                ):
                     logger.warning(f"ffmpeg[{self.view}]: {line}")
         except Exception:
             pass
@@ -276,16 +319,20 @@ class VisEncoder:
             self._reader.join(timeout=15)
         if self._reader and self._reader.is_alive():
             # reader 卡住(ffmpeg 未产出 EOF)才强制杀进程逼出 end
-            logger.warning(f"VisEncoder[{self.view}] 读取线程 15s 未结束, 强制终止 ffmpeg")
+            logger.warning(
+                f"VisEncoder[{self.view}] 读取线程 15s 未结束, 强制终止 ffmpeg"
+            )
             try:
                 self._proc.kill()
             except Exception:
                 pass
             self._reader.join(timeout=5)
-        self._stopped = True   # 此后 feed_frame 幂等短路(reader 已完成收尾)
+        self._stopped = True  # 此后 feed_frame 幂等短路(reader 已完成收尾)
         if self._proc:
             try:
                 self._proc.wait(timeout=15)
             except Exception:
                 pass
-        logger.info(f"VisEncoder[{self.view}] 结束,共喂 {self._frame_count} 帧")
+        logger.info(
+            f"VisEncoder[{self.view}] 结束,共喂 {self._frame_count} 帧"
+        )

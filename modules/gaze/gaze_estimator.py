@@ -2,6 +2,7 @@
 
 使用 Gazelle ONNX 模型推断注视方向。
 """
+
 import logging
 import os
 from typing import List, Optional, Tuple
@@ -35,6 +36,7 @@ class GazeEstimator:
             raise FileNotFoundError(f"Gazelle 模型不存在: {model_path}")
 
         import onnxruntime
+
         # 官方 API: 从 pip nvidia 包预加载 CUDA/cuDNN 库，供下方 CUDA EP 使用
         onnxruntime.preload_dlls()
         if providers is None:
@@ -54,7 +56,8 @@ class GazeEstimator:
         # 硬性要求: 仅允许 GPU 推理; CUDA EP 未生效说明已静默回退 CPU, 立即失败
         if "CUDAExecutionProvider" not in self._session.get_providers():
             raise RuntimeError(
-                f"Gazelle 模型 CUDAExecutionProvider 未生效(实际: {self._session.get_providers()}), "
+                f"Gazelle 模型 CUDAExecutionProvider 未生效 "
+                f"(实际: {self._session.get_providers()}), "
                 "按约定禁止 CPU 回退, 拒绝启动"
             )
         self._input_names = [i.name for i in self._session.get_inputs()]

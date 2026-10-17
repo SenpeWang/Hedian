@@ -1,6 +1,3 @@
-/**
- * 慢速逐字打字机: 模拟大模型流式输出, 按 chunk 累积 + 逐字追赶.
- */
 import { ref, watch, onBeforeUnmount, type Ref } from 'vue'
 import type { SegCard } from '../types'
 
@@ -16,11 +13,12 @@ function parseReportContent(text: string): { think: string; report: string } {
 }
 
 /**
- * 创建打字机: 每 step 毫秒揭示一个字, 追完且终态到达即切完成态.
- *
- * @param cards - 报告卡片列表 ref(读取 streamBuffer/reportText, 原地翻转 streaming).
- * @param step - 每个字的间隔毫秒(默认 60).
- * @returns shownLen 揭示长度表, 以及取指定字段已揭示文本的 shownText.
+ * 慢速逐字打字机: setInterval 驱动, 模拟大模型流式输出.
+ * streamBuffer 按 chunk 累积(后端到达), shownLen 逐字追赶; 追完 + reportText 到达 → 切 streaming=false.
+ * 停止条件: 所有卡片转完成态才停(防 chunk 续到时 timer 已停致卡死).
+ * @param cards 报告卡片列表(响应式)
+ * @param step 逐字间隔毫秒数, 默认 60ms(~16 字/秒)
+ * @returns `shownLen` 各卡片已展示长度 / `shownText` 按字段截取当前应展示文本
  */
 export function useTypewriter(cards: Ref<SegCard[]>, step = 60) {
   const shownLen = ref<Record<string, number>>({})
@@ -59,13 +57,6 @@ export function useTypewriter(cards: Ref<SegCard[]>, step = 60) {
   })
 
   // 截 streamBuffer 按 shownLen, 再 parse 出对应 field(think+report 都逐字)
-  /**
-   * 取卡片指定字段已揭示的文本(非流式卡片直接返回解析结果).
-   *
-   * @param card - 目标报告卡片.
-   * @param field - 取 think(思考过程)或 report(正文).
-   * @returns 已揭示到当前进度的该字段文本.
-   */
   function shownText(card: SegCard, field: 'think' | 'report'): string {
     const raw = card.streamBuffer || card.reportText || ''
     if (!raw) return ''

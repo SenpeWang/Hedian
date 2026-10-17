@@ -1,8 +1,3 @@
-/**
- * 评估报告卡片: 流式 chunk 累积 + 完成态 + 计数; 完成态释放全文副本(RetentionCenter).
- *
- * 评估走直推通道(不参与对齐), 前端播到流程结束点附近由卡片渲染时序承接(语义同现状).
- */
 // 评估报告卡片: 流式 chunk 累积 + 完成态 + 计数; 完成态释放全文副本(RetentionCenter)
 // 评估走直推通道(不参与对齐), 前端播到流程结束点附近由卡片渲染时序承接(语义同现状)
 import { ref, computed, watch } from 'vue'
@@ -11,9 +6,10 @@ import { retentionCenter } from '../media/retention'
 import { isStreamMsg, isTerminalMsg } from '../media/protocol'
 
 /**
- * 创建评估报告 store: 维护卡片列表、分数序列与三类流程计数.
- *
- * @returns 卡片/计数/均分的只读 ref, 以及 handleReportEvent / toggleCard / reset.
+ * 评估报告卡片: 流式 chunk 累积 + 完成态 + 计数; 完成态释放全文副本(RetentionCenter).
+ * 评估走直推通道(不参与对齐), 前端播到流程结束点附近由卡片渲染时序承接.
+ * @returns 卡片列表/各类计数/均分计算, 以及 `handleReportEvent` 消息入口、
+ *   `toggleCard` 折叠翻转、`reset` 全量清空
  */
 export function useReports() {
   const segCards = ref<SegCard[]>([])
@@ -23,11 +19,6 @@ export function useReports() {
   const noticeN = ref(0)
   const completedFlows = new Set<string>()
 
-  /**
-   * 处理一条报告消息: 按 flowId 建卡或累积 chunk, 终态落分数与计数.
-   *
-   * @param msg - WS 报告消息(流式或终态).
-   */
   function handleReportEvent(msg: unknown): void {
     const m = msg as {
       source?: string
@@ -104,7 +95,6 @@ export function useReports() {
     if (card) card.collapsed = !card.collapsed
   }
 
-  /** 清空卡片、分数与计数(重新推理时调用) */
   function reset(): void {
     segCards.value = []
     segScores.value = []

@@ -16,7 +16,9 @@ _DATEFMT = "%H:%M:%S"
 _ROOT_CONFIGURED = False
 
 
-def setup_logger(name: str = None, level: int = logging.INFO) -> logging.Logger:
+def setup_logger(
+    name: str = None, level: int = logging.INFO
+) -> logging.Logger:
     """初始化 root logger 后返回指定名称的 logger.
 
     首次调用时按 level 挂载 stdout handler; 之后的调用只做名称路由, 不重复配置.

@@ -2,6 +2,7 @@
 
 负责头部检测、注视推断、ROI 分类与可视化，并推送推理结果与注视告警事件。
 """
+
 import logging
 import threading
 from concurrent.futures import Future, ThreadPoolExecutor
@@ -47,9 +48,9 @@ class GazeModule:
         gaze_model_path: str,
         roi_json_path: str,
         config: Optional[Dict[str, Any]] = None,
-        inference_fn: Optional[Callable[..., Any]] = None,
+        inference_fn: Optional[Callable] = None,
         event_bus: Optional[Any] = None,
-        progress_fn: Optional[Callable[..., Any]] = None,
+        progress_fn: Optional[Callable] = None,
         paths: Optional[PathConfig] = None,
     ) -> None:
         """初始化凝视模块.
@@ -75,9 +76,13 @@ class GazeModule:
 
         if self._event_bus is not None:
             from core.event_bus import EventTopic
-            self._event_bus.subscribe(EventTopic.FLOW_STARTED,
-                                      self._on_flow_started)
-            self._event_bus.subscribe(EventTopic.FLOW_ENDED, self._on_flow_ended)
+
+            self._event_bus.subscribe(
+                EventTopic.FLOW_STARTED, self._on_flow_started
+            )
+            self._event_bus.subscribe(
+                EventTopic.FLOW_ENDED, self._on_flow_ended
+            )
             logger.info("GazeModule 已订阅 FLOW_STARTED/FLOW_ENDED 事件")
 
         self._head_detector = HeadDetector(
@@ -100,7 +105,9 @@ class GazeModule:
         self._cached_results: List[Dict[str, Any]] = []
         self._cached_has_heads = False
         self._cached_any_in_roi = False
-        self._gaze_interval = int(config.get("gaze_interval", 10)) if config else 10
+        self._gaze_interval = (
+            int(config.get("gaze_interval", 10)) if config else 10
+        )
 
         self._gaze_away_start_timestamp: Optional[float] = None
         self._alerting = False
@@ -201,7 +208,7 @@ class GazeModule:
             exception = self._gaze_future.exception()  # 防止异常被静默吞掉
             if exception is not None:
                 logger.warning(f"异步凝视检测失败: {exception}")
-            self._gaze_future: Optional[Future[Any]] = None
+            self._gaze_future = None
 
     def _run_gaze_detection_safe(
         self,
@@ -242,8 +249,8 @@ class GazeModule:
         new_any_in_roi = False
 
         if heads:
-            heatmaps, in_out_scores, valid_boxes = self._gaze_estimator.predict(
-                frame, heads
+            heatmaps, in_out_scores, valid_boxes = (
+                self._gaze_estimator.predict(frame, heads)
             )
             if heatmaps is not None and valid_boxes:
                 for index, box in enumerate(valid_boxes):
@@ -252,7 +259,8 @@ class GazeModule:
                         heatmap = heatmap[0]
                     in_out_score = (
                         float(in_out_scores[index])
-                        if in_out_scores is not None else 1.0
+                        if in_out_scores is not None
+                        else 1.0
                     )
                     gaze_point = self._roi_classifier.extract_gaze_point(
                         heatmap, frame_width, frame_height
@@ -264,12 +272,14 @@ class GazeModule:
                     )
                     if status == "IN_ROI":
                         new_any_in_roi = True
-                    new_results.append({
-                        "box": (box.x1, box.y1, box.x2, box.y2),
-                        "center": (box.cx, box.cy),
-                        "gaze_pt": gaze_point,
-                        "status": status,
-                    })
+                    new_results.append(
+                        {
+                            "box": (box.x1, box.y1, box.x2, box.y2),
+                            "center": (box.cx, box.cy),
+                            "gaze_pt": gaze_point,
+                            "status": status,
+                        }
+                    )
 
         with self._gaze_lock:
             self._cached_results = new_results
@@ -279,11 +289,15 @@ class GazeModule:
 
         if self._inference_fn:
             away_duration = 0.0
-            if (new_has_heads and not new_any_in_roi
-                    and self._gaze_away_start_timestamp is not None):
+            if (
+                new_has_heads
+                and not new_any_in_roi
+                and self._gaze_away_start_timestamp is not None
+            ):
                 away_duration = timestamp - self._gaze_away_start_timestamp
             self._inference_fn(
-                "gaze", {
+                "gaze",
+                {
                     "localSec": round(timestamp, 2),
                     "tag": "gaze_status",
                     "data": {
@@ -292,7 +306,7 @@ class GazeModule:
                         "heads_count": len(new_results),
                         "away_duration": round(away_duration, 2),
                     },
-                }
+                },
             )
 
         # 告警逻辑（_check_alert）移到主线程 process_frame 中执行，
@@ -312,23 +326,28 @@ class GazeModule:
             if self._gaze_away_start_timestamp is None:
                 self._gaze_away_start_timestamp = timestamp
             away_duration = timestamp - self._gaze_away_start_timestamp
-            if away_duration >= self._gaze_away_threshold and not self._alerting:
+            if (
+                away_duration >= self._gaze_away_threshold
+                and not self._alerting
+            ):
                 self._alerting = True
                 # 推理流 data 只含纯展示字段
                 if self._inference_fn:
                     self._inference_fn(
-                        "gaze", {
+                        "gaze",
+                        {
                             "localSec": round(timestamp, 2),
                             "tag": "GAZE_ALERT",
                             "data": {
                                 "state": "无人注视盘台",
                                 "away_duration": round(away_duration, 2),
                             },
-                        }
+                        },
                     )
                 # 事件流：完整字段供规则状态机使用
                 if self._event_bus:
                     from core.event_bus import EventTopic
+
                     with self._gaze_lock:
                         heads_count = len(self._cached_results)
                     self._event_bus.publish(
@@ -348,29 +367,36 @@ class GazeModule:
             if self._alerting:
                 duration = (
                     timestamp - self._gaze_away_start_timestamp
-                    if self._gaze_away_start_timestamp else 0.0
+                    if self._gaze_away_start_timestamp
+                    else 0.0
                 )
-                self._events.append({
-                    "localSec": round(self._gaze_away_start_timestamp, 2),
-                    "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
-                })
+                self._events.append(
+                    {
+                        "localSec": round(self._gaze_away_start_timestamp, 2),
+                        "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
+                    }
+                )
                 if self._storage:
-                    self._storage.save_key_moments(self._run_id, self.get_events())
+                    self._storage.save_key_moments(
+                        self._run_id, self.get_events()
+                    )
                 # 推理流：通知前端告警结束
                 if self._inference_fn:
                     self._inference_fn(
-                        "gaze", {
+                        "gaze",
+                        {
                             "localSec": round(timestamp, 2),
                             "tag": "GAZE_VIOLATION_END",
                             "data": {
                                 "state": "无人注视盘台",
                                 "duration": round(duration, 2),
                             },
-                        }
+                        },
                     )
                 # 事件流：完整字段供规则状态机使用
                 if self._event_bus:
                     from core.event_bus import EventTopic
+
                     self._event_bus.publish(
                         EventTopic.GAZE_ALERT,
                         {
@@ -380,7 +406,7 @@ class GazeModule:
                         },
                         timestamp=timestamp,
                     )
-            self._gaze_away_start_timestamp: Optional[float] = None
+            self._gaze_away_start_timestamp = None
             self._alerting = False
 
     def _on_flow_started(self, event: dict) -> None:
@@ -397,7 +423,9 @@ class GazeModule:
             self._info_notice_start_timestamp = timestamp
             self._info_notice_active = True
             self._notice_attention_buffer = []
-            logger.info(f"GazeModule: 收到信息通报触发，开启 10 秒关注度检测窗口 @{timestamp:.1f}s")
+            logger.info(
+                f"GazeModule: 收到信息通报触发，开启 10 秒关注度检测窗口 @{timestamp:.1f}s"
+            )
 
     def _on_flow_ended(self, event: dict) -> None:
         """流程结束事件回调：信息通报流程结束时，关闭 ATTENTION_RESULT 推送.
@@ -456,6 +484,7 @@ class GazeModule:
 
             if self._event_bus:
                 from core.event_bus import EventTopic
+
                 self._event_bus.publish(
                     EventTopic.GAZE_ATTENTION,
                     {
@@ -496,7 +525,9 @@ class GazeModule:
                 (0, 200, 255),
                 2,
             )
-        cv2.addWeighted(overlay, 0.25, annotated_frame, 0.75, 0, annotated_frame)
+        cv2.addWeighted(
+            overlay, 0.25, annotated_frame, 0.75, 0, annotated_frame
+        )
 
     def _draw_head_zones(self, annotated_frame: np.ndarray) -> None:
         """在帧上绘制头部区域多边形.
@@ -558,10 +589,12 @@ class GazeModule:
         # 视频结束时若仍处于告警状态，按当前帧计算持续时间并追加
         if self._alerting and self._gaze_away_start_timestamp is not None:
             duration = self._latest_timestamp - self._gaze_away_start_timestamp
-            events.append({
-                "localSec": round(self._gaze_away_start_timestamp, 2),
-                "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
-            })
+            events.append(
+                {
+                    "localSec": round(self._gaze_away_start_timestamp, 2),
+                    "key_moment": f"没有看盘台持续{round(duration, 1)}秒",
+                }
+            )
         return events
 
     def save_results(self, run_id: str) -> None:
@@ -582,7 +615,7 @@ class GazeModule:
                 self._gaze_future.result(timeout=5.0)
             except Exception as error:
                 logger.warning(f"等待异步凝视检测完成时异常: {error}")
-            self._gaze_future: Optional[Future[Any]] = None
+            self._gaze_future = None
 
     def shutdown(self) -> None:
         """刷新后台任务并关闭凝视线程池."""

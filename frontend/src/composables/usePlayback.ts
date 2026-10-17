@@ -1,9 +1,3 @@
-/**
- * 播放编排核心: 组合 media 内核(WsClient/MediaBuffer/RateController/RetentionCenter/Scheduler).
- *
- * 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入).
- * 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports).
- */
 // 播放编排核心: 组合 media 内核(WsClient/MediaBuffer/RateController/RetentionCenter/Scheduler)
 // 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入)
 // 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports)
@@ -21,10 +15,12 @@ import { startPipeline as apiStart, stopPipeline as apiStop } from '../api/pipel
 const log = createLogger('playback')
 
 /**
- * 创建播放编排: 建立 MSE / WS / 调度器, 对外暴露播放状态与控制方法.
- *
- * @param currentPlaybackSec - 主时钟 ref(源视频秒), 与业务 store 共享.
- * @returns 播放状态与控制方法, 以及业务回调注册口(onBatch/onReport).
+ * 播放编排核心: 组合 media 内核(WsClient/MediaBuffer/RateController/RetentionCenter/Scheduler).
+ * 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入).
+ * 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports).
+ * @param currentPlaybackSec 主时钟写入引用(由视频伺服层回报, 供业务层同步取数)
+ * @returns 播放状态/进度/媒体 URL 等响应式状态, `startPipeline`/`stopPipeline`/`resetState`
+ *   等控制方法, 以及业务层延迟注册口 `onBatch`/`onReport`
  */
 export function usePlayback(currentPlaybackSec: Ref<number>) {
   // ── 播放状态(对外 reactive) ──

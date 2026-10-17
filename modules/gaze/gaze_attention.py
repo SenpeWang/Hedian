@@ -3,10 +3,10 @@
 在给定时间窗口内基于注视点累计位移判断视线是否发生转动：累计位移达到
 阈值视为视线转动，即认为给予了关注；未达到则视为未给予关注。
 """
+
 import math
 from dataclasses import dataclass
 from typing import List
-
 
 # ---------------------------------------------------------------------------
 # Data structures

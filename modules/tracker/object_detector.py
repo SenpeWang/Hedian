@@ -2,6 +2,7 @@
 
 基于 YOLO 系列模型提供目标检测（Person）与骨架关键点估计（Pose Estimation）能力。
 """
+
 import logging
 import os
 from typing import Any, Dict, List, Optional, Tuple
@@ -52,10 +53,12 @@ class ObjectDetector:
         self.model = YOLO(model_path)
         logger.info(f"加载目标检测模型: {os.path.basename(model_path)}")
 
-        self.pose_model: Optional[Any] = None
+        self.pose_model = None
         if pose_model_path and os.path.exists(pose_model_path):
             self.pose_model = YOLO(pose_model_path)
-            logger.info(f"加载姿态估计模型: {os.path.basename(pose_model_path)}")
+            logger.info(
+                f"加载姿态估计模型: {os.path.basename(pose_model_path)}"
+            )
 
     def detect_two_thresholds(
         self, frame: np.ndarray
@@ -94,7 +97,12 @@ class ObjectDetector:
 
                 if class_id == 0:  # person
                     detection_item = {
-                        "box": [float(x_min), float(y_min), float(x_max), float(y_max)],
+                        "box": [
+                            float(x_min),
+                            float(y_min),
+                            float(x_max),
+                            float(y_max),
+                        ],
                         "confidence": confidence,
                         "class": "person",
                         "class_id": class_id,
@@ -148,10 +156,12 @@ class ObjectDetector:
                 center_x = (float(box_coords[0]) + float(box_coords[2])) / 2.0
                 center_y = (float(box_coords[1]) + float(box_coords[3])) / 2.0
 
-                poses.append({
-                    "center": np.array([center_x, center_y]),
-                    "keypoints": keypoints_array,
-                    "box": [float(coord) for coord in box_coords],
-                })
+                poses.append(
+                    {
+                        "center": np.array([center_x, center_y]),
+                        "keypoints": keypoints_array,
+                        "box": [float(coord) for coord in box_coords],
+                    }
+                )
 
         return poses

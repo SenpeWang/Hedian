@@ -1,7 +1,6 @@
-/**
- * 播放内核类型与常量(收口所有可调参数; 语义与重构前一致).
- */
 // 播放内核类型与常量(收口所有可调参数; 语义与重构前一致)
+
+/** 播放内核可调参数收口(秒/毫秒/速率上下限, 全部只读) */
 export const PLAYBACK = {
   TRIM_HEAD_KEEP_SEC: 8, // 视频头窗: 已播回看余量
   TRIM_TAIL_KEEP_SEC: 180, // forceTrimTail 兜底窗(仅 QuotaExceeded 时调用)
@@ -16,19 +15,16 @@ export const PLAYBACK = {
   RATE_MAX: 1.0
 } as const
 
-/** 视频视角标识: front=正面主视角, pop=从动视角 */
+/** 视角标识: front(正面, 主时钟) / pop(操作盘, 从动) */
 export type ViewId = 'front' | 'pop'
 
-/** 管线状态机状态: idle 空闲 / starting 启动中 / running 推理中 / done 完成 / stopped 已停止 */
+/** 管线状态机状态 */
 export type PipelineStatus = 'idle' | 'starting' | 'running' | 'done' | 'stopped'
 
 /**
  * 管线状态机合法转换表(非法转换 dev 告警, 防状态悄悄漂移).
- *
- * idle→running/done: 页面刷新时后端仍在跑/已完成, 从 status 快照恢复的场景.
+ * idle→running/done: 页面刷新时后端仍在跑/已完成, 从 status 快照恢复的场景
  */
-// 管线状态机合法转换表(非法转换 dev 告警, 防状态悄悄漂移)
-// idle→running/done: 页面刷新时后端仍在跑/已完成, 从 status 快照恢复的场景
 export const STATUS_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
   idle: ['starting', 'stopped', 'running', 'done'],
   starting: ['running', 'idle', 'stopped'],
@@ -37,10 +33,9 @@ export const STATUS_TRANSITIONS: Record<PipelineStatus, PipelineStatus[]> = {
   stopped: ['starting', 'idle']
 }
 
-// WS 二进制帧协议: [1字节 channel][1字节 type] + payload
-/** WS 二进制帧的 channel 字节取值: 视角 → 数值 */
+/** WS 二进制帧协议: [1字节 channel][1字节 type] + payload */
 export const VIS_CHANNEL = { front: 0, pop: 1 } as const
-/** WS 二进制帧的 type 字节取值: 段类型 → 数值 */
+/** WS 二进制帧段类型码 */
 export const VIS_TYPE = { init: 0, media: 1, end: 2 } as const
-/** 视频流段类型: init=解码配置 / media=媒体段 / end=供给终止 */
+/** 可视化段类型(init=配置头 / media=fMP4 段 / end=供给终止) */
 export type VisSegType = 'init' | 'media' | 'end'

@@ -2,6 +2,7 @@
 
 使用 YOLOv8 ONNX 模型检测头部。
 """
+
 import logging
 import os
 from typing import List, Optional
@@ -23,7 +24,9 @@ class HeadBox:
         y2: 右下角 y 坐标。
     """
 
-    def __init__(self, score: float, x1: int, y1: int, x2: int, y2: int) -> None:
+    def __init__(
+        self, score: float, x1: int, y1: int, x2: int, y2: int
+    ) -> None:
         """初始化头部边界框.
 
         Args:
@@ -87,6 +90,7 @@ class HeadDetector:
             raise FileNotFoundError(f"YOLOv8 模型不存在: {model_path}")
 
         import onnxruntime
+
         # 官方 API: 从 pip nvidia 包预加载 CUDA/cuDNN 库，供下方 CUDA EP 使用
         onnxruntime.preload_dlls()
         if providers is None:
@@ -103,7 +107,8 @@ class HeadDetector:
         # 硬性要求: 仅允许 GPU 推理; CUDA EP 未生效说明已静默回退 CPU, 立即失败
         if "CUDAExecutionProvider" not in self._session.get_providers():
             raise RuntimeError(
-                f"YOLOv8 头部检测模型 CUDAExecutionProvider 未生效(实际: {self._session.get_providers()}), "
+                f"YOLOv8 头部检测模型 CUDAExecutionProvider 未生效 "
+                f"(实际: {self._session.get_providers()}), "
                 "按约定禁止 CPU 回退, 拒绝启动"
             )
         self._input_name = self._session.get_inputs()[0].name
@@ -131,21 +136,29 @@ class HeadDetector:
         scale = min(self._input_size / image_h, self._input_size / image_w)
         new_width = int(image_w * scale)
         new_height = int(image_h * scale)
-        resized = cv2.resize(image, (new_width, new_height),
-                             interpolation=cv2.INTER_LINEAR)
-        padded = np.full((self._input_size, self._input_size, 3), 114, dtype=np.uint8)
+        resized = cv2.resize(
+            image, (new_width, new_height), interpolation=cv2.INTER_LINEAR
+        )
+        padded = np.full(
+            (self._input_size, self._input_size, 3), 114, dtype=np.uint8
+        )
         pad_x = (self._input_size - new_width) // 2
         pad_y = (self._input_size - new_height) // 2
-        padded[pad_y:pad_y + new_height, pad_x:pad_x + new_width] = resized
+        y_end = pad_y + new_height
+        x_end = pad_x + new_width
+        padded[pad_y:y_end, pad_x:x_end] = resized
 
         # BGR 转 RGB、归一化并转 CHW
         input_tensor = padded[:, :, ::-1].astype(np.float32) / 255.0
         input_tensor = input_tensor.transpose(2, 0, 1)
         input_tensor = np.expand_dims(input_tensor, axis=0)
 
-        outputs = self._session.run(self._output_names, {self._input_name: input_tensor})
+        outputs = self._session.run(
+            self._output_names, {self._input_name: input_tensor}
+        )
 
-        # 输出 [1, 5, 8400] 转置为 [8400, 5] = [center_x, center_y, width, height, score]
+        # 输出 [1, 5, 8400] 转置为 [8400, 5]
+        # = [center_x, center_y, width, height, score]
         predictions = outputs[0][0].T
 
         scores = predictions[:, 4]
@@ -194,9 +207,15 @@ class HeadDetector:
             box_width = box_x2 - box_x1
             box_height = box_y2 - box_y1
 
-            if box_width < self._head_min_size or box_height < self._head_min_size:
+            if (
+                box_width < self._head_min_size
+                or box_height < self._head_min_size
+            ):
                 continue
-            if box_width > self._head_max_size or box_height > self._head_max_size:
+            if (
+                box_width > self._head_max_size
+                or box_height > self._head_max_size
+            ):
                 continue
 
             heads.append(

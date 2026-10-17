@@ -2,6 +2,7 @@
 
 所有路径由本模块基于 base_dir 计算, 避免在业务代码中硬编码.
 """
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
@@ -26,7 +27,9 @@ class PathConfig:
     result_root: Path
 
     @classmethod
-    def from_config(cls, config: dict, base_dir: Optional[str] = None) -> "PathConfig":
+    def from_config(
+        cls, config: dict, base_dir: Optional[str] = None
+    ) -> "PathConfig":
         """根据配置构造路径配置.
 
         Args:
@@ -88,7 +91,9 @@ class PathConfig:
         path.mkdir(parents=True, exist_ok=True)
         return path / filename
 
-    def get_result_dir(self, run_id: str, module: Optional[str] = None) -> Path:
+    def get_result_dir(
+        self, run_id: str, module: Optional[str] = None
+    ) -> Path:
         """获取结果目录, 并创建目录.
 
         Args:
@@ -96,7 +101,8 @@ class PathConfig:
             module: 产出模块名; None 时返回 run_id 级目录.
 
         Returns:
-            Path: module 给定时为 result_root / run_id / module, 否则为 result_root / run_id.
+            Path: module 给定时为 result_root / run_id / module,
+            否则为 result_root / run_id.
         """
         if module:
             path = self.result_root / run_id / module

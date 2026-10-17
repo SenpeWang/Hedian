@@ -1,8 +1,3 @@
-/**
- * 运行时指标结构: 累计计数器 + 最新值快照.
- *
- * 每次快照刷新到 window.__playbackMetrics(devtools 排查, 不外发).
- */
 // 运行时指标: 计数器 + 最新值快照, 每次快照刷新到 window.__playbackMetrics(devtools 排查, 不外发)
 export interface PlaybackMetrics {
   // 累计计数器
@@ -27,9 +22,7 @@ declare global {
   }
 }
 
-/**
- * 指标存储: 计数器累加 + 快照写入 window, 供 devtools 在线排查.
- */
+/** 运行时指标存储: 计数器累加 + 最新值快照(flush 到 window 供 devtools 排查) */
 class MetricsStore {
   private data: PlaybackMetrics = {
     appendFail: 0,
@@ -47,10 +40,9 @@ class MetricsStore {
   }
 
   /**
-   * 累加数值型计数器.
-   *
-   * @param key - 计数器字段名.
-   * @param n - 增量, 默认 1.
+   * 计数器累加.
+   * @param key 计数类指标键
+   * @param n 增量, 默认 1
    */
   incr<K extends keyof PlaybackMetrics>(key: K, n = 1): void {
     const v = this.data[key]
@@ -58,10 +50,9 @@ class MetricsStore {
   }
 
   /**
-   * 覆写快照字段(水位/速率/时钟等瞬时值).
-   *
-   * @param key - 字段名.
-   * @param value - 新值.
+   * 写最新值快照.
+   * @param key 指标键
+   * @param value 该键的当前值
    */
   set<K extends keyof PlaybackMetrics>(key: K, value: PlaybackMetrics[K]): void {
     this.data[key] = value
@@ -80,9 +71,6 @@ class MetricsStore {
     }
   }
 
-  /**
-   * 全量清零(重新推理时调用), 并立即刷新一次快照.
-   */
   reset(): void {
     this.data.appendFail = 0
     this.data.quotaErrors = 0
@@ -100,5 +88,5 @@ class MetricsStore {
   }
 }
 
-/** 全局指标单例(各模块共享同一份计数器与快照) */
+/** 模块级指标单例(全内核共享) */
 export const metrics = new MetricsStore()

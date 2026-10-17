@@ -3,6 +3,7 @@
 本模块以面向对象方式统管行为类事件（举手、手指屏幕、手指文件等），
 所有事件通过统一入口追加落盘到 behavior_key_moments.json。
 """
+
 import fcntl
 import json
 import logging
@@ -20,7 +21,7 @@ VALID_IDENTITIES: Set[str] = {"LEADER", "ROAD1", "ROAD2"}
 
 
 class BehaviorStorage(BaseStorage):
-    """行为事件存储：以面向对象方式统一落盘所有行为关键事件。
+    """行为事件存储：以面向对象方式统一落盘所有行为关键事件.
 
     举手与手指类事件均通过统一方法（add_event / report_hand_raise）
     原子追加到 behavior_key_moments.json，避免多进程写入互相覆盖。
@@ -76,11 +77,15 @@ class BehaviorStorage(BaseStorage):
             events_list.append(event)
             events_list.sort(key=lambda event: event.get("localSec", 0))
             save_ok = self._save_json_atomic(
-                BEHAVIOR_KEY_MOMENTS_FILENAME, run_id, events_list,
+                BEHAVIOR_KEY_MOMENTS_FILENAME,
+                run_id,
+                events_list,
                 output_path=file_path,
             )
             if not save_ok:
-                logger.warning(f"行为事件落盘失败(将依赖收尾合并补写): {event}")
+                logger.warning(
+                    f"行为事件落盘失败(将依赖收尾合并补写): {event}"
+                )
 
     def merge_events(self, run_id: str, events: List[Dict[str, Any]]) -> None:
         """收尾兜底合并: 仅补写文件中缺失的事件(按完整事件键去重).
@@ -107,11 +112,15 @@ class BehaviorStorage(BaseStorage):
             if added:
                 merged.sort(key=lambda event: event.get("localSec", 0))
                 save_ok = self._save_json_atomic(
-                    BEHAVIOR_KEY_MOMENTS_FILENAME, run_id, merged,
+                    BEHAVIOR_KEY_MOMENTS_FILENAME,
+                    run_id,
+                    merged,
                     output_path=file_path,
                 )
                 if not save_ok:
-                    logger.warning(f"收尾合并落盘失败: 补写 {added} 条事件丢失")
+                    logger.warning(
+                        f"收尾合并落盘失败: 补写 {added} 条事件丢失"
+                    )
                     return
                 logger.info(f"收尾合并补写 {added} 条缺失事件")
 
@@ -125,8 +134,12 @@ class BehaviorStorage(BaseStorage):
         Returns:
             事件唯一键.
         """
-        return (event.get("localSec"), event.get("key_moment"),
-                event.get("source"), event.get("track_id"))
+        return (
+            event.get("localSec"),
+            event.get("key_moment"),
+            event.get("source"),
+            event.get("track_id"),
+        )
 
     def _locked(self, file_path: str) -> "_FileLock":
         """获取跨进程文件锁上下文.
@@ -169,11 +182,14 @@ class BehaviorStorage(BaseStorage):
         valid_identity = identity if identity in VALID_IDENTITIES else None
         key_moment = f"{valid_identity}举手" if valid_identity else "举手"
 
-        self.add_event(run_id, {
-            "localSec": local_sec,
-            "key_moment": key_moment,
-            "source": "behavior",
-        })
+        self.add_event(
+            run_id,
+            {
+                "localSec": local_sec,
+                "key_moment": key_moment,
+                "source": "behavior",
+            },
+        )
 
         display_data = {
             "state": "举手",
@@ -183,17 +199,23 @@ class BehaviorStorage(BaseStorage):
             display_data["track_id"] = track_id
 
         if inference_fn is not None:
-            inference_fn("behavior", {
-                "localSec": local_sec,
-                "tag": "HAND_RAISED",
-                "data": display_data,
-            })
+            inference_fn(
+                "behavior",
+                {
+                    "localSec": local_sec,
+                    "tag": "HAND_RAISED",
+                    "data": display_data,
+                },
+            )
         elif hasattr(event_bus, "push_display"):
-            event_bus.push_display("behavior", {
-                "localSec": local_sec,
-                "tag": "HAND_RAISED",
-                "data": display_data,
-            })
+            event_bus.push_display(
+                "behavior",
+                {
+                    "localSec": local_sec,
+                    "tag": "HAND_RAISED",
+                    "data": display_data,
+                },
+            )
 
         event_payload = {
             "localSec": local_sec,
@@ -208,9 +230,11 @@ class BehaviorStorage(BaseStorage):
             timestamp=timestamp,
         )
 
+        track_suffix = (
+            f" (track_id={track_id})" if track_id is not None else ""
+        )
         logger.info(
-            f"举手上报: {key_moment}"
-            f" {'(track_id=' + str(track_id) + ')' if track_id is not None else ''}"
+            f"举手上报: {key_moment}{track_suffix}"
             f" @{local_sec}s [source=behavior]"
         )
 
@@ -238,7 +262,7 @@ class _FileLock:
             fcntl.flock(self._handle, fcntl.LOCK_EX)
         except BaseException:
             self._handle.close()
-            self._handle: Optional[TextIO] = None
+            self._handle = None
             raise
         return self
 
@@ -258,4 +282,4 @@ class _FileLock:
             except OSError as close_error:
                 logger.warning(f"关闭锁文件失败: {close_error}")
             finally:
-                self._handle: Optional[TextIO] = None
+                self._handle = None

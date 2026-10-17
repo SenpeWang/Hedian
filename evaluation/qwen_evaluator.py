@@ -3,6 +3,7 @@
 在独立子进程中加载 Qwen3 模型按流程类型构建 prompt 并生成评估报告，
 子进程退出即释放显存，评估结果与 prompt 一并落盘供前端展示。
 """
+
 import logging
 import multiprocessing as mp
 import os
@@ -52,16 +53,23 @@ def _qwen_worker(
 
     try:
         import torch
+
         torch.set_num_threads(1)
         import threading
-        from transformers import AutoTokenizer, AutoModelForCausalLM, TextIteratorStreamer
+        from transformers import (
+            AutoTokenizer,
+            AutoModelForCausalLM,
+            TextIteratorStreamer,
+        )
 
         logging.getLogger("evaluation.qwen").info(
             f"子进程加载 Qwen3 模型: {model_path} (GPU {selected_gpu}, bfloat16)"
         )
 
         tokenizer = AutoTokenizer.from_pretrained(
-            model_path, trust_remote_code=True, local_files_only=True,
+            model_path,
+            trust_remote_code=True,
+            local_files_only=True,
         )
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -89,7 +97,9 @@ def _qwen_worker(
         ).to(model.device)
 
         streamer = TextIteratorStreamer(
-            tokenizer, skip_prompt=True, skip_special_tokens=False,
+            tokenizer,
+            skip_prompt=True,
+            skip_special_tokens=False,
         )
 
         generation_kwargs = {
@@ -101,7 +111,9 @@ def _qwen_worker(
             "streamer": streamer,
         }
 
-        thread = threading.Thread(target=model.generate, kwargs=generation_kwargs)
+        thread = threading.Thread(
+            target=model.generate, kwargs=generation_kwargs
+        )
         thread.start()
 
         for text in streamer:
@@ -112,13 +124,16 @@ def _qwen_worker(
 
     except Exception as error:
         import traceback
+
         message_queue.put(("error", f"{error}\n{traceback.format_exc()}"))
 
 
 class QwenEvaluator:
     """Qwen 大模型评估器（子进程模式，走 config 分配的 GPU，评估完自动释放显存）."""
 
-    def __init__(self, model_path: Optional[str] = None, eval_gpu: str = "1") -> None:
+    def __init__(
+        self, model_path: Optional[str] = None, eval_gpu: str = "1"
+    ) -> None:
         """初始化 Qwen 评估器.
 
         Args:
@@ -151,7 +166,8 @@ class QwenEvaluator:
 
             logger.info(
                 f"开始 Qwen 评估（子进程，动态空闲 GPU），"
-                f"flow_id={flow_data.get('flow_id')} total_flows={total_flows}..."
+                f"flow_id={flow_data.get('flow_id')} "
+                f"total_flows={total_flows}..."
             )
 
             ctx = mp.get_context("spawn")
@@ -175,7 +191,9 @@ class QwenEvaluator:
                             stream_callback(payload)
                         except Exception as error:
                             # 回调失败（如前端断开）不影响评估流程，仅记录
-                            logger.warning(f"流式回调推送失败（不影响评估）: {error}")
+                            logger.warning(
+                                f"流式回调推送失败（不影响评估）: {error}"
+                            )
                 elif msg_type == "done":
                     break
                 elif msg_type == "error":
@@ -228,7 +246,9 @@ class QwenEvaluator:
                     # ValueError: 进程仍运行；OSError: 管道/句柄问题，均为清理兜底，可忽略
                     pass
 
-    def _build_prompt(self, flow_data: Dict[str, Any], total_flows: int = 0) -> str:
+    def _build_prompt(
+        self, flow_data: Dict[str, Any], total_flows: int = 0
+    ) -> str:
         """按流程类型构建评估 prompt.
 
         Args:
@@ -279,18 +299,28 @@ class QwenEvaluator:
         behavior_events = flow_data.get("behavior_events", [])
 
         parts = []
-        parts.append("你是核电站主控室信息通报规程合规检测评审专家。请根据以下流程数据，按五个评估维度进行评分。")
+        parts.append(
+            "你是核电站主控室信息通报规程合规检测评审专家。请根据以下流程数据，按五个评估维度进行评分。"
+        )
         parts.append("")
         parts.append("## 信息通报规程规则")
-        parts.append("1. 流程启动：发起人举手 + 喊出\"信息通报\"或\"信息通告\"（红线规则：单独举手不启动流程）")
+        parts.append(
+            '1. 流程启动：发起人举手 + 喊出"信息通报"或"信息通告"（红线规则：单独举手不启动流程）'
+        )
         parts.append("2. 团队接受：主控室其他成员听到后立刻停下手中工作")
-        parts.append("3. 团队关注：发起人确认团队成员均予以关注，方可进行信息传递")
-        parts.append("4. 信息结束：发起人喊出\"通报完毕\"或\"通告完毕\"（即时闭环，不等待\"收到\"回复）")
-        parts.append("5. 值长回应：值长（US）回答\"收到\"（作为评估依据，不阻塞流程关闭）")
+        parts.append(
+            "3. 团队关注：发起人确认团队成员均予以关注，方可进行信息传递"
+        )
+        parts.append(
+            '4. 信息结束：发起人喊出"通报完毕"或"通告完毕"（即时闭环，不等待"收到"回复）'
+        )
+        parts.append(
+            '5. 值长回应：值长（US）回答"收到"（作为评估依据，不阻塞流程关闭）'
+        )
         parts.append("")
         parts.append("## 流程信息")
         parts.append("- 流程类型: 信息通报")
-        if flow_data.get('_flow_id_desc'):
+        if flow_data.get("_flow_id_desc"):
             parts.append(f"- {flow_data.get('_flow_id_desc')}")
         parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
         parts.append(f"- 结束时间: {flow_data.get('flow_end_sec', 0)}s")
@@ -300,30 +330,49 @@ class QwenEvaluator:
         parts.append("")
         parts.append("## 语音事件（按时间排序）")
         for event in voice_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
         if not voice_events:
             parts.append("- 无")
         parts.append("")
         parts.append("## 注视事件（团队关注度判定）")
         for event in gaze_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
         if not gaze_events:
             parts.append("- 无")
         parts.append("")
         parts.append("## 行为事件（举手等）")
         for event in behavior_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
         if not behavior_events:
             parts.append("- 无")
         parts.append("")
         parts.append("## 评估维度（每项2分，满分10分）")
         parts.append("| 维度 | 评估要点 | 评分标准 |")
         parts.append("|------|---------|---------|")
-        parts.append("| 1. 流程启动 | 发起人是否举手 + 喊出\"信息通报\" | 2分=举手+语音；1分=仅语音；0分=无启动信号 |")
-        parts.append("| 2. 团队关注 | 团队成员是否予以关注 | 2分=有视线转动；1分=部分关注；0分=无关注 |")
-        parts.append("| 3. 信息结束 | 是否喊出\"通报完毕\" | 2分=有\"通报完毕\"；0分=无 |")
-        parts.append("| 4. 值长回应 | 值长是否回答\"收到\" | 2分=有\"收到\"；0分=无 |")
-        parts.append("| 5. 整体规范 | 流程完整度与时间合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |")
+        parts.append(
+            '| 1. 流程启动 | 发起人是否举手 + 喊出"信息通报" | 2分=举手+语音；1分=仅语音；0分=无启动信号 |'
+        )
+        parts.append(
+            "| 2. 团队关注 | 团队成员是否予以关注 | 2分=有视线转动；1分=部分关注；0分=无关注 |"
+        )
+        parts.append(
+            '| 3. 信息结束 | 是否喊出"通报完毕" | 2分=有"通报完毕"；0分=无 |'
+        )
+        parts.append(
+            '| 4. 值长回应 | 值长是否回答"收到" | 2分=有"收到"；0分=无 |'
+        )
+        parts.append(
+            "| 5. 整体规范 | 流程完整度与时间合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |"
+        )
         parts.append("")
         parts.append("## 输出格式")
         parts.append("请按以下格式输出评估报告：")
@@ -362,10 +411,12 @@ class QwenEvaluator:
         behavior_events = flow_data.get("behavior_events", [])
 
         # ============ 第一部分：完整的评估规程 prompt ============
-        prompt = f"""你是核电站主控室监护制规程合规检测评审专家。请根据附带的关键事件（keymoment），评估该流程与监护制规程要求的合规性。
+        prompt = f"""你是核电站主控室监护制规程合规检测评审专家。
+请根据附带的关键事件（keymoment），评估该流程与监护制规程要求的合规性。
 
 ## 监护制规程要求（动作与语音步骤顺序）
-1. 流程启动：操作人喊出"请求监护"，且发起前后5秒内有举手动作（双向5秒窗口：举手落在"请求监护"语音±5秒内即为合格；红线规则：单独举手不启动流程，必须语音 + 举手）
+1. 流程启动：操作人喊出"请求监护"，且发起前后5秒内有举手动作（双向5秒窗口：举手落在"请求监护"语音±5秒内即为合格；
+红线规则：单独举手不启动流程，必须语音 + 举手）
 2. 监护人到位：监护人移动至操作人身旁（跟踪事件"监护员已到位监护X回路"）
 3. 手指指向文件：若有纸质程序计划，操作人左手指向程序待执行指令（有程序分支的关键判断特征）
 4. 手指指向屏幕与复述：操作人/监护人手指指向操作控件，操作人读出9字码，监护人核对并复述9字码
@@ -376,10 +427,10 @@ class QwenEvaluator:
 ## 评估维度（共6项评估要点，满分10分）
 | 维度 | 评估要点 | 评分标准 |
 |------|---------|---------|
-| 1. 流程启动 | "请求监护"语音发起前后5秒内是否有举手(双向5秒) | 2分=语音+5秒内举手(合格)；1分=仅语音(无举手或举手超5秒)；0分=无启动信号 |
+| 1. 流程启动 | "请求监护"语音前后5秒内是否有举手(双向5秒) | 2分=语音+5秒内举手；1分=仅语音；0分=无启动信号 |
 | 2. 监护人到位 | 跟踪事件是否记录到位 | 2分=有到位记录；0分=无 |
 | 3. 指令复述与设备码 | 操作人读9字码 + 监护人复述9字码 | 2分=双方都复述；1分=单方复述；0分=无复述 |
-| 4. 动作规范(指向屏幕/文件) | 是否有手指指向屏幕(操作控件)或指向文件(程序指令)动作 | 2分=双动作/指向规范；1分=有单项指向；0分=无指向动作 |
+| 4. 动作规范(指向屏幕/文件) | 是否有指屏幕(控件)或指文件(指令)动作 | 2分=双动作/指向规范；1分=单项指向；0分=无指向 |
 | 5. 执行与核对 | 是否有含"执行"命令及"核对"确认 | 2分=执行与核对齐全；1分=有单项；0分=均无 |
 
 ## 顺序一致性检查
@@ -423,19 +474,22 @@ class QwenEvaluator:
 
         prompt += "### 语音事件（按时间顺序）\n"
         for event in voice_events:
-            prompt += f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}\n"
+            prompt += f"- [{event.get('localSec', 0)}s] "
+            f"{event.get('key_moment', '')}\n"
         if not voice_events:
             prompt += "- 无\n"
 
         prompt += "\n### 跟踪事件（监护到位/离开等）\n"
         for event in tracker_events:
-            prompt += f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}\n"
+            prompt += f"- [{event.get('localSec', 0)}s] "
+            f"{event.get('key_moment', '')}\n"
         if not tracker_events:
             prompt += "- 无\n"
 
         prompt += "\n### 行为事件（举手等）\n"
         for event in behavior_events:
-            prompt += f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}\n"
+            prompt += f"- [{event.get('localSec', 0)}s] "
+            f"{event.get('key_moment', '')}\n"
         if not behavior_events:
             prompt += "- 无\n"
 
@@ -455,20 +509,26 @@ class QwenEvaluator:
         behavior_events = flow_data.get("behavior_events", [])
 
         parts = []
-        parts.append("你是核电站主控室自唱票规程合规检测评审专家。请根据以下流程数据，按五个评估维度进行评分。")
+        parts.append(
+            "你是核电站主控室自唱票规程合规检测评审专家。请根据以下流程数据，按五个评估维度进行评分。"
+        )
         parts.append("")
         parts.append("## 自唱票规程规则")
         parts.append("1. 流程启动：操作人右手点开操作控件")
         parts.append("2. 九字码读出：操作人读出控件9字码")
         parts.append("3. 九字码确认：")
-        parts.append("   - 有程序计划：操作人左手指向程序指令（关键特征），核对9字码与程序一致")
-        parts.append("   - 无程序计划：操作人确认读出的9字码与想要操作的设备一致")
+        parts.append(
+            "   - 有程序计划：操作人左手指向程序指令（关键特征），核对9字码与程序一致"
+        )
+        parts.append(
+            "   - 无程序计划：操作人确认读出的9字码与想要操作的设备一致"
+        )
         parts.append("4. 设备操作：操作人执行设备操作")
         parts.append("5. 流程结束：操作完成")
         parts.append("")
         parts.append("## 流程信息")
         parts.append("- 流程类型: 自唱票")
-        if flow_data.get('_flow_id_desc'):
+        if flow_data.get("_flow_id_desc"):
             parts.append(f"- {flow_data.get('_flow_id_desc')}")
         parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
         parts.append(f"- 结束时间: {flow_data.get('flow_end_sec', 0)}s")
@@ -477,24 +537,40 @@ class QwenEvaluator:
         parts.append("")
         parts.append("## 语音事件（按时间排序）")
         for event in voice_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
         if not voice_events:
             parts.append("- 无")
         parts.append("")
         parts.append("## 行为事件（手指屏幕、操作手势等）")
         for event in behavior_events:
-            parts.append(f"- [{event.get('localSec', 0)}s] {event.get('key_moment', '')}")
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
         if not behavior_events:
             parts.append("- 无")
         parts.append("")
         parts.append("## 评估维度（每项2分，满分10分）")
         parts.append("| 维度 | 评估要点 | 评分标准 |")
         parts.append("|------|---------|---------|")
-        parts.append("| 1. 流程启动 | 操作人是否点开操作控件 | 2分=有点开动作；0分=无 |")
-        parts.append("| 2. 九字码读出 | 操作人是否读出9字码 | 2分=读出9字码；0分=无 |")
-        parts.append("| 3. 动作规范(指向屏幕/文件) | 是否有手指指向屏幕(控件)或指向文件(程序指令) | 2分=指向规范/双指向；1分=有单项指向；0分=无指向 |")
-        parts.append("| 4. 九字码确认与设备操作 | 操作人是否确认9字码并执行设备操作 | 2分=确认与操作完整；1分=单项完整；0分=均无 |")
-        parts.append("| 5. 整体规范 | 流程完整度与时间合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |")
+        parts.append(
+            "| 1. 流程启动 | 操作人是否点开操作控件 | 2分=有点开动作；0分=无 |"
+        )
+        parts.append(
+            "| 2. 九字码读出 | 操作人是否读出9字码 | 2分=读出9字码；0分=无 |"
+        )
+        parts.append(
+            "| 3. 动作规范(指向屏幕/文件) | 是否有指屏幕(控件)或指文件(指令) | 2分=双指向规范；1分=单项指向；0分=无 |"
+        )
+        parts.append(
+            "| 4. 九字码确认与设备操作 | 操作人是否确认9字码并执行设备操作 | 2分=确认与操作完整；1分=单项完整；0分=均无 |"
+        )
+        parts.append(
+            "| 5. 整体规范 | 流程完整度与时间合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |"
+        )
         parts.append("")
         parts.append("## 输出格式")
         parts.append("请按以下格式输出评估报告：")
@@ -531,7 +607,9 @@ class QwenEvaluator:
         import re
 
         # 清除 <think>...</think> 思考块的干扰，防止匹配到大模型在思考推理过程中演算的各项中间分值
-        clean_text = re.sub(r"<think>.*?</think>", "", report_text, flags=re.DOTALL)
+        clean_text = re.sub(
+            r"<think>.*?</think>", "", report_text, flags=re.DOTALL
+        )
 
         patterns = [
             r"总分[：:]\s*(\d+)",

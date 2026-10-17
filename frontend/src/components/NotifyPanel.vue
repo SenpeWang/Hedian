@@ -2,11 +2,6 @@
      · 状态量状态栏(监控室人数/凝视状态): getLatestAt 取最新可得值, 持续显示
      · 事件流状态栏(流程事件列表): filter 累积已发生事件, 只增不减 -->
 <script setup lang="ts">
-/**
- * NotifyPanel: 系统通知栏(人数/凝视状态量 + 流程事件流).
- *
- * 状态量持续显示最新值; 事件流按主时钟过滤后累积展示, 并自动滚底.
- */
 import { ref } from 'vue'
 import type { PeopleState, GazeState, FlowEvent } from '../types'
 import { useScrollBottom } from '../composables/useScrollBottom'
@@ -48,7 +43,6 @@ function gazeFocusColor(): string {
   return '#ff4d4d'
 }
 
-/** 离岗进度条百分比(60s 为满格上限) */
 function awayPct() {
   return Math.min(100, (props.gaze.awayDuration / 60) * 100).toFixed(0)
 }
@@ -83,7 +77,7 @@ function awayPct() {
                   width: awayPct() + '%',
                   background: gaze.awayDuration >= 60 ? '#ff4d4d' : '#ffaa00'
                 }"
-              />
+              ></div>
             </div>
             <span
               class="gaze-progress-text"
