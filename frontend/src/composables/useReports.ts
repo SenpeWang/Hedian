@@ -17,6 +17,7 @@ export function useReports() {
   const supN = ref(0)
   const ticketN = ref(0)
   const noticeN = ref(0)
+  const commN = ref(0)
   const completedFlows = new Set<string>()
 
   function handleReportEvent(msg: unknown): void {
@@ -71,6 +72,7 @@ export function useReports() {
       if (flowType === 'supervision') supN.value++
       else if (flowType === 'self_ticket') ticketN.value++
       else if (flowType === 'info_notice') noticeN.value++
+      else if (flowType === 'normal_comm') commN.value++
     }
   }
 
@@ -101,6 +103,7 @@ export function useReports() {
     supN.value = 0
     ticketN.value = 0
     noticeN.value = 0
+    commN.value = 0
     completedFlows.clear()
   }
 
@@ -109,6 +112,7 @@ export function useReports() {
     supN,
     ticketN,
     noticeN,
+    commN,
     totalScore,
     avgScore,
     toggleCard,

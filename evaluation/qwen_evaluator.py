@@ -265,6 +265,7 @@ class QwenEvaluator:
             "supervision": "监护制",
             "self_ticket": "自唱票",
             "info_notice": "信息通报",
+            "normal_comm": "普通沟通",
         }
         flow_type_label = flow_type_label_map.get(flow_type, flow_type)
 
@@ -282,6 +283,8 @@ class QwenEvaluator:
             return self._build_self_ticket_prompt(flow_data)
         elif flow_type == "info_notice":
             return self._build_info_notice_prompt(flow_data)
+        elif flow_type == "normal_comm":
+            return self._build_normal_comm_prompt(flow_data)
         else:
             return f"评估流程类型: {flow_type}"
 
@@ -384,6 +387,98 @@ class QwenEvaluator:
         parts.append("- 团队关注: X分/2分 - [依据与说明]")
         parts.append("- 信息结束: X分/2分 - [依据与说明]")
         parts.append("- 值长回应: X分/2分 - [依据与说明]")
+        parts.append("- 整体规范: X分/2分 - [依据与说明]")
+        parts.append("")
+        parts.append("#### 总分: X分/10分")
+        parts.append("")
+        parts.append("#### 综合说明")
+        parts.append("[对流程执行情况的总体评价，包括合规点与改进建议]")
+        parts.append("")
+        parts.append("请严格按以上格式输出，不要输出其他内容。")
+
+        prompt = "\n".join(parts)
+        prompt += _THINK_BLOCK_PROMPT
+        return prompt
+
+    def _build_normal_comm_prompt(self, flow_data: Dict[str, Any]) -> str:
+        """构建普通沟通评估 prompt.
+
+        Args:
+            flow_data: 提取拼接完成的流程数据字典.
+
+        Returns:
+            完整的普通沟通评估 prompt 文本.
+        """
+        voice_events = flow_data.get("voice_events", [])
+
+        parts = []
+        parts.append(
+            "你是核电站主控室普通沟通规程合规检测评审专家。请根据以下流程数据，按五个评估维度进行评分。"
+        )
+        parts.append("")
+        parts.append("## 普通沟通规程规则")
+        parts.append(
+            "1. 喊岗位名称：发起沟通前须先喊出被沟通对象的岗位名称（一回路 / 二回路 / 机组长）"
+        )
+        parts.append(
+            '2. 等待应答：喊出岗位名称后，被沟通对象须答复"请讲"，方可开始后续沟通内容'
+        )
+        parts.append(
+            '3. 沟通内容：收到"请讲"应答后，方可进行后续沟通内容'
+        )
+        parts.append(
+            '4. 回复确认：获取信息后须答复"收到"，完成闭环'
+        )
+        parts.append("5. 时长约束：单次普通沟通最长 50 秒，超时自动收尾")
+        parts.append("")
+        parts.append("## 流程信息")
+        parts.append("- 流程类型: 普通沟通")
+        if flow_data.get("_flow_id_desc"):
+            parts.append(f"- {flow_data.get('_flow_id_desc')}")
+        parts.append(f"- 开始时间: {flow_data.get('flow_start_sec', 0)}s")
+        parts.append(f"- 结束时间: {flow_data.get('flow_end_sec', 0)}s")
+        parts.append(f"- 持续时间: {flow_data.get('flow_continue_sec', 0)}s")
+        parts.append(f"- 触发来源: {flow_data.get('start_source', '未知')}")
+        parts.append(f"- 结束来源: {flow_data.get('end_source', '未知')}")
+        parts.append("")
+        parts.append("## 语音事件（按时间排序）")
+        for event in voice_events:
+            parts.append(
+                f"- [{event.get('localSec', 0)}s] "
+                f"{event.get('key_moment', '')}"
+            )
+        if not voice_events:
+            parts.append("- 无")
+        parts.append("")
+        parts.append("## 评估维度（每项2分，满分10分）")
+        parts.append("| 维度 | 评估要点 | 评分标准 |")
+        parts.append("|------|---------|---------|")
+        parts.append(
+            "| 1. 喊岗位名称 | 沟通前是否喊出岗位名称 | 2分=有岗位名称；0分=无 |"
+        )
+        parts.append(
+            '| 2. 请讲应答 | 是否得到"请讲"应答 | 2分=有应答；0分=无 |'
+        )
+        parts.append(
+            '| 3. 沟通内容 | 应答后是否进行后续沟通 | 2分=有实质内容；1分=内容简短；0分=无 |'
+        )
+        parts.append(
+            '| 4. 收到确认 | 获取信息后是否答复"收到" | 2分=有"收到"；0分=无 |'
+        )
+        parts.append(
+            "| 5. 整体规范 | 流程完整度与时长合理性 | 2分=完整规范；1分=基本规范；0分=不规范 |"
+        )
+        parts.append("")
+        parts.append("## 输出格式")
+        parts.append("请按以下格式输出评估报告：")
+        parts.append("")
+        parts.append("### 普通沟通评估报告")
+        parts.append("")
+        parts.append("#### 维度评分")
+        parts.append("- 喊岗位名称: X分/2分 - [依据与说明]")
+        parts.append("- 请讲应答: X分/2分 - [依据与说明]")
+        parts.append("- 沟通内容: X分/2分 - [依据与说明]")
+        parts.append("- 收到确认: X分/2分 - [依据与说明]")
         parts.append("- 整体规范: X分/2分 - [依据与说明]")
         parts.append("")
         parts.append("#### 总分: X分/10分")
