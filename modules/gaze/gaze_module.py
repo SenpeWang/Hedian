@@ -189,7 +189,14 @@ class GazeModule:
         frame_height: int,
         timestamp: float,
     ) -> None:
-        """尝试提交异步凝视检测任务。若上一任务未完成则跳过本轮."""
+        """尝试提交异步凝视检测任务。若上一任务未完成则跳过本轮.
+
+        Args:
+            frame: 当前 BGR 帧.
+            frame_width: 帧宽(像素).
+            frame_height: 帧高(像素).
+            timestamp: 帧对应的视频时间戳(秒).
+        """
         if self._gaze_future is not None and not self._gaze_future.done():
             return
 
@@ -217,7 +224,14 @@ class GazeModule:
         frame_height: int,
         timestamp: float,
     ) -> None:
-        """_run_gaze_detection 的线程安全包装：加锁保护缓存写入."""
+        """_run_gaze_detection 的线程安全包装：加锁保护缓存写入.
+
+        Args:
+            frame: 待检测的 BGR 帧(已由调用方拷贝).
+            frame_width: 帧宽(像素).
+            frame_height: 帧高(像素).
+            timestamp: 帧对应的视频时间戳(秒).
+        """
         try:
             self._run_gaze_detection(
                 frame, frame_width, frame_height, timestamp
