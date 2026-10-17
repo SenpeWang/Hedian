@@ -138,24 +138,40 @@ class ConfigManager:
 
     @property
     def gpu(self) -> str:
-        """返回默认 GPU 编号(gpu_default 优先, 缺省时退回 gpu)."""
+        """返回默认 GPU 编号(gpu_default 优先, 缺省时退回 gpu).
+
+        Returns:
+            默认 GPU 编号字符串, 如 "0".
+        """
         return self._config["app"].get("gpu_default") or self._config[
             "app"
         ].get("gpu", "0")
 
     @property
     def gpu_map(self) -> dict:
-        """获取视角级 GPU 映射 {module_name: gpu_str}."""
+        """获取视角级 GPU 映射 {module_name: gpu_str}.
+
+        Returns:
+            模块名到 GPU 编号的映射; 未配置时为空字典.
+        """
         return self._config["app"].get("gpu_map", {})
 
     @property
     def fps(self) -> float:
-        """返回推理帧率."""
+        """返回推理帧率.
+
+        Returns:
+            推理帧率(帧/秒).
+        """
         return self._config["app"]["fps"]
 
     @property
     def video_path(self) -> str:
-        """返回默认视频路径."""
+        """返回默认视频路径.
+
+        Returns:
+            默认 front 视角视频路径.
+        """
         return self._config["videos"]["front"]
 
     def to_dict(self) -> dict:
