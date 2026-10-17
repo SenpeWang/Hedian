@@ -1,0 +1,57 @@
+# 提交信息校验: 与 README「贡献指南 > 提交规范」一致。
+#
+# 触发时机:
+#   - Pull Request 指向 main: 校验该 PR 的全部提交
+#   - 推送到 main:            校验本次推送区间内的提交
+#
+# 注意: GitHub.com 没有服务端 git hook, 无法拒绝 push; 本检查的作用是在
+# Pull Request 上给出状态, 再由分支保护的「Require status checks」把它变成
+# 合并的硬门槛。
+name: 提交信息校验
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  commitlint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出完整历史
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 配置 Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: 安装 commitlint
+        run: npm install --no-save @commitlint/cli@19 @commitlint/config-conventional@19
+
+      - name: 确定校验区间
+        id: range
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            FROM="${{ github.event.pull_request.base.sha }}"
+            TO="${{ github.event.pull_request.head.sha }}"
+          else
+            FROM="${{ github.event.before }}"
+            TO="${{ github.sha }}"
+            # 首次推送或 force push 时 before 为全零, 退化为只校验最新提交
+            if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ]; then
+              FROM="$(git rev-parse "$TO^" 2>/dev/null || echo "$TO")"
+            fi
+          fi
+          echo "from=$FROM" >> "$GITHUB_OUTPUT"
+          echo "to=$TO" >> "$GITHUB_OUTPUT"
+          echo "校验区间: $FROM..$TO"
+
+      - name: 校验提交信息
+        run: npx commitlint --from "${{ steps.range.outputs.from }}" --to "${{ steps.range.outputs.to }}" --verbose

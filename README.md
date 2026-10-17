@@ -419,7 +419,7 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 遵循 [Conventional Commits](https://www.conventionalcommits.org/)：`<type>(<scope>): <subject>`。
 
 - **type**（11 选 1）：`feat` 新功能 · `fix` 修缺陷 · `docs` 文档 · `style` 格式 · `refactor` 重构 · `perf` 性能 · `test` 测试 · `build` 构建 · `ci` CI · `chore` 杂项 · `revert` 回滚
-- **scope**（本仓库模块）：`core` · `tracker` · `voice` · `gaze` · `behavior` · `rules` · `evaluation` · `web` · `frontend` · `config` · `docs`
+- **scope**（本仓库模块）：`core` · `tracker` · `voice` · `gaze` · `behavior` · `rules` · `evaluation` · `web` · `frontend` · `config` · `docs` · `ci`
 - **subject**：祈使句，不加句号，≤ 50 字
 
 **一次提交只做一件事**：
@@ -428,6 +428,8 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 - 同一功能的跨模块改动放一个 commit（如新增规程流程要同时改 `rules/`、`config.yaml`、`frontend/`，拆开会让前端因 `flowTypeMap` 缺键而报错）
 - 互不相关的改动拆开（`fix(tracker): ...` 与 `fix(gaze): ...` 不合并）
 - `type` 只能填一个，混装会让其余改动在日志与 CHANGELOG 中丢失
+
+以上规则由 CI 校验：`.github/workflows/commitlint.yml` 在 Pull Request 指向 `main`、以及推送到 `main` 时运行 commitlint。`type` 取值、`scope` 必填、`subject` 非空且不以句号结尾、header 总长 100 以内为**强制项**（不通过则检查失败）；`scope` 是否取自上方词典、`subject` 是否 ≤ 50 字仅为**提示**，不阻断。
 
 ### 提交流程
 
