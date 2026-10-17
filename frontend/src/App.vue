@@ -106,6 +106,7 @@ const ws = {
   supN: reports.supN,
   ticketN: reports.ticketN,
   noticeN: reports.noticeN,
+  commN: reports.commN,
   totalScore: reports.totalScore,
   avgScore: reports.avgScore,
   toggleCard: reports.toggleCard,
@@ -162,6 +163,7 @@ const ws = {
       :sup-n="ws.supN.value"
       :ticket-n="ws.ticketN.value"
       :notice-n="ws.noticeN.value"
+      :comm-n="ws.commN.value"
       :total="ws.totalScore.value"
       :avg="ws.avgScore.value"
       @toggle="ws.toggleCard"

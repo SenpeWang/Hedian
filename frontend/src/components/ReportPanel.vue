@@ -9,6 +9,7 @@ const props = defineProps<{
   supN: number
   ticketN: number
   noticeN: number
+  commN: number
   total: number
   avg: string
 }>()
@@ -32,16 +33,19 @@ function scoreColor(score: number) {
 function borderColor(flowType: string) {
   if (flowType === 'supervision') return '#00d4ff'
   if (flowType === 'info_notice') return '#00ffcc'
+  if (flowType === 'normal_comm') return '#00ff88'
   return '#ffaa00'
 }
 function cardIcon(flowType: string) {
   if (flowType === 'supervision') return '🛡️'
   if (flowType === 'info_notice') return '📢'
+  if (flowType === 'normal_comm') return '💬'
   return '🎫'
 }
 function cardLabel(flowType: string) {
   if (flowType === 'supervision') return '监护制'
   if (flowType === 'info_notice') return '信息通报'
+  if (flowType === 'normal_comm') return '普通沟通'
   return '自唱票'
 }
 </script>
@@ -62,6 +66,10 @@ function cardLabel(flowType: string) {
         <div>
           <div class="val">{{ noticeN }}</div>
           <div class="lbl">信息通报</div>
+        </div>
+        <div>
+          <div class="val">{{ commN }}</div>
+          <div class="lbl">普通沟通</div>
         </div>
         <div>
           <div class="val">{{ avg }}</div>
