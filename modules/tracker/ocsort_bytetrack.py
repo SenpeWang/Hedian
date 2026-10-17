@@ -218,19 +218,31 @@ class Tracklet:
 
     @property
     def tlwh(self) -> np.ndarray:
-        """获取当前估计的 [top_left_x, top_left_y, width, height] 边界框."""
+        """获取当前估计的 [top_left_x, top_left_y, width, height] 边界框.
+
+        Returns:
+            当前估计的 [top_left_x, top_left_y, width, height] 边界框数组 (4,).
+        """
         return self.xyah_to_tlwh(self.mean[:4])
 
     @property
     def tlbr(self) -> np.ndarray:
-        """获取当前估计的 [x1, y1, x2, y2] 边界框."""
+        """获取当前估计的 [x1, y1, x2, y2] 边界框.
+
+        Returns:
+            当前估计的 [x1, y1, x2, y2] 边界框数组 (4,).
+        """
         tlbr = self.tlwh.copy()
         tlbr[2:] += tlbr[:2]
         return tlbr
 
     @property
     def bbox(self) -> np.ndarray:
-        """获取标准包围盒坐标数组 [x1, y1, x2, y2]."""
+        """获取标准包围盒坐标数组 [x1, y1, x2, y2].
+
+        Returns:
+            标准包围盒坐标数组 [x1, y1, x2, y2] (4,).
+        """
         return self.tlbr
 
     def predict(self) -> None:
@@ -282,12 +294,20 @@ class Tracklet:
         self.state = TrackState.REMOVED
 
     def get_center(self) -> np.ndarray:
-        """获取轨迹当前的中心点坐标 [cx, cy]."""
+        """获取轨迹当前的中心点坐标 [cx, cy].
+
+        Returns:
+            轨迹当前的中心点坐标 [cx, cy] (2,).
+        """
         tlwh = self.tlwh
         return np.array([tlwh[0] + tlwh[2] / 2, tlwh[1] + tlwh[3] / 2])
 
     def get_velocity(self) -> np.ndarray:
-        """获取轨迹当前的估计速度矢量 [vx, vy]."""
+        """获取轨迹当前的估计速度矢量 [vx, vy].
+
+        Returns:
+            轨迹当前的估计速度矢量 [vx, vy] (2,)；位置历史不足时返回零向量.
+        """
         if len(self.position_history) < 2:
             return np.zeros(2)
         window = min(5, len(self.position_history))
