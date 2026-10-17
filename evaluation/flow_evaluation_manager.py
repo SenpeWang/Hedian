@@ -288,7 +288,11 @@ class FlowEvaluationManager:
             has_playback_waited = True
 
         def stream_callback(text_chunk: str) -> None:
-            """逐 token 流式回调."""
+            """逐 token 流式回调.
+
+            Args:
+                text_chunk: Qwen 流式返回的单个文本片段.
+            """
             wait_playback_reached()
             if self._direct_fn:
                 self._direct_fn(
