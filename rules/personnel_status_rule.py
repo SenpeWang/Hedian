@@ -36,7 +36,11 @@ class PersonnelStatusRule(BaseRule):
         self._last_event_ts = 0.0
 
     def name(self) -> str:
-        """制度名称."""
+        """制度名称.
+
+        Returns:
+            制度名称字符串.
+        """
         return "personnel_status"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
@@ -52,7 +56,11 @@ class PersonnelStatusRule(BaseRule):
         )
 
     def is_active(self) -> bool:
-        """人员状态监控始终是激活状态."""
+        """人员状态监控始终是激活状态.
+
+        Returns:
+            恒为 True，人员状态监控无流程开关.
+        """
         return True
 
     def finalize(self) -> Optional[Dict[str, Any]]:
@@ -86,7 +94,11 @@ class PersonnelStatusRule(BaseRule):
         return None
 
     def _on_gaze_alert(self, event: Dict[str, Any]) -> None:
-        """处理两名操纵员视线同时离开盘台超过 60 秒的事件."""
+        """处理两名操纵员视线同时离开盘台超过 60 秒的事件.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 away_duration、heads_count 等判定字段.
+        """
         payload = event.get("data", {})
         ts = payload.get("localSec", event.get("ts", 0))
         self._last_event_ts = max(self._last_event_ts, ts)
@@ -114,7 +126,11 @@ class PersonnelStatusRule(BaseRule):
         self._violations.append(violation)
 
     def _on_people_count(self, event: Dict[str, Any]) -> None:
-        """处理人数统计事件（TRACKER_HEADCOUNT）."""
+        """处理人数统计事件（TRACKER_HEADCOUNT）.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 count 字段.
+        """
         payload = event.get("data", {})
         ts = payload.get("localSec", event.get("ts", 0))
         count = payload.get("count", 0)

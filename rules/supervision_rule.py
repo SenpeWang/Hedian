@@ -67,7 +67,11 @@ class SupervisionRule(BaseRule):
         self._ever_bound = False
 
     def name(self) -> str:
-        """制度名称."""
+        """制度名称.
+
+        Returns:
+            制度名称字符串.
+        """
         return "supervision"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
@@ -210,7 +214,11 @@ class SupervisionRule(BaseRule):
         return flow
 
     def _on_voice_intent(self, event: Dict[str, Any]) -> None:
-        """处理语音事件."""
+        """处理语音事件.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 key_moment 字段.
+        """
         payload = event.get("data", {})
         timestamp = payload.get("localSec", event.get("ts", 0.0))
         key_moment = payload.get("key_moment", "")
@@ -248,19 +256,31 @@ class SupervisionRule(BaseRule):
                 self._checklist["verification"] = True
 
     def _on_finger_screen(self, event: Dict[str, Any]) -> None:
-        """处理手指指向屏幕事件."""
+        """处理手指指向屏幕事件.
+
+        Args:
+            event: 事件载荷, 含 localSec 与判定字段.
+        """
         if self._active:
             self._checklist["finger_screen"] = True
             logger.info("监护制: 记录手指指向屏幕操作")
 
     def _on_finger_file(self, event: Dict[str, Any]) -> None:
-        """处理手指指向文件事件（有程序分支关键特征）."""
+        """处理手指指向文件事件（有程序分支关键特征）.
+
+        Args:
+            event: 事件载荷, 含 localSec 与判定字段.
+        """
         if self._active:
             self._checklist["finger_file"] = True
             logger.info("监护制: 记录手指指向文件操作(有程序分支关键特征)")
 
     def _on_hand_raised(self, event: Dict[str, Any]) -> None:
-        """处理 BEHAVIOR_HAND_RAISED 举手事件."""
+        """处理 BEHAVIOR_HAND_RAISED 举手事件.
+
+        Args:
+            event: 事件载荷, 含 localSec 与 operator 字段.
+        """
         payload = event.get("data", {})
         timestamp = payload.get("localSec", event.get("ts", 0))
         # 身份由跟踪模块赋予后随事件下发；缺失时保留 None，不自行赋予
@@ -272,7 +292,11 @@ class SupervisionRule(BaseRule):
         logger.debug(f"监护制: 收到举手事件 @{timestamp:.1f}s")
 
     def _on_proximity_update(self, event: Dict[str, Any]) -> None:
-        """处理 TRACKER_PROXIMITY 距离状态更新，实现状态机转移."""
+        """处理 TRACKER_PROXIMITY 距离状态更新，实现状态机转移.
+
+        Args:
+            event: 事件载荷, 含 localSec、state 与 operator 字段.
+        """
         payload = event.get("data", {})
         timestamp = payload.get("localSec", event.get("ts", 0))
         state = payload.get("state", "")
@@ -390,7 +414,11 @@ class SupervisionRule(BaseRule):
         self._ever_bound = False
 
     def save_results(self, result_dir: str) -> None:
-        """规则层不保存 key_moment 文件（由 tracker 通过事件流接收并保存）."""
+        """规则层不保存 key_moment 文件（由 tracker 通过事件流接收并保存）.
+
+        Args:
+            result_dir: 结果目录路径.
+        """
         pass
 
 

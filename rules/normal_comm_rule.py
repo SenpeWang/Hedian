@@ -62,7 +62,11 @@ class NormalCommRule(BaseRule):
         self._timeout_timer: Optional[threading.Timer] = None
 
     def name(self) -> str:
-        """制度名称."""
+        """制度名称.
+
+        Returns:
+            制度名称字符串, 恒为 "normal_comm".
+        """
         return "normal_comm"
 
     def subscribe_events(self, event_bus: EventBus) -> None:
@@ -293,7 +297,11 @@ class NormalCommRule(BaseRule):
         self._last_post_word_ts = -999.0
 
     def save_results(self, result_dir: str) -> None:
-        """规则层不保存产物（流程事件由 FlowEventRecorder 统一记录）."""
+        """规则层不保存产物（流程事件由 FlowEventRecorder 统一记录）.
+
+        Args:
+            result_dir: 结果目录(本制度不产出文件, 该参数不使用).
+        """
         pass
 
 
