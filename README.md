@@ -8,7 +8,7 @@
 |------|------|
 | 前端 | Vue 3 · TypeScript · Vite · ESLint + Prettier · MSE 流式播放 |
 | 感知 | YOLO11 检测 · YOLO26s 姿态 · OC-SORT 跟踪 · Qwen3-ASR 流式语音对齐 · Qwen3-8B 评估 |
-| 代码规模 | 54+ 个 Python 文件 · 27+ 个前端源文件 |
+| 代码规模 | 58 个 Python 文件 / 约 15,000 行 · 27 个前端源文件 / 约 2,600 行 |
 
 ---
 
@@ -84,7 +84,7 @@ flowchart LR
 **关键设计点**
 
 - **事件总线解耦**：各推理模块只向总线发布事件，规程状态机被动消费，模块可独立增删；规则由 `RuleRegistry.discover()` 扫描 `rules/` 目录自动发现注册。
-- **视角级 GPU 分配**：`config.yaml` 按模块指定 GPU；**evaluation（约 16GB）与 tracker 同在 GPU 0，GPU 1 只留 voice + behavior**（单卡环境请将 `gpu_map` 中非 0 值全部改为 `"0"` 并关闭高耗模块）。
+- **视角级 GPU 分配**：`config.yaml` 按模块指定 GPU；默认 `tracker` 独占 GPU 0，`voice` / `behavior` / `evaluation`（约 16GB）共用 GPU 1（单卡环境请将 `gpu_map` 中非 0 值全部改为 `"0"` 并关闭高耗模块）。
 - **语音块级流式**：ffmpeg 管道增量读音频 → 在线 VAD 切片 → 逐段解码即出 → 跨段全局词流成句，**保留字级时间戳**（下游对齐/判定/渲染全部依赖时间戳）。
 - **推理解耦常驻**：`main.py` 以子进程拉起各推理流，Web 服务常驻；进程异常不影响 HTTP 面。
 - **状态可回放**：Redis 记录推理与模块状态，WebSocket 连接时补发状态快照，前端刷新即恢复进度。
@@ -232,7 +232,7 @@ pkill -f main.py                            # 直接结束服务
 | 字段 | 默认 | 说明 |
 |------|------|------|
 | `app.port` | `5002` | Web 服务端口 |
-| `app.gpu_map` | tracker/evaluation=0，voice/behavior=1 | **单卡环境请将值 `"1"` 改为 `"0"`**；双卡部署时约 16GB 的 evaluation 与 tracker 同置 GPU 0，GPU 1 只留 voice + behavior |
+| `app.gpu_map` | tracker=0；voice / behavior / evaluation=1 | **单卡环境请将值 `"1"` 改为 `"0"`**；双卡部署时 tracker 独占 GPU 0，voice / behavior 与约 16GB 的 evaluation 共置 GPU 1 |
 | `app.gpu_default` | `"0"` | `gpu_map` 未覆盖模块的回退值，含 CLI `--gpu` |
 | `app.fps` | `30.0` | 帧率基准 |
 | `redis.host` / `port` / `db` | `localhost` / `6379` / `0` | Redis 连接 |
@@ -288,7 +288,7 @@ pkill -f main.py                            # 直接结束服务
 ## 推送与交互逻辑
 
 - **消息通道**：WebSocket 下行分两类——二进制视频帧（fMP4 分片）与 JSON 结构化数据；上行仅播放进度。
-- **系统通知**：推送五类流程的开始/结束事件，以及监控室人数、凝视状态量。
+- **系统通知**：推送四类流程的开始/结束事件，以及监控室人数、凝视状态量。
 - **流程类型**：监护制、自唱票、信息通报、**普通沟通**四种（外加人员状态研判）。
 - **评价报告**：流程结束后触发后台异步评估，待前端播放到流程结束时刻才流式推送评分与评语。
 - **实时字幕**：按秒归并，仅显示已播时刻的条目，命中关键词高亮（标红）。
@@ -321,7 +321,7 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 
 设计要点：
 
-- **内存有界**：环形缓冲按绝对秒保留（≈38.6s + overlap），与音频总时长无关；同一代码路径支持本地文件与 rtsp/rtmp/http 直播源。
+- **内存有界**：环形缓冲按绝对秒保留（约 38.6s，含切片回看窗口与左右上下文），与音频总时长无关；同一代码路径支持本地文件与 rtsp/rtmp/http 直播源。
 - **保护词机制**：岗位词（一回路 / 二回路 / 机组长 / 请讲 / 请监护 等）默认自动派生为保护词，任何停顿都不会把它们从句边界切开；句尾停在保护词前缀（如"二"、"请"）时最多挂起 `protected_hold_sec` 秒等待后续。
 - **关键词事件顺序**：按词在句中的实际出现位置输出（岗位词 → 请讲 → 收到），消除"确认信号先于启动信号到达而被丢弃"的问题。
 - **首包延迟**：仅需等待首个语音段闭合（约一个尾静音 0.8s），无需整文件扫描。
@@ -381,7 +381,7 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 |------|----------|
 | 启动即报模型路径不存在 | 核对 `voice.model_path` / `aligner_path` 与实际目录名是否一致（下划线 vs 点号） |
 | `/api/video/front` 返回 404 | `data/videos/` 下缺少 `camFRONT.mp4` 或 `.mpg`，或 `videos.front` 指向的文件不存在 |
-| 显存溢出 / 进程被杀 | 单卡环境：把 `gpu_map` 中的 `"1"` 改为 `"0"`，或关闭 `modules.*` 中的高耗模块（注意 evaluation ~16GB 必须与 tracker 同卡或独占） |
+| 显存溢出 / 进程被杀 | 单卡环境：把 `gpu_map` 中的 `"1"` 改为 `"0"`，或关闭 `modules.*` 中的高耗模块（注意约 16GB 的 evaluation 与 voice / behavior 共置 GPU 1，需为整卡留足显存） |
 | 岗位词（如"二回路"）在转录文本中被切开 | 确认 `sentence_gap_sec ≥ vad_min_silence_sec`；`protected_words` 保持 `null`（自动派生） |
 | "收到"被切成"收 / 到" | 确认 `voice.segmenter: silence_vad` 且 `vad_split_search_sec` 生效（能量最低点切分 + 跨段成句） |
 | 普通沟通频繁超时（50s）结束 | 属正常现象（句中确无"收到"）；若"请讲"无法开启新流程，核对 `rules.normal_comm: true` |
