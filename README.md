@@ -418,7 +418,7 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 
 ```bash
 # 1. Fork 项目并克隆到本地
-git clone <your-repo-url>
+git clone https://github.com/SenpeWang/Hedian.git
 
 # 2. 创建功能分支
 git checkout -b feature/new-feature
