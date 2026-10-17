@@ -411,8 +411,23 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 
 - **代码风格**：Python **基于 PEP 8 并遵循 Google Python Style Guide**（4 空格缩进、行宽 ≤ 79 列、 snake_case 命名、类型注解完整，docstring 使用 Google 风格的 `Args` / `Returns` 段）；前端使用 ESLint + Prettier 统一风格（配置已随仓库提供：`frontend/eslint.config.js`、`frontend/.prettierrc`），提交前确认 `npm run lint` 与 `npx prettier --check 'src/**/*.{ts,vue}'` 均无告警。
 - **组件命名**：Vue 组件使用 PascalCase（如 `VideoPanel.vue`）；组合式函数以 `use` 前缀驼峰命名（如 `usePlayback.ts`、`useNotify.ts`）；其余变量与函数统一 camelCase。
-- **提交规范**：遵循 Conventional Commits，格式为 `<type>(<scope>): <subject>`，如 `feat(rules): ...`、`fix(voice): ...`、`docs(readme): ...`。
+- **提交规范**：遵循 [Conventional Commits](https://www.conventionalcommits.org/)，并遵守原子提交 —— 详见下方「提交规范」一节。
 - **文档注释**：Python 关键函数补 `Args` / `Returns` 段；前端导出的 API 使用 TSDoc（`@param` / `@returns`）。
+
+### 提交规范
+
+遵循 [Conventional Commits](https://www.conventionalcommits.org/)：`<type>(<scope>): <subject>`。
+
+- **type**（11 选 1）：`feat` 新功能 · `fix` 修缺陷 · `docs` 文档 · `style` 格式 · `refactor` 重构 · `perf` 性能 · `test` 测试 · `build` 构建 · `ci` CI · `chore` 杂项 · `revert` 回滚
+- **scope**（本仓库模块）：`core` · `tracker` · `voice` · `gaze` · `behavior` · `rules` · `evaluation` · `web` · `frontend` · `config` · `docs`
+- **subject**：祈使句，不加句号，≤ 50 字
+
+**一次提交只做一件事**：
+
+- 判定：能用一句话说清 · 能独立 `git revert` · 提交后代码树仍可运行
+- 同一功能的跨模块改动放一个 commit（如新增规程流程要同时改 `rules/`、`config.yaml`、`frontend/`，拆开会让前端因 `flowTypeMap` 缺键而报错）
+- 互不相关的改动拆开（`fix(tracker): ...` 与 `fix(gaze): ...` 不合并）
+- `type` 只能填一个，混装会让其余改动在日志与 CHANGELOG 中丢失
 
 ### 提交流程
 
