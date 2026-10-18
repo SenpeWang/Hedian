@@ -267,7 +267,7 @@ class GazeModule:
                 self._gaze_estimator.predict(frame, heads)
             )
             if heatmaps is not None and valid_boxes:
-                for index, box in enumerate(valid_boxes):
+                for index, bbox in enumerate(valid_boxes):
                     heatmap = heatmaps[index]
                     if heatmap.ndim == 3:
                         heatmap = heatmap[0]
@@ -288,8 +288,8 @@ class GazeModule:
                         new_any_in_roi = True
                     new_results.append(
                         {
-                            "box": (box.x1, box.y1, box.x2, box.y2),
-                            "center": (box.cx, box.cy),
+                            "box": (bbox.x1, bbox.y1, bbox.x2, bbox.y2),
+                            "center": (bbox.cx, bbox.cy),
                             "gaze_pt": gaze_point,
                             "status": status,
                         }
