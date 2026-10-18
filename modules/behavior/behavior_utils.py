@@ -181,9 +181,9 @@ class PoseTools:
         """计算三点构成的角度（度），点 b 为顶点，退化时返回 None.
 
         Args:
-            point_a: 端点 A 坐标及置信度 [x, y, conf]，或 [x, y].
-            point_b: 顶点 B 坐标及置信度 [x, y, conf]，或 [x, y].
-            point_c: 端点 C 坐标及置信度 [x, y, conf]，或 [x, y].
+            point_a: 端点 A 坐标及置信度 [x, y, confidence]，或 [x, y].
+            point_b: 顶点 B 坐标及置信度 [x, y, confidence]，或 [x, y].
+            point_c: 端点 C 坐标及置信度 [x, y, confidence]，或 [x, y].
 
         Returns:
             角度（度）；两向量任一长度退化时返回 None.

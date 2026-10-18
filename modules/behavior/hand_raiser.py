@@ -30,9 +30,9 @@ def is_hand_up(
     3. 若肘部可见，手臂夹角 (shoulder-elbow-wrist) 需 >= 50 度，避免自然下垂或搭手误判。
 
     Args:
-        shoulder: 肩膀关键点坐标及置信度 [x, y, conf].
-        elbow: 肘部关键点坐标及置信度 [x, y, conf].
-        wrist: 手腕关键点坐标及置信度 [x, y, conf].
+        shoulder: 肩膀关键点坐标及置信度 [x, y, confidence].
+        elbow: 肘部关键点坐标及置信度 [x, y, confidence].
+        wrist: 手腕关键点坐标及置信度 [x, y, confidence].
         bbox_height: 姿态检测边界框高度（像素）.
         conf_threshold: 关键点有效置信度阈值，默认 0.25.
 
