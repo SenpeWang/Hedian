@@ -241,9 +241,9 @@ class BehaviorModule(BaseModule):
                     video_source, timestamp
                 )
                 if total_frames > 0:
-                    current_time = time.time()
-                    if current_time - self._last_progress_push >= 0.3:
-                        self._last_progress_push = current_time
+                    now = time.time()
+                    if now - self._last_progress_push >= 0.3:
+                        self._last_progress_push = now
                         progress_percentage = min(
                             100.0, timestamp / (total_frames / fps) * 100
                         )

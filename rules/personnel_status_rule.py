@@ -71,11 +71,11 @@ class PersonnelStatusRule(BaseRule):
         """
         # 视频收尾时，检查是否仍有未结束的无人值守状态且时长已超过 10 秒
         if self._no_people_start_ts is not None:
-            duration = self._last_event_ts - self._no_people_start_ts
-            if duration >= 10.0:
+            duration_sec = self._last_event_ts - self._no_people_start_ts
+            if duration_sec >= 10.0:
                 description = (
                     f"警报：主控室无人值守（人员少于1人）持续超过10S"
-                    f"（实际持续 {duration:.1f}秒）"
+                    f"（实际持续 {duration_sec:.1f}秒）"
                 )
                 logger.warning(
                     f"人员状态违规 (PeopleCount/Finalize): {description} "
@@ -85,7 +85,7 @@ class PersonnelStatusRule(BaseRule):
                     "localSec": self._no_people_start_ts,
                     "event": "NO_OPERATOR_VIOLATION",
                     "count": 0,
-                    "duration": round(duration, 2),
+                    "duration": round(duration_sec, 2),
                     "source": "tracker",
                     "description": description,
                 }
@@ -147,11 +147,11 @@ class PersonnelStatusRule(BaseRule):
                 )
         else:
             # 人数恢复到 >= 1 人，检查是否满足 10S 阈值
-            duration = timestamp - self._no_people_start_ts
-            if duration >= 10.0:
+            duration_sec = timestamp - self._no_people_start_ts
+            if duration_sec >= 10.0:
                 description = (
                     f"警报：主控室无人值守（人员少于1人）持续超过10S"
-                    f"（实际持续 {duration:.1f}秒）"
+                    f"（实际持续 {duration_sec:.1f}秒）"
                 )
                 logger.warning(
                     f"人员状态违规 (PeopleCount): {description} @{timestamp:.1f}s"
@@ -161,14 +161,14 @@ class PersonnelStatusRule(BaseRule):
                     "localSec": self._no_people_start_ts,
                     "event": "NO_OPERATOR_VIOLATION",
                     "count": 0,
-                    "duration": round(duration, 2),
+                    "duration": round(duration_sec, 2),
                     "source": "tracker",
                     "description": description,
                 }
                 self._violations.append(violation)
             else:
                 logger.info(
-                    f"人员状态监控: 无人值守时长仅 {duration:.1f}秒，未达10S阈值，不作记录"
+                    f"人员状态监控: 无人值守时长仅 {duration_sec:.1f}秒，未达10S阈值，不作记录"
                 )
             self._no_people_start_ts = None
 

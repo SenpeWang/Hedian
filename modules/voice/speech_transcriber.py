@@ -108,7 +108,7 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
 
 def normalize_qwen_results(
     results: Any,
-    duration_seconds: float = 0.0,
+    total_sec: float = 0.0,
 ) -> List[Dict[str, Any]]:
     """把 Qwen3-ASR 返回结果统一归一化为段级字典列表.
 
@@ -117,7 +117,7 @@ def normalize_qwen_results(
 
     Args:
         results: Qwen3-ASR 的原始返回结果.
-        duration_seconds: 音频总时长（秒），用于无字级信息时兜底段结束时间.
+        total_sec: 音频总时长（秒），用于无字级信息时兜底段结束时间.
 
     Returns:
         段级结果列表，每项含 start/end/text，有字级信息时附加 words.
@@ -169,7 +169,7 @@ def normalize_qwen_results(
                 text = "".join(word_item["word"] for word_item in words)
         else:
             start = 0.0
-            end = float(duration_seconds or 0.0)
+            end = float(total_sec or 0.0)
 
         if not text:
             continue
@@ -296,7 +296,7 @@ class SpeechTranscriber:
         on_segment: Optional[Any] = None,
         segmenter_name: str = "silence_vad",
         segmenter_config: Optional[Dict[str, Any]] = None,
-        total_seconds: float = 0.0,
+        total_sec: float = 0.0,
         boundary_overlap_sec: float = 0.4,
         block_sec: float = 0.2,
     ) -> List[Dict[str, Any]]:
@@ -317,7 +317,7 @@ class SpeechTranscriber:
             可为 None.
             segmenter_name: 切片策略名（见 segmenters.available_segmenters）.
             segmenter_config: 切片策略参数覆盖（覆盖 config.yaml 中的取值）.
-            total_seconds: 已知总时长（秒），用于进度百分比；直播源传 0.
+            total_sec: 已知总时长（秒），用于进度百分比；直播源传 0.
             boundary_overlap_sec: 每段向前多取的重叠时长（秒），用作左上下文.
             block_sec: 管道单次读取块时长（秒），越小首包延迟越低.
 
@@ -340,14 +340,14 @@ class SpeechTranscriber:
         )
         logger.info("流式切片策略生效: %s", segmenter.describe())
 
-        if total_seconds <= 0 and not is_live_source(source):
+        if total_sec <= 0 and not is_live_source(source):
             try:
-                total_seconds = self._probe_duration(source)
+                total_sec = self._probe_duration(source)
             except Exception as probe_error:  # 时长探测失败不影响转写
                 logger.warning(
                     "总时长探测失败，进度百分比将不可用: %s", probe_error
                 )
-                total_seconds = 0.0
+                total_sec = 0.0
 
         overlap = max(0.0, float(boundary_overlap_sec))
         # 环形缓冲需覆盖：切片策略回看窗口 + 左上下文 + 余量
@@ -390,7 +390,7 @@ class SpeechTranscriber:
                     return_time_stamps=has_aligner,
                 )
                 normalized = normalize_qwen_results(
-                    results, duration_seconds=seg_duration
+                    results, total_sec=seg_duration
                 )
             except Exception as decode_error:
                 logger.warning(
@@ -454,7 +454,7 @@ class SpeechTranscriber:
             )
             if on_segment:
                 on_segment(
-                    segment_words, segment.start, segment.end, total_seconds
+                    segment_words, segment.start, segment.end, total_sec
                 )
 
         try:
@@ -472,7 +472,7 @@ class SpeechTranscriber:
                         and cursor_sec - last_progress_sec >= 0.3
                     ):
                         last_progress_sec = cursor_sec
-                        progress_callback(cursor_sec, total_seconds)
+                        progress_callback(cursor_sec, total_sec)
                     for segment in segmenter.push(pcm, block_start):
                         _decode_segment(segment)
                 for segment in segmenter.flush():

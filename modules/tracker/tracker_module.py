@@ -469,11 +469,11 @@ class TrackerModule(BaseModule):
         """
         super().update_progress(current, total)
         if total and total > 0:
-            current_time = time.time()
+            now = time.time()
             if not hasattr(self, "_last_gaze_progress_push"):
                 self._last_gaze_progress_push = 0
-            if current_time - self._last_gaze_progress_push >= 1.0:
-                self._last_gaze_progress_push = current_time
+            if now - self._last_gaze_progress_push >= 1.0:
+                self._last_gaze_progress_push = now
                 gaze_percentage = min(100.0, current / total * 100)
                 self.push_display(
                     "progress",

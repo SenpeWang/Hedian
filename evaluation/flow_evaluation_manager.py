@@ -272,12 +272,12 @@ class FlowEvaluationManager:
             if has_playback_waited or not self._get_playback_sec_fn:
                 return
             target_sec = max(0.0, end_sec - 0.5)
-            start_wait = time.time()
+            wait_start = time.time()
             while True:
                 current_playback = self._get_playback_sec_fn()
                 if current_playback >= target_sec:
                     break
-                if time.time() - start_wait > 60.0:
+                if time.time() - wait_start > 60.0:
                     logger.warning(
                         f"wait_playback_reached 等待前端播放进度超时(60.0s)，"
                         f"目标={target_sec:.2f}s, "

@@ -53,7 +53,8 @@ function cardLabel(flowType: string) {
 <template>
   <div class="panel">
     <div class="panel-title">📋 流程评价</div>
-    <div ref="cardsEl" class="panel-body">
+    <!-- 固定栏: 汇总统计(不随评价卡片滚动) -->
+    <div class="report-stats">
       <div class="summary-grid">
         <div>
           <div class="val">{{ supN }}</div>
@@ -80,6 +81,9 @@ function cardLabel(flowType: string) {
           <div class="lbl">总分</div>
         </div>
       </div>
+    </div>
+    <!-- 滑动栏: 流程评价卡片 -->
+    <div ref="cardsEl" class="panel-body">
       <div>
         <div
           v-for="card in segCards"

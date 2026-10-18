@@ -208,7 +208,7 @@ class VoiceModule(BaseModule):
             words: List[Dict[str, Any]],
             seg_start: float,
             seg_end: float,
-            total_duration: float,
+            total_sec: float,
         ) -> None:
             """每段解码完成后的回调：成句并推进进度.
 
@@ -216,7 +216,7 @@ class VoiceModule(BaseModule):
                 words: 该段带时间戳的词表.
                 seg_start: 段起始（秒）.
                 seg_end: 段结束（秒）.
-                total_duration: 总时长（秒）；直播源为 0.
+                total_sec: 总时长（秒）；直播源为 0.
             """
             if not words:
                 return
@@ -225,7 +225,7 @@ class VoiceModule(BaseModule):
             # 句尾停顿已被确认的句子立即交付，不必等到下一个词到达
             for sentence_words in assembler.tick(seg_end):
                 handle_sentence(sentence_words)
-            self.update_progress(seg_end, total_duration)
+            self.update_progress(seg_end, total_sec)
 
         def on_progress(current_sec: float, total_sec: float) -> None:
             """音频读取进度回调：仅用于按游标及时封句，不改动对齐进度.

@@ -149,7 +149,7 @@ class FlowDataExtractor:
             target_sec: 目标时间（秒）.
             timeout: 超时时间（秒）.
         """
-        start_time = time.time()
+        wait_start = time.time()
 
         while True:
             progress = self._get_all_module_progress()
@@ -169,7 +169,7 @@ class FlowDataExtractor:
                 return
 
             # 检查超时
-            elapsed = time.time() - start_time
+            elapsed = time.time() - wait_start
             if elapsed > timeout:
                 logger.warning(f"等待超时 ({timeout}s)，模块进度: {progress}")
                 return
