@@ -40,7 +40,7 @@ class InferenceSync:
         redis_host: str = "localhost",
         redis_port: int = 6379,
         redis_db: int = 0,
-        duration: float = 0.0,
+        total_sec: float = 0.0,
         event_bus=None,
     ) -> None:
         """初始化同步器并清理上一轮遗留数据.
@@ -52,11 +52,11 @@ class InferenceSync:
             redis_host: Redis 主机地址.
             redis_port: Redis 端口.
             redis_db: 数据库编号.
-            duration: 视频总时长(秒), 用于排除接近片尾的 source.
+            total_sec: 视频总时长(秒), 用于排除接近片尾的 source.
             event_bus: 跨进程消息总线; 提供时订阅 FLOW_STARTED / FLOW_ENDED.
         """
         self.fps = fps
-        self.duration = duration
+        self.total_sec = total_sec
         self._event_bus = event_bus
 
         from core.redis_conn import get_redis_client
@@ -353,12 +353,12 @@ class InferenceSync:
                 ):
                     continue
                 try:
-                    sec = float(value)
+                    local_sec = float(value)
                 except ValueError:
                     continue
-                if self.duration > 0 and sec >= self.duration - 1.5:
+                if self.total_sec > 0 and local_sec >= self.total_sec - 1.5:
                     continue
-                relevant[source] = sec
+                relevant[source] = local_sec
 
             if not relevant:
                 return float("inf")
@@ -486,26 +486,26 @@ class InferenceSync:
             前端 batch 字典, 含 globalSec / totalDuration / sourceTimes
             与各 source 事件组.
         """
-        batch = {"globalSec": global_sec, "totalDuration": self.duration}
+        batch = {"globalSec": global_sec, "totalDuration": self.total_sec}
         # 各视角整体进度(供前端速率引擎)
         try:
             all_progress = self._redis.hgetall(self._progress_key)
             view_secs = {}
             for field, value in all_progress.items():
                 try:
-                    sec = float(value)
+                    local_sec = float(value)
                 except (ValueError, TypeError):
                     continue
                 fine = _fine_source(field)
                 # 视角整体进度归类: tracking/gaze/video_front -> front(取最大, 视角已产出位置)
                 if fine in ("tracking", "gaze", "video_front"):
-                    if sec > view_secs.get("front", -1):
-                        view_secs["front"] = sec
+                    if local_sec > view_secs.get("front", -1):
+                        view_secs["front"] = local_sec
                 elif fine in ("video_pop", "behavior"):
-                    if sec > view_secs.get("pop", -1):
-                        view_secs["pop"] = sec
+                    if local_sec > view_secs.get("pop", -1):
+                        view_secs["pop"] = local_sec
                 elif fine == "voice":
-                    view_secs["voice"] = sec
+                    view_secs["voice"] = local_sec
             batch["sourceTimes"] = view_secs
         except Exception as e:
             logger.warning(f"采集 sourceTimes 失败: {e}")

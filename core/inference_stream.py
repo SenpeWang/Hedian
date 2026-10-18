@@ -106,18 +106,18 @@ class InferenceStream:
         # 各 source 最近 local_sec，模块退出时用于批量上报结束信号
         self._source_last_sec: Dict[str, float] = {}
 
-    def update_module_time(self, source: str, sec: float) -> None:
+    def update_module_time(self, source: str, local_sec: float) -> None:
         """更新某个 source 的当前进度(per-source 粒度, 供对齐中间件 min 计算).
 
         字段以 "大类.细粒度" 形式写入(如 tracker.tracking), 便于按模块聚合查询.
 
         Args:
             source: 细粒度 source 名.
-            sec: 当前进度(local_sec).
+            local_sec: 当前进度(local_sec).
         """
         try:
             self._redis.hset(
-                self._progress_key, _progress_field(source), str(sec)
+                self._progress_key, _progress_field(source), str(local_sec)
             )
         except Exception as e:
             logger.error(f"更新 source 进度失败 {source}: {e}")

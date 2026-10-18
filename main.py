@@ -330,11 +330,11 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             video_fps = cap.get(cv2.CAP_PROP_FPS) or config_dict.get("fps", 30)
             if total_frames > 0 and video_fps > 0:
-                duration = total_frames / video_fps
-                video_duration = max(video_duration, duration)
+                total_sec = total_frames / video_fps
+                video_duration = max(video_duration, total_sec)
                 logger.info(
                     f"视频 {video_path}: {total_frames}帧@{video_fps:.1f}fps, "
-                    f"时长 {duration:.2f}s"
+                    f"时长 {total_sec:.2f}s"
                 )
             cap.release()
         logger.info(f"读取视频时长完成（取最大）: {video_duration:.2f}s")
@@ -357,7 +357,7 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
         redis_host=REDIS_HOST,
         redis_port=REDIS_PORT,
         redis_db=REDIS_DB,
-        duration=video_duration,
+        total_sec=video_duration,
         event_bus=event_bus,
     )
     # 结果目录提前确定，供规则和评估器使用
