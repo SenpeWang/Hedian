@@ -34,7 +34,7 @@ class WSHandler:
         # 保证后到的浏览器也能从 init 开始正确解码 MSE。
         self._vis_init_cache: Dict[str, bytes] = {}
         # 状态快照注入: 总时长/流水线状态/同步器, connect 时补发给前端(刷新即恢复进度)
-        self._total_duration: float = 0.0
+        self._total_sec: float = 0.0
         self._pipeline_state: Optional[Dict[str, Any]] = None
         self._inference_sync: Optional[Any] = None
 
@@ -48,18 +48,18 @@ class WSHandler:
 
     def set_state_refs(
         self,
-        total_duration: float,
+        total_sec: float,
         pipeline_state: Dict[str, Any],
         inference_sync: Optional[Any] = None,
     ) -> None:
         """注入总时长/流水线状态/同步器, 供 connect 补发状态快照.
 
         Args:
-            total_duration: 视频总时长（秒）.
+            total_sec: 视频总时长（秒）.
             pipeline_state: 流水线状态引用（含 status 字段）.
             inference_sync: 推理流同步器，用于计算当前全局秒.
         """
-        self._total_duration = float(total_duration or 0.0)
+        self._total_sec = float(total_sec or 0.0)
         self._pipeline_state = pipeline_state
         self._inference_sync = inference_sync
 
@@ -72,7 +72,6 @@ class WSHandler:
         Args:
             websocket: 客户端 WebSocket 连接.
         """
-        total = self._total_duration or 0.0
         pipeline_status = (self._pipeline_state or {}).get("status", "idle")
         if pipeline_status == "running" and self._inference_sync is not None:
             try:
@@ -91,7 +90,7 @@ class WSHandler:
             global_sec = 0.0
         msg = {
             "source": "status",
-            "totalDuration": total,
+            "totalDuration": self._total_sec or 0.0,
             "globalSec": global_sec,
             "status": pipeline_status,
         }
