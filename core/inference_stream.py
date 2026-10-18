@@ -91,7 +91,6 @@ class InferenceStream:
         self._progress_key = KEY_PROGRESS
         self._snapshot_key = KEY_SNAPSHOT
         self._event_stream_key = KEY_EVENT_STREAM
-        self._clock_key = "inference:global_sec"
         # per-source 结束信号：field=source, value=final local_sec
         # （模块退出时写入，供中间件剔除已结束 source）
         self._source_done_key = KEY_SOURCE_DONE
