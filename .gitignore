@@ -49,6 +49,7 @@ frontend/tsconfig.tsbuildinfo
 # Markdown files
 *.md
 !README.md
-!RELEASE.md
+!API.md
+!命名规范.md
 
 
