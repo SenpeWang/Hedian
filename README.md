@@ -7,8 +7,8 @@
 | 后端 | Python 3.10 · FastAPI · Redis Stream+Hash · ffmpeg fMP4 |
 |------|------|
 | 前端 | Vue 3 · TypeScript · Vite · ESLint + Prettier · MSE 流式播放 |
-| 感知 | YOLO11 检测 · YOLO26s 姿态 · OC-SORT 跟踪 · Qwen3-ASR 流式语音对齐 · Qwen3-8B 评估 |
-| 代码规模 | 58 个 Python 文件 / 约 15,000 行 · 27 个前端源文件 / 约 2,600 行 |
+| 感知 | YOLO11 检测 · YOLO26s 姿态 · OC-SORT 跟踪 · MediaPipe 指向手势 · Qwen3-ASR 流式语音对齐 · Qwen3-8B 评估 |
+| 代码规模 | 57 个 Python 文件 / 约 16,000 行 · 27 个前端源文件 / 约 2,600 行 |
 
 ---
 
@@ -98,7 +98,7 @@ flowchart LR
 | Tracker | 人员追踪 | 目标检测 + 姿态估计 + 多目标跟踪，输出操作人 / 监护人身份 |
 | Gaze | 眼睛关注度 | 头部姿态 + 视线估计，判定是否注视关键区域 |
 | Voice | 语音转录 | **流式流水线**：增量读音频 + 在线切片 + 跨段成句 + 字词级时间对齐 + 行业术语归一化，支撑唱票比对 |
-| Behavior | 行为检测 | 举手、手指屏幕、手指文件三类关键动作 |
+| Behavior | 行为检测 | 举手、手指屏幕、指向文件三类关键动作；指向判定采用 YOLO 四分类 + MediaPipe 21 关键点手势规则，并在事件时刻判别人手角色（机组长 / 操作员） |
 | Rules | 规程判定 | 监护制 / 自唱票 / 信息通报 / 人员状态 / **普通沟通** 五大状态机实时研判 + 违规告警 |
 | Evaluation | 合规评估 | 大模型基于完整多模态证据链输出合规结论与打分 |
 | Frontend | 流式可视化 | 视频、字幕（关键词标红）、关注度热力图、告警实时推送，断点续看，流程通知同秒稳定排序 |
@@ -126,9 +126,10 @@ flowchart LR
 | 路径 | 用途 |
 |------|------|
 | `detection/yolo11_MOT.pt` | 人员检测（含 MOT 跟踪头） |
-| `detection/yolo26s-pose.pt` | 姿态估计 |
-| `behavior/behavior_yolo.pt` | 行为检测 |
-| `behavior/behavior_yolo26s-pose.pt` | 行为姿态估计 |
+| `detection/yolo26s-pose.pt` | 姿态估计（举手检测与 MOT 姿态） |
+| `behavior/detect_4class.pt` | 行为检测主模型（hand / file / person / pointing_hand 四分类） |
+| `behavior/pose.pt` | 行为角色判别姿态模型（机组长 / 操作员，事件时刻触发） |
+| `behavior/detect_3class_union.pt` | 可选并集召回模型（三分类 hand / file / person），补手框召回 |
 | `gaze/yolov8n_head.onnx` | 头部检测 |
 | `gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 |
 | `evaluation/Qwen3-8B` | 合规评估主模型 |
@@ -254,9 +255,10 @@ pkill -f main.py                            # 直接结束服务
 | `voice.fixed_window_sec` / `fixed_window_overlap_sec` | `20.0` / `5.0` | 仅 `segmenter=fixed_window` 时生效 |
 | `supervision.*` | 见仓库 | 监护制绑定的时长与距离阈值、连续帧数、告警冷却 |
 | `tracker.detection.*` | 见仓库 | 检测置信度、NMS、输入尺寸 |
-| `gaze.*` / `behavior.*` | 见仓库 | 关注度与行为判定的置信度、IoU、冷却参数 |
+| `gaze.*` | 见仓库 | 关注度判定的置信度、热力图与头部尺寸参数 |
+| `behavior.mp_pointing.*` | 见仓库 | 指向检测的模型路径、跳帧与裁剪放大、四指角度阈值、四分类融合、目标归属（文件包含比 / 机箱重叠比与距离）与事件去重（合并秒数 / 宽限帧 / 防抖帧）参数 |
 | `bus.max_queue_size` | `1024` | 事件总线队列上限 |
-| `modules.*` | `true` | 各感知模块开关，未备齐资源的模块可置 `false` |
+| `modules.*` | `true` | 各感知模块开关（含 `evaluation`），未备齐资源的模块可置 `false`；关停的模块会自动从对齐 `expected_sources` 中剔除，不再拖住 `done` 判定 |
 | `rules.*` | `true` | 各规程状态机开关（含 `normal_comm`） |
 
 ---
@@ -389,7 +391,8 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 | 前端刷新后进度丢失 | Redis 连接失败；检查 `redis.*` 与实例可用性 |
 | 前端一直转圈 | 后端未在运行，或端口与 `app.port` 不一致 |
 | 同一秒"普通沟通开始"显示在"结束"之前 | 前端产物过旧；重新 `npm run build` 并强刷浏览器 |
-| 告警阈值不符合现场 | 调整 `supervision.*`、`gaze.*`、`behavior.*` 阈值后重启 |
+| 告警阈值不符合现场 | 调整 `supervision.*`、`gaze.*` 阈值后重启 |
+| 指向事件过密 / 过疏 | 调整 `behavior.mp_pointing.*`：判定松紧看 `file_contain_threshold`、`screen_overlap_threshold`、`straight_angle`、`point_thumb_gap`；事件稠密度看 `merge_seconds`、`grace_frames`、`debounce_frames`、`cooldown_sec` |
 | 前端页面未更新 | 确认已重新 `npm run build`，且产物位于后端静态兜底目录 |
 
 ---

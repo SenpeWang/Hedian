@@ -107,6 +107,30 @@ def _paths_from_dict(paths_dict: dict) -> "PathConfig":
     )
 
 
+def _expected_sources(config_dict: dict) -> set:
+    """按本轮启用的模块推导参与对齐的 source 集合.
+
+    gaze 内嵌于 tracker 进程（无独立子进程），故仅在 tracker 启用时才计入。
+
+    Args:
+        config_dict: 完整配置字典, 读取其中 "modules" 开关.
+
+    Returns:
+        参与 global_sec 对齐与流水线 done 判定的 source 名称集合.
+    """
+    modules_config = config_dict.get("modules", {})
+    expected_sources = set()
+    if modules_config.get("voice", False):
+        expected_sources.add("voice")
+    if modules_config.get("behavior", False):
+        expected_sources.add("behavior")
+    if modules_config.get("tracker", False):
+        expected_sources.add("tracking")
+        if modules_config.get("gaze", False):
+            expected_sources.add("gaze")
+    return expected_sources
+
+
 def _run_module_process(
     module_name: str,
     module_factory,
@@ -347,13 +371,9 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
     inference_sync = InferenceSync(
         fps=config_dict.get("fps", 30),
         # per-source 粒度：每个 source 独立上报进度与结束信号，彻底解耦各模态产出长度不一致问题
-        expected_sources={
-            "voice",  # 语音转录
-            "tracking",  # 目标跟踪与在岗人数 (tracker)
-            "behavior",  # 行为事件 (behavior)
-            "gaze",  # 凝视估计 (gaze)
-            # vis_front/vis_pop 走画进帧的 fMP4 通道, 不经推理流, 故不参与 done 判定
-        },
+        # 仅统计本轮实际启用的模块，避免被关停模块永久拖住 done 判定
+        # (vis_front/vis_pop 走画进帧的 fMP4 通道, 不经推理流, 故不参与 done 判定)
+        expected_sources=_expected_sources(config_dict),
         redis_host=REDIS_HOST,
         redis_port=REDIS_PORT,
         redis_db=REDIS_DB,
@@ -575,21 +595,30 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             "evaluation", config_dict.get("gpu_default", "1")
         )
     )
-    from evaluation.flow_evaluation_manager import FlowEvaluationManager
+    if config_dict.get("modules", {}).get("evaluation", True):
+        from evaluation.flow_evaluation_manager import FlowEvaluationManager
 
-    flow_evaluator = FlowEvaluationManager(
-        event_bus=event_bus,
-        result_dir=flow_result_dir,
-        fps=config_dict.get("fps", 30),
-        sync_fn=push_sync,  # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
-        direct_fn=push_direct,  # 评估报告(stream/report) ➔ 完全不经过对齐中间件
-        get_playback_sec_fn=lambda: (
-            app.state.ws_handler.get_playback_sec()
-            if app.state.ws_handler
-            else 0.0
-        ),
-    )
-    logger.info(f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}")
+        flow_evaluator = FlowEvaluationManager(
+            event_bus=event_bus,
+            result_dir=flow_result_dir,
+            fps=config_dict.get("fps", 30),
+            sync_fn=push_sync,  # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
+            direct_fn=push_direct,  # 评估报告(stream/report) ➔ 完全不经过对齐中间件
+            get_playback_sec_fn=lambda: (
+                app.state.ws_handler.get_playback_sec()
+                if app.state.ws_handler
+                else 0.0
+            ),
+        )
+        logger.info(
+            f"FlowEvaluationManager 已创建, 结果目录: {flow_result_dir}"
+        )
+    else:
+        flow_evaluator = None
+        logger.info(
+            "大模型评估已禁用(modules.evaluation=false), "
+            "跳过 FlowEvaluationManager 创建"
+        )
 
     def push_inference_event(event) -> None:
         """推理流推送回调.
@@ -610,7 +639,8 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             if flow_result_dir:
                 registry.save_all_results(flow_result_dir)
             try:
-                flow_evaluator.finalize()
+                if flow_evaluator is not None:
+                    flow_evaluator.finalize()
             except Exception as e:
                 logger.error(
                     f"FlowEvaluationManager finalize 失败: {e}", exc_info=True

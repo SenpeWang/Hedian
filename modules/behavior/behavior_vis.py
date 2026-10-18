@@ -12,7 +12,7 @@
 可视化风格：统一黄色半透明填充 + 实线闭合边框 + 质心标签（对齐 gaze_roi_app/visualizer）。
 """
 
-from typing import Any, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
@@ -144,3 +144,111 @@ def draw_trigger(
             (0, 0, 255),
             2,
         )
+
+
+# MediaPipe 21 关键点手部骨架连接（0 手腕, 1-4 拇指, 5-8 食指, 9-12 中指,
+# 13-16 无名指, 17-20 小指）
+HAND_EDGES: List[Tuple[int, int]] = [
+    (0, 1),
+    (1, 2),
+    (2, 3),
+    (3, 4),
+    (0, 5),
+    (5, 6),
+    (6, 7),
+    (7, 8),
+    (5, 9),
+    (9, 10),
+    (10, 11),
+    (11, 12),
+    (9, 13),
+    (13, 14),
+    (14, 15),
+    (15, 16),
+    (13, 17),
+    (17, 18),
+    (18, 19),
+    (19, 20),
+    (0, 17),
+]
+
+# 检测框配色（BGR）: hand 橙 / file 黄 / person 绿 / pointing_hand 红
+CLASS_BOX_COLORS: Dict[str, Tuple[int, int, int]] = {
+    "hand": (0, 200, 255),
+    "file": (255, 255, 0),
+    "person": (0, 255, 0),
+    "pointing_hand": (0, 0, 255),
+}
+
+
+def draw_class_boxes(
+    frame: np.ndarray,
+    detections: Optional[List[Dict[str, Any]]] = None,
+) -> None:
+    """按类别配色绘制 YOLO 检测框与类名标签.
+
+    Args:
+        frame: 视频帧，原地绘制.
+        detections: 检测项列表，每项含 bbox / name / conf 键.
+    """
+    for detection in detections or []:
+        bbox = detection["bbox"]
+        name = str(detection.get("name", ""))
+        color = CLASS_BOX_COLORS.get(name, (200, 200, 200))
+        x1, y1, x2, y2 = (int(value) for value in bbox)
+        cv2.rectangle(frame, (x1, y1), (x2, y2), color, 2)
+        label = f"{name} {detection.get('conf', 0.0):.2f}"
+        cv2.putText(
+            frame,
+            label,
+            (x1, max(12, y1 - 6)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.5,
+            color,
+            1,
+        )
+
+
+def draw_hand_landmarks(
+    frame: np.ndarray,
+    hands: Optional[List[Dict[str, Any]]] = None,
+    draw_all_hands: bool = True,
+) -> None:
+    """绘制手部 21 关键点骨架：指向手 = 红框 + 白线，其余手 = 橙框 + 灰线.
+
+    Args:
+        frame: 视频帧，原地绘制.
+        hands: 手部结果列表，每项含 bbox / landmarks / pointing 键.
+        draw_all_hands: 是否绘制所有检出到关键点的手；False 时只画指向手.
+    """
+    for hand in hands or []:
+        landmarks = hand.get("landmarks")
+        if landmarks is None:
+            continue
+        is_pointing = bool(hand.get("pointing"))
+        if not draw_all_hands and not is_pointing:
+            continue
+
+        box_color = (0, 0, 255) if is_pointing else (0, 200, 255)
+        skeleton_color = (255, 255, 255) if is_pointing else (160, 160, 160)
+        x1, y1, x2, y2 = (int(value) for value in hand["bbox"])
+        cv2.rectangle(frame, (x1, y1), (x2, y2), box_color, 2)
+
+        for start_index, end_index in HAND_EDGES:
+            start_point = (
+                int(landmarks[start_index][0]),
+                int(landmarks[start_index][1]),
+            )
+            end_point = (
+                int(landmarks[end_index][0]),
+                int(landmarks[end_index][1]),
+            )
+            cv2.line(frame, start_point, end_point, skeleton_color, 2)
+        for point in landmarks:
+            cv2.circle(
+                frame,
+                (int(point[0]), int(point[1])),
+                3,
+                skeleton_color,
+                -1,
+            )

@@ -169,6 +169,26 @@ def bbox_iou(box_a, box_b) -> float:
 
 
 # 姿态工具
+def bbox_containment_ratio(inner, outer) -> float:
+    """计算 inner 框被 outer 框覆盖的比例（交集面积 / inner 面积）.
+
+    与 bbox_iou 不同: 只关心 inner 是否被 outer 包住(如手框落在文件框内),
+    不因 outer 框远超 inner 而衰减, 故指向文件的包含判定用本函数.
+
+    Args:
+        inner: 待判定包含关系的检测框 [x1, y1, x2, y2].
+        outer: 可能包含 inner 的检测框 [x1, y1, x2, y2].
+
+    Returns:
+        inner 被 outer 覆盖的面积比例, 取值 0~1; inner 面积退化时返回 0.
+    """
+    ix1, iy1 = max(inner[0], outer[0]), max(inner[1], outer[1])
+    ix2, iy2 = min(inner[2], outer[2]), min(inner[3], outer[3])
+    intersection = max(0.0, ix2 - ix1) * max(0.0, iy2 - iy1)
+    inner_area = max(0.0, (inner[2] - inner[0]) * (inner[3] - inner[1]))
+    return intersection / inner_area if inner_area > 0 else 0.0
+
+
 class PoseTools:
     """姿态几何工具."""
 

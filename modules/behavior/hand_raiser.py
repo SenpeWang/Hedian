@@ -24,9 +24,9 @@ def is_hand_up(
 ) -> bool:
     """判断单臂是否处于举手状态.
 
-    几何规则（对齐 behavior-v1）:
+    几何规则（对齐 behavior-v2/hand_raise.py）:
     1. 肩膀与手腕关键点置信度需达到阈值；
-    2. 手腕垂直位置高于肩膀基准线（结合人体高度自适应比例阈值）；
+    2. 手腕垂直位置高于肩膀基准线（结合人体高度自适应比例阈值, 下限 20 像素）；
     3. 若肘部可见，手臂夹角 (shoulder-elbow-wrist) 需 >= 50 度，避免自然下垂或搭手误判。
 
     Args:
@@ -43,7 +43,7 @@ def is_hand_up(
         return False
     elbow_visible = elbow[2] >= conf_threshold
     ratio_thresh = bbox_height * (0.06 if elbow_visible else 0.12)
-    if wrist[1] > shoulder[1] - max(ratio_thresh, 15.0):
+    if wrist[1] > shoulder[1] - max(ratio_thresh, 20.0):
         return False
     if elbow_visible:
         angle = PoseTools.calc_angle(shoulder, elbow, wrist)

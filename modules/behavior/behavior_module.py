@@ -1,8 +1,8 @@
-"""行为检测模块入口.
+"""行为检测模块入口（指向检测采用 behavior-v2 的 MediaPipe 方案）.
 
-在单一 pop 视角（camPOP.mpg）上共享一次 YOLO 推理，
-串行运行手指指向屏幕（FingerScreenDetector）与手指指向文件（FingerFileDetector）两个判定器，
-举手检测由 tracker 模块在前置视角调用 HandRaiser，本模块通过 BehaviorStorage 共享事件落盘。
+在单一 pop 视角（camPOP.mpg）上运行「YOLO 四分类 + MediaPipe 21 关键点」指向检测器,
+统一判别手指指向屏幕（FingerScreen）与手指指向文件（FingerFile）并附带行为人角色;
+举手检测由 tracker 模块在前置视角调用 HandRaiser, 本模块通过 BehaviorStorage 共享事件落盘。
 """
 
 import logging
@@ -11,7 +11,6 @@ import time
 from typing import Any, Dict, List, Optional
 
 import cv2
-from ultralytics import YOLO
 
 from core.base_module import BaseModule
 from core.event_bus import EventBus, EventTopic
@@ -23,8 +22,7 @@ from modules.behavior.behavior_vis import (
     draw_roi_overlay,
     screen_polygons_as_tuples,
 )
-from modules.behavior.file_detector import FingerFileDetector
-from modules.behavior.screen_detect import FingerScreenDetector
+from modules.behavior.mp_pointing import MPPointingDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 
 logger = logging.getLogger("module.behavior")
@@ -33,6 +31,11 @@ _EVENT_TOPIC_MAP: Dict[str, EventTopic] = {
     "FINGER_SCREEN": EventTopic.BEHAVIOR_FINGER_SCREEN,
     "FINGER_FILE": EventTopic.BEHAVIOR_FINGER_FILE,
 }
+
+# 默认模型路径（相对项目根, 可被 config.behavior.mp_pointing 覆盖）
+_DEFAULT_WEIGHTS = "models/behavior/detect_4class.pt"
+_DEFAULT_POSE_MODEL = "models/behavior/pose.pt"
+_DEFAULT_UNION_WEIGHTS = "models/behavior/detect_3class_union.pt"
 
 
 class BehaviorModule(BaseModule):
@@ -57,8 +60,7 @@ class BehaviorModule(BaseModule):
             inference_stream: 前端推理流推送通道.
         """
         super().__init__(event_bus, config, paths, inference_stream)
-        self._screen_detector: Optional[FingerScreenDetector] = None
-        self._file_detector: Optional[FingerFileDetector] = None
+        self._pointing_detector: Optional[MPPointingDetector] = None
         self._result_storage: Optional[BehaviorStorage] = None
         self._vis_encoder: Optional[VisEncoder] = None
         self._events: List[Dict[str, Any]] = []
@@ -74,36 +76,52 @@ class BehaviorModule(BaseModule):
         """
         return "behavior"
 
+    def _resolve_path(self, configured_path: str, default_path: str) -> str:
+        """把配置中的相对模型路径解析为绝对路径（相对项目根）.
+
+        Args:
+            configured_path: 配置里的路径, 空串时回退默认值.
+            default_path: 默认相对路径.
+
+        Returns:
+            绝对路径字符串.
+        """
+        path = configured_path or default_path
+        if path and not path.startswith("/"):
+            path = str(self.paths.base_dir / path)
+        return path
+
     def initialize(self) -> bool:
-        """初始化行为检测模块的各判定器与事件订阅.
+        """初始化指向检测器与举手事件订阅.
 
         Returns:
             初始化成功返回 True，失败返回 False.
         """
         try:
-            behavior_config = self.config.get("behavior", {})
-            screen_config = behavior_config.get("screen", {})
-            file_config = behavior_config.get("file", {})
-
-            fps = self._read_video_fps("pop")
-
-            self._screen_detector = FingerScreenDetector(
-                detect_conf=screen_config.get("detect_conf", 0.25),
-                screen_overlap_threshold=screen_config.get(
-                    "screen_overlap_threshold", 0.2
-                ),
-                max_distance=screen_config.get("max_dist", 20),
-                cooldown_sec=screen_config.get("cooldown_sec", 1.5),
-                fps=fps,
+            pointing_config = self.config.get("behavior", {}).get(
+                "mp_pointing", {}
+            )
+            weights_path = self._resolve_path(
+                str(pointing_config.get("weights", "")), _DEFAULT_WEIGHTS
+            )
+            pose_model_path = self._resolve_path(
+                str(pointing_config.get("pose_model", "")), _DEFAULT_POSE_MODEL
+            )
+            union_config = pointing_config.get(
+                "union_weights", _DEFAULT_UNION_WEIGHTS
+            )
+            union_weights_path = (
+                self._resolve_path(str(union_config), _DEFAULT_UNION_WEIGHTS)
+                if union_config
+                else None
             )
 
-            self._file_detector = FingerFileDetector(
-                detect_conf=file_config.get("detect_conf", 0.25),
-                file_iou_threshold=file_config.get("file_iou_threshold", 0.2),
-                cooldown_sec=file_config.get("cooldown_sec", 1.5),
-                fps=fps,
+            self._pointing_detector = MPPointingDetector(
+                weights_path=weights_path,
+                pose_model_path=pose_model_path,
+                config=pointing_config,
+                union_weights_path=union_weights_path,
             )
-
             self._result_storage = BehaviorStorage(self.paths)
             self.event_bus.subscribe(
                 EventTopic.BEHAVIOR_HAND_RAISED, self._on_hand_raised
@@ -118,44 +136,26 @@ class BehaviorModule(BaseModule):
             )
             return False
 
-    def _read_video_fps(self, video_key: str) -> float:
-        """读取配置中指定视角视频的真实帧率, 读不到直接报错(不兜底,避免时间轴错位).
-
-        Args:
-            video_key: 视频键名（如 'pop'）.
-
-        Returns:
-            视频真实帧率.
-
-        Raises:
-            RuntimeError: 视频无法打开或帧率读取失败.
-        """
-        videos_config = self.config.get("videos", {})
-        rel_path = videos_config.get(
-            video_key, f"data/videos/cam{video_key.upper()}.mpg"
-        )
-        abs_path = str(self.paths.base_dir / rel_path)
-        cap = cv2.VideoCapture(abs_path)
-        if not cap.isOpened():
-            raise RuntimeError(
-                f"无法打开视频读取帧率 ({video_key}): {abs_path}"
-            )
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        cap.release()
-        if not fps or fps <= 0:
-            raise RuntimeError(
-                f"读取视频帧率失败 ({video_key}, CAP_PROP_FPS={fps}): {abs_path}"
-            )
-        return float(fps)
-
-    def _append_event(self, local_sec: float, key_moment: str) -> None:
+    def _append_event(
+        self,
+        local_sec: float,
+        key_moment: str,
+        role: Optional[str] = None,
+    ) -> None:
         """线程安全地收集关键事件 + 实时落盘(保证评估提取时文件有全部事件).
 
         Args:
             local_sec: 事件发生的时间戳（秒）.
             key_moment: 关键时刻描述文本.
+            role: 行为人角色（机组长/操作员/机组长和操作员）, 不可判定时为 None.
         """
-        event = {"localSec": round(local_sec, 2), "key_moment": key_moment}
+        event: Dict[str, Any] = {
+            "localSec": round(local_sec, 2),
+            "key_moment": key_moment,
+            "source": "behavior",
+        }
+        if role:
+            event["role"] = role
         with self._events_lock:
             self._events.append(event)
         # 实时落盘(不等到 save_results), 保证评估提取时 behavior_key_moments.json 有全部事件
@@ -179,22 +179,19 @@ class BehaviorModule(BaseModule):
     def _process_pop_view(
         self,
         video_path: str,
-        model: Any,
-        screen_detector: FingerScreenDetector,
-        file_detector: FingerFileDetector,
-        tag: str,
         video_source: str,
     ) -> None:
-        """在单一 pop 视角上共享一次推理并运行两个判定器.
+        """在 pop 视角上运行指向检测（YOLO 四分类 + MediaPipe）.
 
         Args:
             video_path: pop 视频文件路径.
-            model: 共享的 YOLO 行为检测模型实例.
-            screen_detector: 手指屏幕检测器.
-            file_detector: 手指文件检测器.
-            tag: 推理事件标签.
-            video_source: 视频流推送源名称.
+            video_source: 推理流进度 source 名称.
         """
+        detector = self._pointing_detector
+        if detector is None:
+            logger.error("[pop_view] 指向检测器未初始化，跳过推理")
+            return
+
         try:
             video_capture = cv2.VideoCapture(video_path)
             if not video_capture.isOpened():
@@ -208,14 +205,11 @@ class BehaviorModule(BaseModule):
                 )
             fps = float(raw_fps)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
+            total_duration = (total_frames / fps) if total_frames > 0 else 0.0
             frame_count = 0
 
-            infer_every_n_frames = 5
-            cached_results: Any = None
-
             logger.info(
-                f"[pop_view] 开始处理: {video_path} "
-                f"({total_frames}帧, {fps:.1f}fps)"
+                f"[pop_view] 开始处理: {video_path} ({total_frames}帧, {fps:.1f}fps)"
             )
 
             # 视觉流编码器:pop 视角(无音频) -> fMP4 推 Redis Stream
@@ -234,19 +228,16 @@ class BehaviorModule(BaseModule):
                 if not frame_read_success:
                     break
 
-                timestamp = frame_count / fps
                 frame_count += 1
+                timestamp = frame_count / fps
 
                 self.inference_stream.update_module_time(
                     video_source, timestamp
                 )
                 if total_frames > 0:
-                    now = time.time()
-                    if now - self._last_progress_push >= 0.3:
-                        self._last_progress_push = now
-                        progress_percentage = min(
-                            100.0, timestamp / (total_frames / fps) * 100
-                        )
+                    current_time = time.time()
+                    if current_time - self._last_progress_push >= 0.3:
+                        self._last_progress_push = current_time
                         self.push_display(
                             "progress",
                             {
@@ -254,37 +245,22 @@ class BehaviorModule(BaseModule):
                                 "tag": "progress",
                                 "data": {
                                     "label": "pop",
-                                    "pct": round(progress_percentage, 1),
+                                    "pct": min(
+                                        100.0,
+                                        round(
+                                            timestamp / total_duration * 100.0,
+                                            1,
+                                        ),
+                                    ),
                                 },
                             },
                         )
 
-                if (
-                    frame_count % infer_every_n_frames == 0
-                    or cached_results is None
-                ):
-                    cached_results = model.track(
-                        frame,
-                        conf=0.2,
-                        iou=0.5,
-                        persist=True,
-                        verbose=False,
-                    )[0]
-                results = cached_results
+                # 先画 ROI 底层,检测器随后在帧上叠加检测框与手部关键点(in-place)
+                draw_roi_overlay(frame, screen_polygons_as_tuples())
+                events = detector.process_frame(frame, frame_count, fps)
 
-                # 先画 ROI 底层,detector 随后在 detect 中画检测框+触发框(in-place)
-                if self._vis_encoder is not None:
-                    draw_roi_overlay(frame, screen_polygons_as_tuples())
-                events: List[Dict[str, Any]] = []
-                events += screen_detector.detect(
-                    frame, results, frame_count, fps
-                )
-                events += file_detector.detect(
-                    frame, results, frame_count, fps
-                )
-
-                # POP 视角标注已由 detector 在 detect 中画进帧(检测框+触发),
-                # 此处把带标注帧喂入视觉流编码器 -> fMP4 -> 前端 MSE
+                # POP 视角标注已由检测器画进帧, 此处把带标注帧喂入视觉流编码器 -> fMP4 -> 前端 MSE
                 if self._vis_encoder is not None:
                     try:
                         self._vis_encoder.feed_frame(frame)
@@ -293,18 +269,21 @@ class BehaviorModule(BaseModule):
 
                 for event in events:
                     event_sec = round(event.get("localSec", timestamp), 2)
-                    self._append_event(event_sec, event.get("state", tag))
+                    role = event.get("role")
+                    self._append_event(
+                        event_sec, event.get("state", "behavior"), role
+                    )
 
                     payload = {
                         "localSec": event_sec,
-                        "tag": event.get("event", tag),
+                        "tag": event.get("event", "behavior"),
                         "data": {
                             key: value
                             for key, value in event.items()
                             if key != "localSec"
                         },
                     }
-                    self.push_display(tag, payload)
+                    self.push_display("behavior", payload)
                     topic = _EVENT_TOPIC_MAP.get(event.get("event", ""))
                     if topic is None:
                         logger.warning(
@@ -320,14 +299,15 @@ class BehaviorModule(BaseModule):
                         else 0
                     )
                     logger.info(
-                        f"[pop_view] {frame_count}/{total_frames}帧 "
-                        f"{progress_percentage}%"
+                        f"[pop_view] {frame_count}/{total_frames}帧 {progress_percentage}%"
                     )
 
             video_capture.release()
             if self._vis_encoder is not None:
                 self._vis_encoder.finalize()
-            logger.info(f"[pop_view] 完成，共 {frame_count} 帧")
+            logger.info(
+                f"[pop_view] 完成，共 {frame_count} 帧，{len(self._events)} 条事件"
+            )
 
         except Exception as pop_error:
             logger.error(
@@ -335,7 +315,7 @@ class BehaviorModule(BaseModule):
             )
 
     def process_video(self, video_path: str) -> None:
-        """在单一 pop 视角上处理行为检测.
+        """在单一 pop 视角上处理指向检测.
 
         Args:
             video_path: 视频文件路径（可被配置项覆盖）.
@@ -346,24 +326,10 @@ class BehaviorModule(BaseModule):
             base_dir / videos_config.get("pop", "data/videos/camPOP.mpg")
         )
 
-        model_path = str(
-            self.paths.get_model_path("behavior", "behavior_yolo.pt")
+        logger.info(
+            f"pop 视角指向检测（YOLO 四分类 + MediaPipe）: {pop_video}"
         )
-        model = YOLO(model_path)
-
-        logger.info("在 pop 视角上共享一次推理运行两个行为检测器:")
-        logger.info(f"  手指屏幕 + 手指文件: {pop_video}")
-
-        self._process_pop_view(
-            pop_video,
-            model,
-            self._screen_detector,
-            self._file_detector,
-            "behavior",
-            "video_pop",
-        )
-
-        logger.info(f"pop 视角处理完成，共 {len(self._events)} 条事件")
+        self._process_pop_view(pop_video, "video_pop")
 
     def save_results(self, run_id: str) -> None:
         """收尾兜底保存: 实时落盘已逐条写入, 此处仅合并补写缺失事件(去重).
@@ -374,3 +340,5 @@ class BehaviorModule(BaseModule):
         with self._events_lock:
             events_list = list(self._events)
         self._result_storage.merge_events(run_id, events_list)
+        if self._pointing_detector is not None:
+            self._pointing_detector.close()
