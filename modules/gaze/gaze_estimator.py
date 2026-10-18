@@ -102,17 +102,17 @@ class GazeEstimator:
         normalized_boxes = []
         valid_boxes = []
 
-        for box in head_boxes:
-            x1 = np.clip(box.x1 * inv_width, 0.0, 1.0)
-            y1 = np.clip(box.y1 * inv_height, 0.0, 1.0)
-            x2 = np.clip(box.x2 * inv_width, 0.0, 1.0)
-            y2 = np.clip(box.y2 * inv_height, 0.0, 1.0)
+        for bbox in head_boxes:
+            x1 = np.clip(bbox.x1 * inv_width, 0.0, 1.0)
+            y1 = np.clip(bbox.y1 * inv_height, 0.0, 1.0)
+            x2 = np.clip(bbox.x2 * inv_width, 0.0, 1.0)
+            y2 = np.clip(bbox.y2 * inv_height, 0.0, 1.0)
 
             if x2 <= x1 or y2 <= y1:
                 continue
 
             normalized_boxes.append([x1, y1, x2, y2])
-            valid_boxes.append(box)
+            valid_boxes.append(bbox)
 
         if not normalized_boxes:
             return None, None, []

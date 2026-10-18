@@ -81,11 +81,11 @@ class FingerFileDetector(BaseDetector):
         for index in range(len(classes)):
             if confidences[index] < self.detect_conf:
                 continue
-            box = boxes_xyxy[index]
+            bbox = boxes_xyxy[index]
             if classes[index] == CLASS_POINTING_HAND:
-                hands.append(box)
+                hands.append(bbox)
             elif classes[index] == CLASS_FILE:
-                files.append(box)
+                files.append(bbox)
 
         draw_detection_boxes(frame, hands=hands, files=files)
 
