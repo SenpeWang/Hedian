@@ -53,6 +53,18 @@ from datetime import datetime
 parser = argparse.ArgumentParser(description="核电站监护制合规检测系统")
 parser.add_argument("--gpu", type=str, default="0", help="GPU 编号 (默认: 0)")
 parser.add_argument("--config", type=str, default=None, help="配置文件路径")
+parser.add_argument(
+    "--port",
+    type=int,
+    default=None,
+    help="HTTP 端口 (默认: config.yaml 的 app.port)",
+)
+parser.add_argument(
+    "--redis-db",
+    type=int,
+    default=None,
+    help="Redis 库号 (默认: config.yaml 的 redis.db)",
+)
 args = parser.parse_args()
 
 # 视角级 GPU 分配: 业务子进程经 _run_module_process 按 module_name 取
@@ -694,6 +706,16 @@ def main() -> None:
     REDIS_HOST = config_dict["redis_host"]
     REDIS_PORT = config_dict["redis_port"]
     REDIS_DB = config_dict["redis_db"]
+    # CLI 覆盖: --port / --redis-db 优先于配置文件, 便于同机多实例并行
+    if args.port is not None:
+        config_dict.setdefault("app", {})["port"] = args.port
+    if args.redis_db is not None:
+        config_dict["redis_db"] = args.redis_db
+        REDIS_DB = args.redis_db
+    logger.info(
+        f"Web 端口: {config_dict.get('app', {}).get('port', 5002)}, "
+        f"Redis: {REDIS_HOST}:{REDIS_PORT}/{REDIS_DB}"
+    )
     config_dict["_log_file"] = log_file
     config_dict["video_path"] = config.video_path
     paths_dict = {
