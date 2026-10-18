@@ -940,11 +940,16 @@ class OCSORTByteTracker:
         """
         converted = []
         for det in detections:
-            box = det["box"]
+            bbox = det["box"]
             converted.append(
                 {
                     "tlwh": np.array(
-                        [box[0], box[1], box[2] - box[0], box[3] - box[1]]
+                        [
+                            bbox[0],
+                            bbox[1],
+                            bbox[2] - bbox[0],
+                            bbox[3] - bbox[1],
+                        ]
                     ),
                     "score": det["confidence"],
                 }

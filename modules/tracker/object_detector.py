@@ -90,10 +90,10 @@ class ObjectDetector:
             boxes = result.boxes
             if boxes is None:
                 continue
-            for box in boxes:
-                x_min, y_min, x_max, y_max = box.xyxy[0].cpu().numpy()
-                confidence = float(box.conf[0].cpu().numpy())
-                class_id = int(box.cls[0].cpu().numpy())
+            for bbox in boxes:
+                x_min, y_min, x_max, y_max = bbox.xyxy[0].cpu().numpy()
+                confidence = float(bbox.conf[0].cpu().numpy())
+                class_id = int(bbox.cls[0].cpu().numpy())
 
                 if class_id == 0:  # person
                     detection_item = {
