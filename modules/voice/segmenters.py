@@ -13,7 +13,7 @@
 
   - ``silence_vad``：在线能量 VAD，静音达到阈值即封段；长语音强制切分时
     会在最近窗口内**挑能量最低点**作为切点（词边界保护），不再盲切 30s；
-  - ``fixed_window``：固定窗 + 重叠（旧版 `Hedian` 的滑窗逻辑），用于 A/B 对比。
+  - ``fixed_window``：固定窗 + 重叠，用于 A/B 对比。
 
 新增策略只需继承 `BaseSegmenter` 并用 `@register_segmenter` 装饰即可，便于
 持续试验"哪种切片转录效果更好"。
@@ -394,7 +394,7 @@ class SilenceVadSegmenter(BaseSegmenter):
 
 
 class FixedWindowSegmenter(BaseSegmenter):
-    """固定窗 + 重叠切片（旧版 `Hedian` 的滑窗逻辑）.
+    """固定窗 + 重叠切片.
 
     仅用于 A/B 对比：不依赖静音检测，按固定步长均匀切分。切点与语音内容无关，
     因此更容易切在字中间；配合 `boundary_overlap_sec` 与跨段句子组装可缓解。
