@@ -2,10 +2,24 @@
 // 状态量(人数/凝视): 后端 globalSec 对齐后实时推送, 前端收到即实时显示(推理侧视角, 不被播放时刻卡住)
 // 事件流(流程开始/结束): 与画面严格同步(sec ≤ 播放时刻, 播放侧视角)
 import { ref, computed, type Ref } from 'vue'
-import type { FlowEvent, FlowType, GazeState, PeopleState } from '../types'
+import type {
+  BehaviorEvent,
+  FlowEvent,
+  FlowType,
+  GazeState,
+  NotifyEvent,
+  PeopleState
+} from '../types'
 import { createLogger } from '../media/logger'
 
 const log = createLogger('notify')
+
+// 行为检测事件 → [颜色, 中文名]: 与流程事件同属事件流(按播放时刻对齐)
+const behaviorTypeMap: Record<string, [string, string]> = {
+  HAND_RAISED: ['#ffaa00', '举手'],
+  FINGER_SCREEN: ['#00d4ff', '手指指向屏幕'],
+  FINGER_FILE: ['#00ffcc', '手指指向文件']
+}
 
 const flowTypeMap: Record<FlowType, [string, string]> = {
   supervision: ['#00d4ff', '监护制'],
@@ -27,6 +41,7 @@ export function useNotify(_currentPlaybackSec: Ref<number>) {
   const people = ref<PeopleState>({ count: '--', alert: '就绪', alertColor: '#8899aa' })
   const gaze = ref<GazeState>({ hasHeads: false, headsCount: 0, anyInRoi: false, awayDuration: 0 })
   const rawFlowEvents = ref<FlowEvent[]>([])
+  const rawBehaviorEvents = ref<BehaviorEvent[]>([])
 
   function addTracking(d: unknown): void {
     const src = d as {
@@ -109,16 +124,65 @@ export function useNotify(_currentPlaybackSec: Ref<number>) {
     else rawFlowEvents.value.splice(idx, 0, item)
   }
 
+  // 行为检测事件: 去重 + 按时刻有序插入(同流程事件)
+  function addBehavior(d: unknown): void {
+    const src = d as { localSec?: number; tag?: string }
+    const sec = Number(src.localSec ?? 0)
+    const tag = String(src.tag || '')
+    const [color, name] = behaviorTypeMap[tag] ?? ['#8899aa', tag || '行为事件']
+    if (rawBehaviorEvents.value.find((e) => e.tag === tag && Math.abs(e.sec - sec) < 0.1)) {
+      return
+    }
+    const item: BehaviorEvent = { sec: Number(sec.toFixed(2)), tag, name, color }
+    const idx = rawBehaviorEvents.value.findIndex((e) => e.sec > item.sec)
+    if (idx < 0) rawBehaviorEvents.value.push(item)
+    else rawBehaviorEvents.value.splice(idx, 0, item)
+  }
+
   // 事件流: 严格同步, 与画面同一时刻(无提前量)
   const flowEvents = computed(() =>
     rawFlowEvents.value.filter((e) => e.sec <= _currentPlaybackSec.value)
+  )
+
+  // 行为事件: 与流程事件同一过滤语义(sec ≤ 播放时刻), 保证与画面对齐
+  const behaviorEvents = computed(() =>
+    rawBehaviorEvents.value.filter((e) => e.sec <= _currentPlaybackSec.value)
+  )
+
+  // 通知栏统一事件流: 流程事件 + 行为检测事件, 合并后按时刻排序
+  const notifyEvents = computed<NotifyEvent[]>(() =>
+    [
+      ...flowEvents.value.map((e) => ({
+        sec: e.sec,
+        text: `${e.name}${e.isStart ? '开始' : '结束'}`,
+        color: e.color,
+        key: `flow-${e.flowType}-${e.sec}-${e.isStart ? 1 : 0}-${e.flowId ?? 0}`
+      })),
+      ...behaviorEvents.value.map((e) => ({
+        sec: e.sec,
+        text: e.name,
+        color: e.color,
+        key: `behavior-${e.tag}-${e.sec}`
+      }))
+    ].sort((a, b) => a.sec - b.sec || a.key.localeCompare(b.key))
   )
 
   function reset(): void {
     people.value = { count: '--', alert: '就绪', alertColor: '#8899aa' }
     gaze.value = { hasHeads: false, headsCount: 0, anyInRoi: false, awayDuration: 0 }
     rawFlowEvents.value = []
+    rawBehaviorEvents.value = []
   }
 
-  return { people, gaze, flowEvents, addTracking, addGaze, addFlow, reset }
+  return {
+    people,
+    gaze,
+    flowEvents,
+    notifyEvents,
+    addTracking,
+    addGaze,
+    addFlow,
+    addBehavior,
+    reset
+  }
 }
