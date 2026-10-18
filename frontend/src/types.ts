@@ -9,6 +9,23 @@ export interface VoiceEntry {
 }
 
 /** 系统通知里的一条流程开始/结束事件 */
+// 行为检测事件(举手 / 手指指向屏幕 / 手指指向文件)
+export interface BehaviorEvent {
+  sec: number
+  tag: string
+  name: string
+  color: string
+}
+
+// 通知栏事件流的一条: 流程事件与行为检测事件合并后的统一渲染形状
+export interface NotifyEvent {
+  sec: number
+  text: string
+  color: string
+  // 去重与同秒稳定排序键
+  key: string
+}
+
 export interface FlowEvent {
   sec: number
   flowType: FlowType

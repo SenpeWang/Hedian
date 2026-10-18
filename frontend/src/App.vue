@@ -33,6 +33,7 @@ function handleBatch(raw: Record<string, unknown>): void {
   if (Array.isArray(d.voice)) for (const v of d.voice) transcript.addVoice(v)
   if (Array.isArray(d.tracking)) for (const t of d.tracking) notify.addTracking(t)
   if (Array.isArray(d.gaze)) notify.addGaze(d.gaze)
+  if (Array.isArray(d.behavior)) for (const b of d.behavior) notify.addBehavior(b)
 }
 
 // 内核 → 业务 store 路由注册(延迟注入破循环依赖)
@@ -101,7 +102,7 @@ const ws = {
   voiceEntries: transcript.voiceEntries,
   people: notify.people,
   gaze: notify.gaze,
-  flowEvents: notify.flowEvents,
+  notifyEvents: notify.notifyEvents,
   segCards: reports.segCards,
   supN: reports.supN,
   ticketN: reports.ticketN,
@@ -155,7 +156,7 @@ const ws = {
     <NotifyPanel
       :people="ws.people.value"
       :gaze="ws.gaze.value"
-      :flow-events="ws.flowEvents.value"
+      :events="ws.notifyEvents.value"
       :fmt="ws.fmt"
     />
     <ReportPanel

@@ -1,20 +1,20 @@
 <!-- 系统通知栏: 两类状态栏
      · 状态量状态栏(监控室人数/凝视状态): getLatestAt 取最新可得值, 持续显示
-     · 事件流状态栏(流程事件列表): filter 累积已发生事件, 只增不减 -->
+     · 事件流状态栏(流程事件 + 行为检测事件): filter 累积已发生事件, 只增不减 -->
 <script setup lang="ts">
 import { ref } from 'vue'
-import type { PeopleState, GazeState, FlowEvent } from '../types'
+import type { PeopleState, GazeState, NotifyEvent } from '../types'
 import { useScrollBottom } from '../composables/useScrollBottom'
 
 const props = defineProps<{
   people: PeopleState
   gaze: GazeState
-  flowEvents: FlowEvent[]
+  events: NotifyEvent[]
   fmt: (s: number) => string
 }>()
 
 const flowEl = ref<HTMLElement | null>(null)
-useScrollBottom(flowEl, () => props.flowEvents.length)
+useScrollBottom(flowEl, () => props.events.length)
 
 // 监控室人数颜色：>=3人绿色，1-2人黄色，0人红色
 function peopleColor(): string {
@@ -92,13 +92,13 @@ function awayPct() {
     <!-- [事件流状态栏] 流程事件列表: 累积显示已发生的流程开始/结束 -->
     <div ref="flowEl" class="flow-events">
       <div
-        v-for="ev in flowEvents"
-        :key="ev.flowType + ev.sec + ev.isStart"
+        v-for="ev in events"
+        :key="ev.key"
         class="flow-event"
         :style="{ borderLeftColor: ev.color }"
       >
         <span class="ts">[{{ fmt(ev.sec) }}]</span>
-        <span :style="{ color: ev.color }">{{ ev.name }}{{ ev.isStart ? '开始' : '结束' }}</span>
+        <span :style="{ color: ev.color }">{{ ev.text }}</span>
       </div>
     </div>
   </div>
