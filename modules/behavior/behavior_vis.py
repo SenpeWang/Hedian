@@ -103,8 +103,8 @@ def draw_detection_boxes(
         hands: pointing_hand 检测框列表.
         files: file 检测框列表.
     """
-    for box in files or []:
-        x1, y1, x2, y2 = map(int, box)
+    for bbox in files or []:
+        x1, y1, x2, y2 = map(int, bbox)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 255, 0), 2)
         cv2.putText(
             frame,
@@ -115,8 +115,8 @@ def draw_detection_boxes(
             (255, 255, 0),
             1,
         )
-    for box in hands or []:
-        x1, y1, x2, y2 = map(int, box)
+    for bbox in hands or []:
+        x1, y1, x2, y2 = map(int, bbox)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (255, 0, 255), 2)
 
 
@@ -132,8 +132,8 @@ def draw_trigger(
         hands: 触发事件的目标框列表.
         label: 触发标签文本.
     """
-    for box in hands or []:
-        x1, y1, x2, y2 = map(int, box)
+    for bbox in hands or []:
+        x1, y1, x2, y2 = map(int, bbox)
         cv2.rectangle(frame, (x1, y1), (x2, y2), (0, 0, 255), 3)
         cv2.putText(
             frame,
