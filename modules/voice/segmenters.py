@@ -63,12 +63,12 @@ class BaseSegmenter(ABC):
 
     name: ClassVar[str] = "base"
 
-    def __init__(self, sample_rate: int = SAMPLE_RATE, **cfg: Any) -> None:
+    def __init__(self, sample_rate: int = SAMPLE_RATE, **config: Any) -> None:
         """初始化帧缓冲.
 
         Args:
             sample_rate: 采样率（Hz）.
-            **cfg: 策略参数（由子类解释，未识别的键忽略）.
+            **config: 策略参数（由子类解释，未识别的键忽略）.
         """
         self.sample_rate = int(sample_rate)
         self._frame_len = max(1, int(round(FRAME_SEC * self.sample_rate)))
@@ -77,7 +77,7 @@ class BaseSegmenter(ABC):
         self._pending = np.zeros((0,), dtype=np.float32)
         self._pending_start = 0.0
         self._index = 0
-        self._cfg = dict(cfg)
+        self._config = dict(config)
 
     # ── 对外接口 ────────────────────────────────────────────────
 
@@ -150,7 +150,7 @@ class BaseSegmenter(ABC):
         Returns:
             含 name 与参数的字典.
         """
-        return {"name": self.name, **self._cfg}
+        return {"name": self.name, **self._config}
 
     # ── 子类实现 ────────────────────────────────────────────────
 
@@ -217,7 +217,7 @@ class SilenceVadSegmenter(BaseSegmenter):
         max_chunk: float = 30.0,
         split_search_sec: float = 1.0,
         split_margin_db: float = 6.0,
-        **cfg: Any,
+        **config: Any,
     ) -> None:
         """初始化在线 VAD 切片器.
 
@@ -231,9 +231,9 @@ class SilenceVadSegmenter(BaseSegmenter):
             split_search_sec: 强制切分时回看并寻找最低能量点的窗口（秒）.
             split_margin_db: 强制切分时"接近最低能量"的容差（dB）；从窗口末尾
                 向前找第一个落入该容差的帧，既避开字中间又尽量少截短段落.
-            **cfg: 透传给基类.
+            **config: 透传给基类.
         """
-        super().__init__(sample_rate=sample_rate, **cfg)
+        super().__init__(sample_rate=sample_rate, **config)
         self.noise_db = float(noise_db)
         self.min_silence = float(min_silence)
         self.speech_pad = float(speech_pad)
@@ -408,7 +408,7 @@ class FixedWindowSegmenter(BaseSegmenter):
         window_sec: float = 20.0,
         overlap_sec: float = 5.0,
         min_speech: float = 0.35,
-        **cfg: Any,
+        **config: Any,
     ) -> None:
         """初始化固定窗切片器.
 
@@ -417,9 +417,9 @@ class FixedWindowSegmenter(BaseSegmenter):
             window_sec: 窗长（秒）.
             overlap_sec: 相邻窗重叠时长（秒）.
             min_speech: 末尾残窗短于该时长时丢弃（秒）.
-            **cfg: 透传给基类.
+            **config: 透传给基类.
         """
-        super().__init__(sample_rate=sample_rate, **cfg)
+        super().__init__(sample_rate=sample_rate, **config)
         self.window_sec = float(window_sec)
         self.overlap_sec = float(overlap_sec)
         self.min_speech = float(min_speech)
@@ -513,14 +513,14 @@ def available_segmenters() -> List[str]:
 
 
 def build_segmenter(
-    name: str, sample_rate: int = SAMPLE_RATE, **cfg: Any
+    name: str, sample_rate: int = SAMPLE_RATE, **config: Any
 ) -> BaseSegmenter:
     """按名字构造切片策略实例.
 
     Args:
         name: 策略名（见 `available_segmenters`）.
         sample_rate: 采样率（Hz）.
-        **cfg: 策略参数.
+        **config: 策略参数.
 
     Returns:
         切片策略实例.
@@ -533,7 +533,7 @@ def build_segmenter(
         raise ValueError(
             f"未知切片策略 '{name}'，可选: {available_segmenters()}"
         )
-    return _SEGMENTER_REGISTRY[key](sample_rate=sample_rate, **cfg)
+    return _SEGMENTER_REGISTRY[key](sample_rate=sample_rate, **config)
 
 
 register_segmenter(SilenceVadSegmenter)
