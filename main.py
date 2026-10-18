@@ -352,7 +352,7 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             "tracking",  # 目标跟踪与在岗人数 (tracker)
             "behavior",  # 行为事件 (behavior)
             "gaze",  # 凝视估计 (gaze)
-            # vis_front/vis_pop 已改为画进帧 fMP4,不再走推理流,故不参与 done 判定
+            # vis_front/vis_pop 走画进帧的 fMP4 通道, 不经推理流, 故不参与 done 判定
         },
         redis_host=REDIS_HOST,
         redis_port=REDIS_PORT,
