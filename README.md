@@ -7,8 +7,8 @@
 | 后端 | Python 3.10 · FastAPI · Redis Stream+Hash · ffmpeg fMP4 |
 |------|------|
 | 前端 | Vue 3 · TypeScript · Vite · ESLint + Prettier · MSE 流式播放 |
-| 感知 | YOLO11 检测 · YOLO26s 姿态 · OC-SORT 跟踪 · Qwen3-ASR 流式语音对齐 · Qwen3-8B 评估 |
-| 代码规模 | 58 个 Python 文件 / 约 15,000 行 · 27 个前端源文件 / 约 2,600 行 |
+| 感知 | YOLO11 检测 · YOLO26s 姿态 · OC-SORT 跟踪 · MediaPipe 指向手势 · Qwen3-ASR 流式语音对齐 · Qwen3-8B 评估 |
+| 代码规模 | 57 个 Python 文件 / 约 16,000 行 · 27 个前端源文件 / 约 2,600 行 |
 
 ---
 
@@ -23,7 +23,6 @@
 - [接口参考](#接口参考)
 - [推送与交互逻辑](#推送与交互逻辑)
 - [语音流式流水线](#语音流式流水线)
-- [普通沟通流程](#普通沟通流程)
 - [项目结构](#项目结构)
 - [故障排查](#故障排查)
 - [开发说明](#开发说明)
@@ -98,7 +97,7 @@ flowchart LR
 | Tracker | 人员追踪 | 目标检测 + 姿态估计 + 多目标跟踪，输出操作人 / 监护人身份 |
 | Gaze | 眼睛关注度 | 头部姿态 + 视线估计，判定是否注视关键区域 |
 | Voice | 语音转录 | **流式流水线**：增量读音频 + 在线切片 + 跨段成句 + 字词级时间对齐 + 行业术语归一化，支撑唱票比对 |
-| Behavior | 行为检测 | 举手、手指屏幕、手指文件三类关键动作 |
+| Behavior | 行为检测 | 举手、手指屏幕、指向文件三类关键动作；指向判定采用 YOLO 四分类 + MediaPipe 21 关键点手势规则，并在事件时刻判别人手角色（机组长 / 操作员） |
 | Rules | 规程判定 | 监护制 / 自唱票 / 信息通报 / 人员状态 / **普通沟通** 五大状态机实时研判 + 违规告警 |
 | Evaluation | 合规评估 | 大模型基于完整多模态证据链输出合规结论与打分 |
 | Frontend | 流式可视化 | 视频、字幕（关键词标红）、关注度热力图、告警实时推送，断点续看，流程通知同秒稳定排序 |
@@ -123,23 +122,24 @@ flowchart LR
 
 ### 模型权重 → `models/`
 
-| 路径 | 用途 |
-|------|------|
-| `detection/yolo11_MOT.pt` | 人员检测（含 MOT 跟踪头） |
-| `detection/yolo26s-pose.pt` | 姿态估计 |
-| `behavior/behavior_yolo.pt` | 行为检测 |
-| `behavior/behavior_yolo26s-pose.pt` | 行为姿态估计 |
-| `gaze/yolov8n_head.onnx` | 头部检测 |
-| `gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 |
-| `evaluation/Qwen3-8B` | 合规评估主模型 |
-| `evaluation/Qwen2.5-1.5B-Instruct` | 备用评估模型 |
-| `voice/qwen/Qwen3-ASR-0.6B` | 语音转录（如有微调权重可将 `voice.model_path` 指向之） |
-| `voice/qwen/Qwen3-ForcedAligner-0.6B` | 字词级对齐 |
+| 本机绝对路径 | 用途 |
+|---|---|
+| `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo11_MOT.pt` | 人员检测（含 MOT 跟踪头） |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo26s-pose.pt` | 姿态估计（举手检测与 MOT 姿态） |
+| `/home/zhanhaoliang/hedian-2/models/behavior/detect_4class.pt` | 行为检测主模型（hand / file / person / pointing_hand 四分类） |
+| `/home/zhanhaoliang/hedian-2/models/behavior/pose.pt` | 行为角色判别姿态模型（机组长 / 操作员，事件时刻触发；双人场景比 yolo26s-pose 更稳） |
+| `/home/zhanhaoliang/hedian-2/models/behavior/detect_3class_union.pt` | 可选并集召回模型（三分类 hand / file / person），补手框召回 |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/yolov8n_head.onnx` | 头部检测 |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen3-8B` | 合规评估主模型 |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen2.5-1.5B-Instruct` | 备用评估模型 |
+| `/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e` | 语音转录，**微调权重 v570e**（1.5 GB）；基础版权重在 `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0___6B` |
+| `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0___6B` | 字词级对齐 |
 
 - Qwen 系列为公开模型，可从 ModelScope / HuggingFace 获取。
 - YOLO 系列为项目训练产物，需自行训练或使用项目方提供的权重。
 
-> ⚠️ **命名差异**：语音模型目录名可能用下划线（`Qwen3-ASR-0___6B`），而 `config.yaml` 中写的是带点形式（`Qwen3-ASR-0.6B`）。下载后必须核对并统一，否则启动即报错。
+
 
 ### 视频与标注 → `data/`
 
@@ -254,9 +254,11 @@ pkill -f main.py                            # 直接结束服务
 | `voice.fixed_window_sec` / `fixed_window_overlap_sec` | `20.0` / `5.0` | 仅 `segmenter=fixed_window` 时生效 |
 | `supervision.*` | 见仓库 | 监护制绑定的时长与距离阈值、连续帧数、告警冷却 |
 | `tracker.detection.*` | 见仓库 | 检测置信度、NMS、输入尺寸 |
-| `gaze.*` / `behavior.*` | 见仓库 | 关注度与行为判定的置信度、IoU、冷却参数 |
+| `gaze.*` | 见仓库 | 关注度判定的置信度、热力图与头部尺寸参数 |
+| `behavior.detection.*` | 见仓库 | 指向检测的模型路径、跳帧与裁剪放大、四指角度阈值、四分类置信度融合与并集召回参数 |
+| `behavior.finger_screen.*` / `finger_file.*` | 见仓库 | 目标归属阈值（机箱重叠比与距离 / 文件包含比）与事件去重（合并秒数 / 角色冷却 / 宽限帧 / 防抖帧） |
 | `bus.max_queue_size` | `1024` | 事件总线队列上限 |
-| `modules.*` | `true` | 各感知模块开关，未备齐资源的模块可置 `false` |
+| `modules.*` | `true` | 各感知模块开关（含 `evaluation`），未备齐资源的模块可置 `false`；关停的模块会自动从对齐 `expected_sources` 中剔除，不再拖住 `done` 判定 |
 | `rules.*` | `true` | 各规程状态机开关（含 `normal_comm`） |
 
 ---
@@ -328,25 +330,6 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 
 ---
 
-## 普通沟通流程
-
-`rules/normal_comm_rule.py` 订阅 `VOICE_KEY_MOMENT`，实现"岗位词 → 请讲 → 收到"状态机：
-
-```
-① 岗位词（一回路/二回路/机组长）无条件登记
-② 流程中 + 窗口内"收到"      → 结束(recv_ack)
-③ 流程中 + 超过 MAX_FLOW_SEC → 结束(timeout)，【不吞事件】
-④ 流程中 + 岗位词后3s内"请讲" → 结束(new_comm，被新沟通顶掉) + 立即开新流程
-⑤ 空闲 + 岗位词后3s内"请讲"   → 启动流程
-   └─ 同句内后续含"收到"     → 立即 recv_ack 结束（同句应答，持续 0.0s）
-```
-
-- `MAX_FLOW_SEC = 50.0`（视频时间轴判定，`threading.Timer` 兜底）。
-- 开始/结束发布 `FLOW_STARTED/ENDED`，前端系统通知绿色显示"普通沟通开始/结束"，并落盘 `flow_events.json`（`end_source` 可区分 `recv_ack` / `timeout` / `new_comm`）。
-- 该流程与 tracker 模块完全解耦。
-
----
-
 ## 项目结构
 
 ```
@@ -389,7 +372,8 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 | 前端刷新后进度丢失 | Redis 连接失败；检查 `redis.*` 与实例可用性 |
 | 前端一直转圈 | 后端未在运行，或端口与 `app.port` 不一致 |
 | 同一秒"普通沟通开始"显示在"结束"之前 | 前端产物过旧；重新 `npm run build` 并强刷浏览器 |
-| 告警阈值不符合现场 | 调整 `supervision.*`、`gaze.*`、`behavior.*` 阈值后重启 |
+| 告警阈值不符合现场 | 调整 `supervision.*`、`gaze.*` 阈值后重启 |
+| 指向事件过密 / 过疏 | 判定松紧看 `behavior.finger_file.file_contain_threshold`、`behavior.finger_screen.screen_overlap_threshold`、`behavior.detection.straight_angle`、`behavior.detection.point_thumb_gap`；事件稠密度看 `finger_file.merge_sec`、`finger_file.grace_frames`、`finger_screen.debounce_frames`、`finger_screen.cooldown_sec` |
 | 前端页面未更新 | 确认已重新 `npm run build`，且产物位于后端静态兜底目录 |
 
 ---
@@ -403,7 +387,7 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 - **接口变更**：新增或调整 HTTP / WebSocket 契约，须同步更新上方接口参考表。
 - **改动接口**（路由 / 字段名 / 消息类型 / Redis 键）须同步更新 `API.md`；
   **新增命名**须遵循 `命名规范.md`。
-- **语音事件时序约定（勿随意调整）**：普通沟通规则 `_on_voice_intent` 的 ①~⑤ 步骤顺序见 [普通沟通流程](#普通沟通流程)；流式进度必须以已解码段结束时间上报，不得使用音频读取游标。
+- **语音事件时序约定（勿随意调整）**：普通沟通规则 `_on_voice_intent` 的 ①~⑤ 步骤顺序以 `rules/normal_comm_rule.py` 为准；流式进度必须以已解码段结束时间上报，不得使用音频读取游标。
 
 ---
 
