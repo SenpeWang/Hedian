@@ -52,7 +52,8 @@ voice:
   # 更敏感"，会造成大量段内无意义断句，导致岗位词被切开
   sentence_gap_sec: 1.0
   asr_engine: "qwen3"
-  model_path: "models/voice/qwen/Qwen3-ASR-0.6B"
+  # 微调 ASR 权重（v570e，1.5GB）；如需换回基础版权重，改成 models/voice/qwen/Qwen3-ASR-0.6B
+  model_path: "/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e"
   aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
   torch_dtype: "bfloat16"
   # VAD 分段参数（对齐 run_infer.py 评估链路）
@@ -97,16 +98,41 @@ gaze:
   head_min_size: 20
   head_max_size: 300
 
+# 行为检测: YOLO 四分类(hand/file/person/pointing_hand) + MediaPipe 21 关键点指向手势
+# detection 为共享的检测与手势判定参数; finger_screen / finger_file 为各自的目标归属与去重参数
 behavior:
+  detection:
+    weights: "models/behavior/detect_4class.pt"  # 四分类主模型
+    pose_model: "models/behavior/pose.pt"  # 角色判别用姿态模型(yolo11l-pose, 双人场景更稳)
+    union_weights: "models/behavior/detect_3class_union.pt"  # 并集模型(补手框召回); 置空串则不用
+    device: "0"  # YOLO 推理设备(子进程已按 gpu_map 限定可见 GPU)
+    confidence: 0.25  # YOLO 置信度
+    frame_step: 8  # 跳帧: 每 8 帧推理 1 次, 其余复用上次结果
+    pad_ratio: 0.8  # 手框外扩比例(补回手腕/前臂)
+    target_size: 480  # 裁剪后长边目标像素, 不足则放大
+    max_num_hands: 2  # 每个手框内最多认几只手
+    mp_detection_confidence: 0.3  # MediaPipe 手部检测置信度
+    straight_angle: 165.0  # 食/中指 >= 该角度算伸直
+    straight_angle_relaxed: 130.0  # 相对条件: 允许的最小角度
+    point_gap: 35.0  # 相对条件: 指向指需比弯曲指高出的角度
+    flex_angle: 160.0  # 无名/小指 < 该角度算弯曲
+    point_thumb_gap: 0.60  # 指向指尖到拇指尖距离/掌宽下限(排除捏握)
+    try_mirrored_order: true  # MediaPipe 指序标反时按镜像指序再判一次
+    four_class_confidence_hi: 0.5  # 四分类 pointing_hand 置信度 >= 该值: 直接采信
+    four_class_confidence_lo: 0.25  # 置信度在 [lo, hi): 需 MediaPipe 规则复核
+    other_hand_iou: 0.2  # 与目标框 IoU >= 该值的框视为同一只手, 不做遮罩
+    union_iou: 0.5  # 并集模型框与已有框 IoU >= 该值视为同一只, 不重复添加
+    draw_all_hands: true  # 是否绘制所有手的关键点(否则只画指向手)
   finger_screen:
-    detect_conf: 0.25
-    screen_overlap_threshold: 0.2
-    max_dist: 10
-    cooldown_sec: 1.5
+    screen_overlap_threshold: 0.2  # 手框与机箱重叠比 > 该值 -> 手指屏幕
+    max_dist: 10  # 手框到机箱距离 < 该值 -> 手指屏幕
+    cooldown_sec: 1.5  # 触发冷却(上升沿之外的兜底)
+    debounce_frames: 3  # 连续 N 帧无指向才算动作结束
   finger_file:
-    detect_conf: 0.25
-    file_iou_threshold: 0.2
-    cooldown_sec: 1.5
+    file_contain_threshold: 0.7  # 手框被 file 框包含比 >= 该值 -> 指向文件
+    merge_sec: 5.0  # 同角色间隔 <= 该值算同一次指向
+    role_cooldown_sec: 1.5  # 角色抖动冷却
+    grace_frames: 12  # 遮挡空窗填补帧数
 
 modules:
   gaze: true
@@ -115,6 +141,7 @@ modules:
   personnel_status: true
   info_notice: true
   behavior: true
+  evaluation: true
 
 rules:
   supervision: true

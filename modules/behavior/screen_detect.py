@@ -1,21 +1,21 @@
 """手指指向屏幕检测模块.
 
-基于 YOLO 目标检测输出的 pointing_hand 框与预标注屏幕/机箱多边形区域的重叠比及最短距离判定。
+基于指向手框与预标注屏幕/机箱多边形区域的重叠比及最短距离判定，
+采用上升沿触发（持续指向只记一次）+ debounce 防抖 + 冷却兜底。
 """
 
 import logging
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
 
 from modules.behavior.base_detector import BaseDetector
 from modules.behavior.behavior_utils import (
+    PoseRoleClassifier,
     bbox_polygon_overlap_ratio,
     bbox_to_polygon_distance,
 )
 from modules.behavior.behavior_vis import (
-    SCREEN_POLYGONS,
-    draw_detection_boxes,
     draw_roi_overlay,
     draw_trigger,
     screen_polygons_as_tuples,
@@ -23,42 +23,37 @@ from modules.behavior.behavior_vis import (
 
 logger = logging.getLogger("module.behavior.screen_detect")
 
-# 类别索引（与 behavior_yolo.pt 训练一致）
-CLASS_POINTING_HAND: int = 4
-
-# 机箱多边形轮廓数组
-_SCREEN_CONTOURS = [
-    np.array(polygon, dtype=np.int32) for polygon in SCREEN_POLYGONS
-]
-
 
 class FingerScreenDetector(BaseDetector):
     """手指指向屏幕行为检测器.
 
-    使用 pointing_hand 框与机箱/屏幕 ROI 多边形的空间重叠度与几何距离进行判定。
+    使用指向手框与机箱/屏幕 ROI 多边形的空间重叠度与几何距离进行判定。
     """
 
     def __init__(
         self,
-        detect_conf: float = 0.25,
         screen_overlap_threshold: float = 0.2,
-        max_distance: int = 20,
+        max_distance: int = 10,
         cooldown_sec: float = 1.5,
         fps: float = 30.0,
+        debounce_frames: int = 3,
     ) -> None:
         """初始化手指指向屏幕检测器.
 
         Args:
-            detect_conf: 检测置信度阈值，默认 0.25.
-            screen_overlap_threshold: 手指与屏幕区域面积重叠比阈值，默认 0.2.
-            max_distance: 手指与屏幕多边形边缘的最大允许像素距离，默认 20.
-            cooldown_sec: 动作触发后的冷却时间（秒），默认 1.5.
-            fps: 视频采样帧率，默认 30.0.
+            screen_overlap_threshold: 指向手与机箱区域面积重叠比阈值.
+            max_distance: 指向手与机箱多边形边缘的最大允许像素距离.
+            cooldown_sec: 动作触发后的冷却时间（秒）.
+            fps: 视频采样帧率.
+            debounce_frames: 连续多少帧无指向才算动作结束.
         """
         super().__init__(cooldown_sec, fps)
-        self.detect_conf: float = detect_conf
         self.screen_overlap_threshold: float = screen_overlap_threshold
         self.max_distance: int = max_distance
+        self.debounce_frames: int = debounce_frames
+        # 上升沿状态：当前是否处于持续指向中，以及连续无指向帧数
+        self._active: bool = False
+        self._idle_frames: int = 0
 
     @staticmethod
     def draw_roi(frame: np.ndarray) -> None:
@@ -69,79 +64,88 @@ class FingerScreenDetector(BaseDetector):
         """
         draw_roi_overlay(frame, screen_polygons_as_tuples())
 
+    def reset(self) -> None:
+        """重置上升沿与冷却状态（新一轮推理解绑旧状态）."""
+        self._active = False
+        self._idle_frames = 0
+        self._last_event_frame = -10_000
+
     def detect(
         self,
         frame: np.ndarray,
-        results: Any,
+        pointing_bboxes: Sequence[Sequence[float]],
+        screen_polygons: Sequence[Tuple[str, np.ndarray]],
         frame_count: int,
-        fps: float,
+        role_classifier: Optional[PoseRoleClassifier] = None,
+        role_frame: Optional[np.ndarray] = None,
     ) -> List[Dict[str, Any]]:
         """检测当前帧中是否存在手指向屏幕的行为.
 
         Args:
-            frame: 当前视频帧（原地绘制标注与 ROI 框）.
-            results: YOLO 模型推理结果对象.
+            frame: 当前视频帧（原地绘制触发框）.
+            pointing_bboxes: 本帧判定为指向的手框列表.
+            screen_polygons: (标签, 机箱多边形轮廓) 列表，已按帧尺寸缩放.
             frame_count: 当前视频帧号.
-            fps: 视频帧率.
+            role_classifier: 角色判别器；为 None 时事件角色为空.
+            role_frame: 供角色判别的干净帧（未叠加标注）；
+                为 None 时退回使用 frame.
 
         Returns:
-            触发事件字典列表，包含 event, state, frame_id, overlap_ratio 等字段.
+            触发事件字典列表，包含 event / state / role / overlap_ratio 等字段.
         """
         events: List[Dict[str, Any]] = []
-        self.draw_roi(frame)
-
-        if results is None:
-            return events
-        boxes = getattr(results, "boxes", None)
-        if boxes is None or len(boxes) == 0:
-            return events
-
-        boxes_xyxy = boxes.xyxy.cpu().numpy()
-        classes = boxes.cls.cpu().numpy().astype(int)
-        confidences = boxes.conf.cpu().numpy()
-
-        hands: List[Any] = []
-        for index in range(len(classes)):
-            if confidences[index] < self.detect_conf:
-                continue
-            if classes[index] == CLASS_POINTING_HAND:
-                hands.append(boxes_xyxy[index])
-
-        draw_detection_boxes(frame, hands=hands)
-
-        # 与每个机箱多边形比较：重叠比 > 阈值 或 最短距离 <= max_distance 判定为命中
-        triggered = False
         best_overlap_ratio = 0.0
-        best_distance = 1e9
-        for hand_box in hands:
-            for screen_polygon in _SCREEN_CONTOURS:
-                overlap_ratio = bbox_polygon_overlap_ratio(
-                    hand_box, screen_polygon
-                )
-                distance = bbox_to_polygon_distance(hand_box, screen_polygon)
+        best_distance = float("inf")
+        triggered_bboxes: List[Sequence[float]] = []
+
+        for hand_bbox in pointing_bboxes:
+            hit = False
+            for _, polygon in screen_polygons:
+                overlap_ratio = bbox_polygon_overlap_ratio(hand_bbox, polygon)
+                distance = bbox_to_polygon_distance(hand_bbox, polygon)
                 best_overlap_ratio = max(best_overlap_ratio, overlap_ratio)
                 best_distance = min(best_distance, distance)
                 if (
-                    overlap_ratio >= self.screen_overlap_threshold
-                    or distance <= self.max_distance
+                    overlap_ratio > self.screen_overlap_threshold
+                    or distance < self.max_distance
                 ):
-                    triggered = True
+                    hit = True
+            if hit:
+                triggered_bboxes.append(hand_bbox)
 
-        if triggered:
-            draw_trigger(frame, hands, "FINGER_SCREEN!")
-            if self._cooldown_ok(frame_count):
-                self._mark_event(frame_count)
-                events.append(
-                    self._make_event(
-                        "FINGER_SCREEN",
-                        "手指指向屏幕",
-                        frame_count,
-                        {
-                            "overlap_ratio": round(
-                                float(best_overlap_ratio), 3
-                            ),
-                            "min_dist": round(float(best_distance), 1),
-                        },
-                    )
-                )
+        if not triggered_bboxes:
+            self._idle_frames += 1
+            if self._idle_frames >= self.debounce_frames:
+                self._active = False
+            return events
+
+        self._idle_frames = 0
+        if self._active:
+            return events
+
+        # 上升沿：持续指向只记录一次，冷却仅作兜底
+        self._active = True
+        draw_trigger(frame, triggered_bboxes, "FINGER_SCREEN!")
+        if not self._cooldown_ok(frame_count):
+            return events
+
+        self._mark_event(frame_count)
+        role: Optional[str] = None
+        if role_classifier is not None:
+            role = role_classifier.classify(
+                frame if role_frame is None else role_frame,
+                triggered_bboxes,
+            )
+        events.append(
+            self._make_event(
+                "FINGER_SCREEN",
+                "手指指向屏幕",
+                frame_count,
+                {
+                    "overlap_ratio": round(float(best_overlap_ratio), 3),
+                    "min_dist": round(float(best_distance), 1),
+                },
+                role=role,
+            )
+        )
         return events

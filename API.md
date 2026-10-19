@@ -288,8 +288,13 @@ curl -X POST http://<host>:<port>/start
 
 ```json
 { "modules": { "voice": true, "tracker": true, "gaze": true,
-               "behavior": true, "personnel_status": true, "info_notice": true } }
+               "behavior": true, "evaluation": true,
+               "personnel_status": true, "info_notice": true } }
 ```
+
+> `evaluation: false` 时 web 进程不创建评估编排器，流程结束后不产出评估报告；
+> 其余模块为 `false` 时对应推理子进程不启动，且该模块的 source 自动退出
+> `expected_sources` 对齐集合，不影响流水线 `done` 判定。
 
 ### 4.4 资源类接口
 
@@ -387,7 +392,10 @@ curl -X POST http://<host>:<port>/start
       "data": { "has_heads": true, "heads_count": 3,
                 "any_in_roi": true, "away_duration": 0.0 } } ],
 
-  "behavior":  [ { "localSec": 113.4, "tag": "FINGER_FILE", "data": { "iou": 0.31 } } ]
+  "behavior":  [ { "localSec": 113.4, "tag": "FINGER_FILE",
+      "data": { "role": "操作员", "contain_ratio": 0.88 } },
+                 { "localSec": 141.3, "tag": "FINGER_SCREEN",
+      "data": { "role": "机组长", "overlap_ratio": 0.0, "min_dist": 7.9 } } ]
 }
 ```
 
@@ -411,6 +419,16 @@ curl -X POST http://<host>:<port>/start
 | `HAND_RAISED` | 举手 |
 | `FINGER_SCREEN` | 手指指向屏幕 |
 | `FINGER_FILE` | 手指指向文件 |
+
+**`behavior` 各 `tag` 的 `data` 字段**：
+
+| 字段 | 出现于 | 含义 |
+|---|---|---|
+| `role` | `FINGER_SCREEN` / `FINGER_FILE` | 行为人角色：`机组长` / `操作员` / `机组长和操作员`；无法判定时为 `null` |
+| `overlap_ratio` | `FINGER_SCREEN` | 指向手框与机箱区域的最大面积重叠比（0–1） |
+| `min_dist` | `FINGER_SCREEN` | 指向手框到机箱多边形的最短距离（像素） |
+| `contain_ratio` | `FINGER_FILE` | 指向手框被文件框包含的面积比（0–1） |
+| `state` / `frame_id` | 全部 | 事件状态文案与触发帧号（`HAND_RAISED` 另有 `operator` / `track_id`） |
 
 **`flow_type` 取值**：`supervision`（监护制）· `self_ticket`（自唱票）·
 `info_notice`（信息通报）· `normal_comm`（普通沟通）
