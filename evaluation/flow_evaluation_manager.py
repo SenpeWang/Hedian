@@ -58,7 +58,7 @@ class FlowEvaluationManager:
         self._direct_fn = direct_fn or inference_fn
         self._get_playback_sec_fn = get_playback_sec_fn
 
-        # 默认模型路径
+        # 评估主模型权重路径, 取自 config.yaml 的 evaluation.model_path
         if model_path is None:
             model_path = "models/evaluation/Qwen3-8B"
 

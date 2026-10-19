@@ -1,7 +1,11 @@
 """全局配置管理.
 
-从 config.yaml 加载配置, 与内置默认值深度合并后提供统一访问接口.
-所有硬编码值集中在此管理.
+config.yaml 是唯一配置事实源; 本模块加载该文件并提供统一访问接口.
+
+加载策略(配置缺失时不阻断启动):
+- config.yaml 存在 -> 正常加载
+- config.yaml 缺失 -> 记录 warning 并以空配置继续, 不抛错;
+  各属性以 .get 链兜底返回程序级常量, 避免 KeyError.
 """
 
 import logging
@@ -13,187 +17,62 @@ import yaml
 
 logger = logging.getLogger("core.config_manager")
 
-# 基础目录
+# 项目基础目录
 BASE_DIR = Path(__file__).parent.parent
 
-# 默认配置
-_DEFAULTS = {
-    "app": {
-        "gpu": "0",
-        "gpu_map": {
-            "tracker": "0",
-            "voice": "1",
-            "behavior": "1",
-            "evaluation": "1",
-        },
-        "gpu_default": "0",
-        "fps": 30.0,
-        "port": 5002,
-    },
-    "paths": {
-        "data_root": "data",
-        "model_root": "models",
-        "result_root": "data/results",
-    },
-    "videos": {
-        "front": "data/videos/camFRONT.mpg",
-        "pop": "data/videos/camPOP.mpg",
-    },
-    "supervision": {
-        "bind_hold_sec": 10.0,
-        "unbind_hold_sec": 20.0,
-        "dist_close_px": 200,
-        "dist_near_px": 560,
-        "consec_raise": 3,
-        "consec_idle": 3,
-    },
-    "voice": {
-        "sample_rate": 16000,
-        "sentence_gap_sec": 1.5,
-        "device_pattern": r"(1ES\w+|T1RPA\w+|LCO\w+|RPA\w+|SM3)",
-        "action_verbs": ["开启", "关闭", "长按", "调出", "停运"],
-        "confirm_words": ["好", "确认", "没问题", "收到", "明白", "正确"],
-        "verify_words": ["核对", "核实", "验证", "检查"],
-    },
-    "gaze": {
-        "head_conf_th": 0.55,
-        "inout_th": 0.5,
-        "heatmap_th": 0.3,
-        "head_min_size": 20,
-        "head_max_size": 300,
-    },
-    "behavior": {
-        "detection": {
-            "confidence": 0.25,
-            "frame_step": 8,
-            "pad_ratio": 0.8,
-            "target_size": 480,
-            "straight_angle": 165.0,
-            "straight_angle_relaxed": 130.0,
-            "point_gap": 35.0,
-            "flex_angle": 160.0,
-            "four_class_confidence_hi": 0.5,
-            "four_class_confidence_lo": 0.25,
-            "other_hand_iou": 0.2,
-            "union_iou": 0.5,
-            "draw_all_hands": True,
-        },
-        "finger_screen": {
-            "screen_overlap_threshold": 0.2,
-            "max_dist": 10.0,
-            "cooldown_sec": 1.5,
-            "debounce_frames": 3,
-        },
-        "finger_file": {
-            "file_contain_threshold": 0.7,
-            "merge_sec": 5.0,
-            "role_cooldown_sec": 1.5,
-            "grace_frames": 12,
-        },
-    },
-    "modules": {
-        "voice": True,
-        "tracker": True,
-        "gaze": True,
-        "behavior": True,
-        "evaluation": True,
-    },
-    "rules": {
-        "supervision": True,
-        "self_ticket": True,
-        "personnel_status": True,
-        "info_notice": True,
-    },
-}
-
-
-def _deep_merge(base: dict, override: dict) -> dict:
-    """深度合并两个配置字典.
-
-    两端的子字典递归合并, 其余键直接以 override 覆盖 base.
-
-    Args:
-        base: 基底配置(如内置默认值).
-        override: 覆盖配置(如用户 config.yaml).
-
-    Returns:
-        合并后的新字典, 不改入参.
-    """
-    result = dict(base)
-    for key, value in override.items():
-        if (
-            key in result
-            and isinstance(result[key], dict)
-            and isinstance(value, dict)
-        ):
-            result[key] = _deep_merge(result[key], value)
-        else:
-            result[key] = value
-    return result
+# 唯一配置事实源文件名(程序限定加载本文件)
+CONFIG_FILENAME = "config.yaml"
 
 
 class ConfigManager:
-    """全局配置管理器: 从 config.yaml 加载配置, 提供统一访问接口."""
+    """全局配置管理器: 唯一事实源为项目根下的 config.yaml.
+
+    属性访问用 .get 链兜底, 所带默认值(如 fps=30.0)是防止 KeyError 的程序级常量.
+    """
 
     def __init__(self, config_path: Optional[str] = None) -> None:
-        """加载配置.
+        """加载 config.yaml.
 
         Args:
-            config_path: config.yaml 路径; None 时取项目根下的 config.yaml.
+            config_path: config.yaml 路径; None 时取项目根下 CONFIG_FILENAME.
         """
-        self._config = dict(_DEFAULTS)
-        yaml_path = config_path or str(BASE_DIR / "config.yaml")
-
+        yaml_path = config_path or str(BASE_DIR / CONFIG_FILENAME)
         if os.path.exists(yaml_path):
             with open(yaml_path, encoding="utf-8") as f:
-                user_config = yaml.safe_load(f) or {}
-            self._config = _deep_merge(self._config, user_config)
+                self._config = yaml.safe_load(f) or {}
             logger.info(f"加载配置: {yaml_path}")
         else:
-            logger.warning(f"配置文件不存在: {yaml_path}，使用默认配置")
+            logger.warning(
+                f"配置文件不存在: {yaml_path}，使用空配置(程序级兜底生效)"
+            )
+            self._config = {}
+
+    @property
+    def gpu_default(self) -> str:
+        """默认 GPU 编号(命令行未指定 --gpu 时使用)."""
+        return self._config.get("app", {}).get("gpu_default", "0")
 
     @property
     def gpu(self) -> str:
-        """返回默认 GPU 编号(gpu_default 优先, 缺省时退回 gpu).
-
-        Returns:
-            默认 GPU 编号字符串, 如 "0".
-        """
-        return self._config["app"].get("gpu_default") or self._config[
-            "app"
-        ].get("gpu", "0")
+        """默认 GPU 编号(gpu_default 优先, 缺省退回 gpu)."""
+        app = self._config.get("app", {})
+        return app.get("gpu_default") or app.get("gpu", "0")
 
     @property
     def gpu_map(self) -> dict:
-        """获取视角级 GPU 映射 {module_name: gpu_str}.
-
-        Returns:
-            模块名到 GPU 编号的映射; 未配置时为空字典.
-        """
-        return self._config["app"].get("gpu_map", {})
+        """视角级 GPU 映射 {module_name: gpu_str}; 未配置为空字典."""
+        return self._config.get("app", {}).get("gpu_map", {})
 
     @property
     def fps(self) -> float:
-        """返回推理帧率.
-
-        Returns:
-            推理帧率(帧/秒).
-        """
-        return self._config["app"]["fps"]
+        """推理帧率(帧/秒)."""
+        return self._config.get("app", {}).get("fps", 30.0)
 
     @property
     def video_path(self) -> str:
-        """返回默认视频路径.
-
-        Returns:
-            默认 front 视角视频路径.
-        """
-        return self._config["videos"]["front"]
+        """默认 front 视频视频路径."""
+        return self._config.get("videos", {}).get("front", "")
 
     def to_dict(self) -> dict:
-        """转换为字典.
-
-        Returns:
-            配置的浅拷贝.
-        """
+        """返回配置的浅拷贝."""
         return dict(self._config)

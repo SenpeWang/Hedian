@@ -1,5 +1,5 @@
 # 核电站监护制合规检测系统 — 全局配置
-# 此文件覆盖 config.py 中的默认值
+# 本文件是唯一配置事实源；core/config_manager.py 加载本文件
 
 app:
   # 视角级 GPU 分配: front(tracker+gaze)=0, voice/pop/evaluation=1
@@ -42,16 +42,14 @@ tracker:
     pose_confidence: 0.35
     nms_threshold: 0.35
     img_size: 640
-
-bus:
-  max_queue_size: 1024
+    weights: "yolo11_MOT.pt"           # 人员检测主模型(含 MOT 跟踪头)
+    pose_model: "yolo26s-pose.pt"      # 姿态估计(举手检测与 MOT 姿态)
 
 voice:
   sample_rate: 16000
   # 句边界停顿阈值（秒）。须 ≥ vad_min_silence_sec(0.8)，否则"句边界比段边界
   # 更敏感"，会造成大量段内无意义断句，导致岗位词被切开
   sentence_gap_sec: 1.0
-  asr_engine: "qwen3"
   # 微调 ASR 权重（v570e，1.5GB）；如需换回基础版权重，改成 models/voice/qwen/Qwen3-ASR-0.6B
   model_path: "/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e"
   aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
@@ -97,6 +95,12 @@ gaze:
   heatmap_th: 0.3
   head_min_size: 20
   head_max_size: 300
+  head_model: "yolov8n_head.onnx"                                            # 头部检测
+  gaze_model: "gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx"  # 视线估计
+
+# 合规评估: 大模型对完整流程多模态证据链打分
+evaluation:
+  model_path: "models/evaluation/Qwen3-8B"  # 评估主模型; 备用 models/evaluation/Qwen2.5-1.5B-Instruct
 
 # 行为检测: YOLO 四分类(hand/file/person/pointing_hand) + MediaPipe 21 关键点指向手势
 # detection 为共享的检测与手势判定参数; finger_screen / finger_file 为各自的目标归属与去重参数

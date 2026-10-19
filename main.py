@@ -602,6 +602,7 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             event_bus=event_bus,
             result_dir=flow_result_dir,
             fps=config_dict.get("fps", 30),
+            model_path=config_dict.get("evaluation", {}).get("model_path"),
             sync_fn=push_sync,  # 系统通知(flow_start/flow_end) ➔ 经过对齐中间件
             direct_fn=push_direct,  # 评估报告(stream/report) ➔ 完全不经过对齐中间件
             get_playback_sec_fn=lambda: (

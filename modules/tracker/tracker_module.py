@@ -27,6 +27,14 @@ from modules.tracker.visualizer import draw_tracks
 
 logger = logging.getLogger("module.tracker")
 
+# 默认模型权重文件名(相对 model_root/<子目录>, 可被 config.yaml 覆盖)
+_DEFAULT_DET_WEIGHTS = "yolo11_MOT.pt"
+_DEFAULT_DET_POSE = "yolo26s-pose.pt"
+_DEFAULT_HEAD_MODEL = "yolov8n_head.onnx"
+_DEFAULT_GAZE_MODEL = (
+    "gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx"
+)
+
 
 class TrackerModule(BaseModule):
     """多目标跟踪模块.
@@ -84,10 +92,12 @@ class TrackerModule(BaseModule):
             detection_config = tracker_config.get("detection", {})
             self._detector = ObjectDetector(
                 model_path=self.paths.get_model_path(
-                    "detection", "yolo11_MOT.pt"
+                    "detection",
+                    detection_config.get("weights", _DEFAULT_DET_WEIGHTS),
                 ),
                 pose_model_path=self.paths.get_model_path(
-                    "detection", "yolo26s-pose.pt"
+                    "detection",
+                    detection_config.get("pose_model", _DEFAULT_DET_POSE),
                 ),
                 conf_threshold=detection_config.get("conf_threshold", 0.65),
                 pose_confidence=detection_config.get("pose_confidence", 0.3),
@@ -102,12 +112,10 @@ class TrackerModule(BaseModule):
             gaze_config = self.config.get("gaze", {})
             self._gaze_processor = GazeModule(
                 head_model_path=self.paths.get_model_path(
-                    "gaze", "yolov8n_head.onnx"
+                    "gaze", gaze_config.get("head_model", _DEFAULT_HEAD_MODEL)
                 ),
                 gaze_model_path=self.paths.get_model_path(
-                    "gaze",
-                    "gazelle_dinov3_vits16plus_finetuned_"
-                    "1x3x640x640_1xNx4.onnx",
+                    "gaze", gaze_config.get("gaze_model", _DEFAULT_GAZE_MODEL)
                 ),
                 roi_json_path=str(self.paths.base_dir / "data" / "ROI.json"),
                 config=gaze_config,
