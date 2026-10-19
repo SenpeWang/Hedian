@@ -50,7 +50,7 @@ voice:
   # 句边界停顿阈值（秒）。须 ≥ vad_min_silence_sec(0.8)，否则"句边界比段边界
   # 更敏感"，会造成大量段内无意义断句，导致岗位词被切开
   sentence_gap_sec: 1.0
-  # 微调 ASR 权重（v570e，1.5GB）；如需换回基础版权重，改成 models/voice/qwen/Qwen3-ASR-0.6B
+  # ASR 权重(微调版 v570e)
   model_path: "/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e"
   aligner_path: "models/voice/qwen/Qwen3-ForcedAligner-0.6B"
   torch_dtype: "bfloat16"
