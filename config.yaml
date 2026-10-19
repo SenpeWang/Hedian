@@ -100,7 +100,7 @@ gaze:
 
 # 合规评估: 大模型对完整流程多模态证据链打分
 evaluation:
-  model_path: "models/evaluation/Qwen3-8B"  # 评估主模型; 备用 models/evaluation/Qwen2.5-1.5B-Instruct
+  model_path: "models/evaluation/Qwen3-8B"  # 评估主模型
 
 # 行为检测: YOLO 四分类(hand/file/person/pointing_hand) + MediaPipe 21 关键点指向手势
 # detection 为共享的检测与手势判定参数; finger_screen / finger_file 为各自的目标归属与去重参数

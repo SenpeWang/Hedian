@@ -132,7 +132,6 @@ flowchart LR
 | `yolov8n_head.onnx` | 头部检测 | `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/yolov8n_head.onnx` |
 | `gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 | `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` |
 | `Qwen3-8B` | 合规评估主模型 | `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen3-8B` |
-| `Qwen2.5-1.5B-Instruct` | 备用评估模型 | `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen2.5-1.5B-Instruct` |
 | `Qwen3-ASR-0.6B-finetuned-v570e` | 语音转录，微调权重 v570e | `/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e` |
 | `Qwen3-ForcedAligner-0___6B` | 字词级对齐 | `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0___6B` |
 
