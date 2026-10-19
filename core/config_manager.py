@@ -34,7 +34,8 @@ class ConfigManager:
         """加载 config.yaml.
 
         Args:
-            config_path: config.yaml 路径; None 时取项目根下 CONFIG_FILENAME.
+            config_path: config.yaml 路径;
+                None 时取项目根下 CONFIG_FILENAME.
         """
         yaml_path = config_path or str(BASE_DIR / CONFIG_FILENAME)
         if os.path.exists(yaml_path):
@@ -49,30 +50,54 @@ class ConfigManager:
 
     @property
     def gpu_default(self) -> str:
-        """默认 GPU 编号(命令行未指定 --gpu 时使用)."""
+        """默认 GPU 编号(命令行未指定 --gpu 时使用).
+
+        Returns:
+            GPU 编号字符串, 默认 "0".
+        """
         return self._config.get("app", {}).get("gpu_default", "0")
 
     @property
     def gpu(self) -> str:
-        """默认 GPU 编号(gpu_default 优先, 缺省退回 gpu)."""
+        """默认 GPU 编号(gpu_default 优先, 缺省退回 gpu).
+
+        Returns:
+            GPU 编号字符串, 默认 "0".
+        """
         app = self._config.get("app", {})
         return app.get("gpu_default") or app.get("gpu", "0")
 
     @property
     def gpu_map(self) -> dict:
-        """视角级 GPU 映射 {module_name: gpu_str}; 未配置为空字典."""
+        """视角级 GPU 映射 {module_name: gpu_str}.
+
+        Returns:
+            模块名到 GPU 编号的映射; 未配置为空字典.
+        """
         return self._config.get("app", {}).get("gpu_map", {})
 
     @property
     def fps(self) -> float:
-        """推理帧率(帧/秒)."""
+        """推理帧率.
+
+        Returns:
+            帧率(帧/秒), 默认 30.0.
+        """
         return self._config.get("app", {}).get("fps", 30.0)
 
     @property
     def video_path(self) -> str:
-        """默认 front 视频视频路径."""
+        """默认 front 视频路径.
+
+        Returns:
+            front 视频路径字符串, 未配置为空字符串.
+        """
         return self._config.get("videos", {}).get("front", "")
 
     def to_dict(self) -> dict:
-        """返回配置的浅拷贝."""
+        """返回配置的浅拷贝.
+
+        Returns:
+            配置的浅拷贝字典.
+        """
         return dict(self._config)
