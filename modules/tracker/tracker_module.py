@@ -192,7 +192,7 @@ class TrackerModule(BaseModule):
             raw_fps = video_capture.get(cv2.CAP_PROP_FPS)
             if not raw_fps or raw_fps <= 0:
                 raise RuntimeError(
-                    f"读取 front 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不再兜底"
+                    f"读取 front 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不使用默认帧率"
                 )
             fps = float(raw_fps)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))

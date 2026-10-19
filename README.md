@@ -257,7 +257,7 @@ pkill -f main.py                            # 直接结束服务
 | `behavior.detection.*` | 见仓库 | 指向检测的模型路径、跳帧与裁剪放大、四指角度阈值、四分类置信度融合与并集召回参数 |
 | `behavior.finger_screen.*` / `finger_file.*` | 见仓库 | 目标归属阈值（机箱重叠比与距离 / 文件包含比）与事件去重（合并秒数 / 角色冷却 / 宽限帧 / 防抖帧） |
 | `evaluation.model_path` | `models/evaluation/Qwen3-8B` | 合规评估大模型权重路径 |
-| `modules.*` | `true` | 各感知模块开关（含 `evaluation`），未备齐资源的模块可置 `false`；关停的模块会自动从对齐 `expected_sources` 中剔除，不再拖住 `done` 判定 |
+| `modules.*` | `true` | 各感知模块开关（含 `evaluation`），未备齐资源的模块可置 `false`；关停的模块会自动从对齐 `expected_sources` 中剔除，不拖住 `done` 判定 |
 | `rules.*` | `true` | 各规程状态机开关（含 `normal_comm`） |
 
 ---
