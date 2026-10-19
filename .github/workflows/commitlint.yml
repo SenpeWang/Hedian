@@ -44,8 +44,9 @@ jobs:
           else
             FROM="${{ github.event.before }}"
             TO="${{ github.sha }}"
-            # 首次推送或 force push 时 before 为全零, 退化为只校验最新提交
-            if [ -z "$FROM" ] || [ "$FROM" = "0000000000000000000000000000000000000000" ]; then
+            # 首次推送或 force push 时 before 为全零, 或已被替换而不在
+            # 任何 ref 上(本次 checkout 取不到该对象), 退化为只校验最新提交
+            if ! git cat-file -e "$FROM" 2>/dev/null; then
               FROM="$(git rev-parse "$TO^" 2>/dev/null || echo "$TO")"
             fi
           fi
