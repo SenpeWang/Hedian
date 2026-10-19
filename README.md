@@ -109,7 +109,7 @@ flowchart LR
 | 组件 | 要求 |
 |------|------|
 | Python | 3.10 |
-| GPU | NVIDIA + CUDA，**需双卡**（合计显存 ~28~30GB；evaluation ~16GB / tracker ~2~4GB / behavior ~4GB / voice ~2~4GB） |
+| GPU | NVIDIA + CUDA，**需双卡**（合计显存 ~30GB；evaluation ~16GB / tracker ~4GB / behavior ~4GB / voice ~4GB） |
 | Redis | 6.x+，需支持 Stream 与 Hash |
 | Node | 20（仅前端构建阶段） |
 | ffmpeg | 系统可用（fMP4 转封装 + 音频管道增量抽取） |
@@ -118,25 +118,25 @@ flowchart LR
 
 ## 准备资源
 
-> 以下模型权重与输入视频不包含在代码仓库内，需按指定路径自行准备。判定逻辑的权威来源为 `rules/` 源码，规程细则与设计文档需向项目方单独获取。
+> 以下模型权重与输入视频不包含在代码仓库内，需按表中路径自行准备。判定逻辑的权威来源为 `rules/` 源码；规程细则与设计文档不在仓库内，需向项目方单独获取。
 
 ### 模型权重 → `models/`
 
-| 本机绝对路径 | 用途 |
-|---|---|
-| `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo11_MOT.pt` | 人员检测（含 MOT 跟踪头） |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo26s-pose.pt` | 姿态估计（举手检测与 MOT 姿态） |
-| `/home/zhanhaoliang/hedian-2/models/behavior/detect_4class.pt` | 行为检测主模型（hand / file / person / pointing_hand 四分类） |
-| `/home/zhanhaoliang/hedian-2/models/behavior/pose.pt` | 行为角色判别姿态模型（机组长 / 操作员，事件时刻触发；双人场景比 yolo26s-pose 更稳） |
-| `/home/zhanhaoliang/hedian-2/models/behavior/detect_3class_union.pt` | 可选并集召回模型（三分类 hand / file / person），补手框召回 |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/yolov8n_head.onnx` | 头部检测 |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen3-8B` | 合规评估主模型 |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen2.5-1.5B-Instruct` | 备用评估模型 |
-| `/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e` | 语音转录，**微调权重 v570e**（1.5 GB）；基础版权重在 `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0___6B` |
-| `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0___6B` | 字词级对齐 |
+| 模型名称 | 作用 | 路径 |
+|---|---|---|
+| `yolo11_MOT.pt` | 人员检测 | `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo11_MOT.pt` |
+| `yolo26s-pose.pt` | 姿态估计 | `/home/wangshengping/Hedian/A_DemoSrc/models/detection/yolo26s-pose.pt` |
+| `detect_4class.pt` | 行为检测主模型 | `/home/zhanhaoliang/hedian-2/models/behavior/detect_4class.pt` |
+| `pose.pt` | 行为角色判别姿态模型 | `/home/zhanhaoliang/hedian-2/models/behavior/pose.pt` |
+| `detect_3class_union.pt` | 可选并集召回模型，补手框召回 | `/home/zhanhaoliang/hedian-2/models/behavior/detect_3class_union.pt` |
+| `yolov8n_head.onnx` | 头部检测 | `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/yolov8n_head.onnx` |
+| `gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` | 视线估计 | `/home/wangshengping/Hedian/A_DemoSrc/models/gaze/gazelle_dinov3_vits16plus_finetuned_1x3x640x640_1xNx4.onnx` |
+| `Qwen3-8B` | 合规评估主模型 | `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen3-8B` |
+| `Qwen2.5-1.5B-Instruct` | 备用评估模型 | `/home/wangshengping/Hedian/A_DemoSrc/models/evaluation/Qwen2.5-1.5B-Instruct` |
+| `Qwen3-ASR-0.6B-finetuned-v570e` | 语音转录，**微调权重 v570e**；基础版权重在 `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ASR-0___6B` | `/home/yehaomin/asr/models/Qwen3-ASR-0.6B-finetuned-v570e` |
+| `Qwen3-ForcedAligner-0___6B` | 字词级对齐 | `/home/wangshengping/Hedian/A_DemoSrc/models/voice/qwen/Qwen3-ForcedAligner-0___6B` |
 
-- Qwen 系列为公开模型，可从 ModelScope / HuggingFace 获取。
+- Qwen 系列为公开模型，也可从 ModelScope / HuggingFace 获取或换取其他模型。
 - YOLO 系列为项目训练产物，需自行训练或使用项目方提供的权重。
 
 
@@ -145,7 +145,7 @@ flowchart LR
 
 | 路径 | 说明 |
 |------|------|
-| `videos/camFRONT.mpg` | 正面视角视频，操作人 / 监护人入镜（`videos.front` 可指向任意本地视频文件） |
+| `videos/camFRONT.mpg` | 正面视角视频，操作人 / 监护人入镜 |
 | `videos/camPOP.mpg` | 操作盘视角视频 |
 | `videos/camFRONT_audio.wav` | 正面视角音频轨 |
 | `ROI.json` | 关键区域标注，关注度判定依据 |
@@ -241,7 +241,6 @@ pkill -f main.py                            # 直接结束服务
 | `paths.result_root` | `data/results` | 结果输出目录 |
 | `videos.front` / `pop` | `data/videos/camFRONT.mpg` / `camPOP.mpg` | 输入视频路径（front 与 pop 可指向同一文件） |
 | `voice.sentence_gap_sec` | `1.0` | 句边界停顿阈值，**必须 ≥ `vad_min_silence_sec(0.8)`**，否则岗位词会被句边界切开 |
-| `voice.asr_engine` | `qwen3` | 语音识别引擎 |
 | `voice.model_path` / `aligner_path` | 见仓库 | 语音模型路径 |
 | `voice.vad_noise_db` 等五项 | `-35.0` / `0.8` / `0.2` / `0.35` / `30.0` | VAD 分段参数（对齐评估链路） |
 | `voice.stream_block_sec` | `0.2` | 音频管道单次读取块时长，越小首包延迟越低 |
@@ -253,11 +252,11 @@ pkill -f main.py                            # 直接结束服务
 | `voice.protected_hold_sec` | `2.0` | 句尾为保护词未完成前缀时的最大挂起秒数 |
 | `voice.fixed_window_sec` / `fixed_window_overlap_sec` | `20.0` / `5.0` | 仅 `segmenter=fixed_window` 时生效 |
 | `supervision.*` | 见仓库 | 监护制绑定的时长与距离阈值、连续帧数、告警冷却 |
-| `tracker.detection.*` | 见仓库 | 检测置信度、NMS、输入尺寸 |
-| `gaze.*` | 见仓库 | 关注度判定的置信度、热力图与头部尺寸参数 |
+| `tracker.detection.*` | 见仓库 | 检测权重（`weights` / `pose_model`）、置信度、NMS、输入尺寸 |
+| `gaze.*` | 见仓库 | 头部与视线模型路径（`head_model` / `gaze_model`）、关注度置信度、热力图与头部尺寸参数 |
 | `behavior.detection.*` | 见仓库 | 指向检测的模型路径、跳帧与裁剪放大、四指角度阈值、四分类置信度融合与并集召回参数 |
 | `behavior.finger_screen.*` / `finger_file.*` | 见仓库 | 目标归属阈值（机箱重叠比与距离 / 文件包含比）与事件去重（合并秒数 / 角色冷却 / 宽限帧 / 防抖帧） |
-| `bus.max_queue_size` | `1024` | 事件总线队列上限 |
+| `evaluation.model_path` | `models/evaluation/Qwen3-8B` | 合规评估大模型权重路径 |
 | `modules.*` | `true` | 各感知模块开关（含 `evaluation`），未备齐资源的模块可置 `false`；关停的模块会自动从对齐 `expected_sources` 中剔除，不再拖住 `done` 判定 |
 | `rules.*` | `true` | 各规程状态机开关（含 `normal_comm`） |
 
