@@ -487,7 +487,7 @@ class BehaviorModule(BaseModule):
             raw_fps = video_capture.get(cv2.CAP_PROP_FPS)
             if not raw_fps or raw_fps <= 0:
                 raise RuntimeError(
-                    f"读取 pop 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不再兜底"
+                    f"读取 pop 视频帧率失败(CAP_PROP_FPS={raw_fps})"
                 )
             fps = float(raw_fps)
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))

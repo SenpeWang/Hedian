@@ -1,17 +1,10 @@
-"""流式音频源：把"整段落盘 + 全量载入"改为"ffmpeg 管道 + 增量 PCM 块".
+"""流式音频源：ffmpeg 管道 + 增量 PCM 块.
 
-原实现依赖 `ffmpeg -i <video> audio.wav` 先落盘整段音频，再由 `librosa.load`
-全量载入内存；两者都要求输入必须完整结束才能返回，因此：
+通过 ffmpeg stdout 管道增量产出 16kHz 单声道 float32 采样块：
 
-  - 无法用于直播（rtsp/http 没有 EOF，`subprocess.run` 会永久阻塞）
-  - 首个转录结果被推迟到整段音频就绪之后
-  - 内存占用与音频总时长成正比（2h 音频约 460MB 波形）
-
-本模块通过 ffmpeg stdout 管道增量产出 16kHz 单声道 float32 采样块：
-
-  - 内存占用与音频总时长无关（配合 `PcmRing` 有界保留）
-  - 本地文件与 rtsp/rtmp/http 直播地址走同一条代码路径
-  - 不产生任何临时 wav 文件（原实现每段都要切一个 seg_XXXX.wav 落盘再删除）
+  - 内存占用与音频总时长无关（配合 `PcmRing` 有界保留）；
+  - 本地文件与 rtsp/rtmp/http 直播地址走同一条代码路径；
+  - 不产生任何临时 wav 文件。
 
 配合 `modules/voice/segmenters.py` 的在线切片，即可实现"读到一段语音就解一段"
 的流式解码。

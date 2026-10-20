@@ -38,7 +38,7 @@ def _qwen_worker(
 ) -> None:
     """子进程工作函数：在指定 GPU 上加载模型并生成评估报告.
 
-    按 config 分配的 eval_gpu 启动模型（不再自主探测），
+    按 config 分配的 eval_gpu 启动模型，
     评估完成后子进程退出，显存 100% 自动释放。
 
     Args:
@@ -47,7 +47,7 @@ def _qwen_worker(
         message_queue: 跨进程消息通信队列.
         eval_gpu: 评估子进程使用的 GPU 编号.
     """
-    # 视角级 GPU 分配: 评估走 config 指定的 GPU(eval_gpu), 不再自主探测
+    # 视角级 GPU 分配: 评估走 config 指定的 GPU(eval_gpu)
     os.environ["CUDA_VISIBLE_DEVICES"] = str(eval_gpu)
     selected_gpu = eval_gpu
 

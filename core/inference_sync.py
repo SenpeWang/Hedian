@@ -98,7 +98,7 @@ class InferenceSync:
         self._last_stream_id: str = "0-0"
         # 本地暂存 local_sec > 当前推送时间的事件，下次循环再处理
         self._pending_events: list = []
-        # 已推送到的 global_sec（游标，用于日志/调试，不再做限速）
+        # 已推送到的 global_sec（游标，用于日志/调试）
         self._pushed_global_sec: float = 0.0
         # 本轮推理是否已推送 done 哨兵
         self._cycle_done: bool = False
