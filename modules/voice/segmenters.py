@@ -104,8 +104,7 @@ class BaseSegmenter(ABC):
             frame = self._pending[: self._frame_len]
             frame_start = self._pending_start
             segments.extend(self._consume_frame(frame, frame_start))
-            frame_len = self._frame_len
-            self._pending = self._pending[frame_len:]
+            self._pending = self._pending[self._frame_len:]
             self._pending_start = frame_start + self._frame_dur
         return segments
 
