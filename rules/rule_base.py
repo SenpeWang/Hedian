@@ -21,7 +21,11 @@ class BaseRule(ABC):
 
     @abstractmethod
     def name(self) -> str:
-        """制度名称，如 'supervision', 'self_ticket'."""
+        """制度名称，如 'supervision', 'self_ticket'.
+
+        Returns:
+            制度名称字符串.
+        """
         pass
 
     @abstractmethod
