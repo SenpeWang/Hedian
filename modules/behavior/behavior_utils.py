@@ -412,7 +412,14 @@ def judge_pointing(
     def thumb_gaps(
         finger_map: Dict[str, Tuple[int, int, int]],
     ) -> Dict[str, float]:
-        """计算各指尖到拇指尖的距离与掌宽之比."""
+        """计算各指尖到拇指尖的距离与掌宽之比.
+
+        Args:
+            finger_map: 手指名到关键点三元组(mcp, pip, tip)的映射.
+
+        Returns:
+            手指名到(指尖-拇指尖距离)/掌宽比的映射.
+        """
         palm_width = math.hypot(
             landmarks[KEYPOINT_INDEX_MIDDLE_MCP][0] - landmarks[0][0],
             landmarks[KEYPOINT_INDEX_MIDDLE_MCP][1] - landmarks[0][1],
@@ -426,8 +433,18 @@ def judge_pointing(
             for name, (mcp, pip, tip) in finger_map.items()
         }
 
-    def evaluate(angle_map: Dict[str, float], gap_map: Dict[str, float]):
-        """按伸直 / 弯曲条件求值，返回是否指向与原因码."""
+    def evaluate(
+        angle_map: Dict[str, float], gap_map: Dict[str, float]
+    ) -> Tuple[bool, str, bool, bool, bool, bool, float]:
+        """按伸直 / 弯曲条件求值，返回是否指向与原因码.
+
+        Args:
+            angle_map: 各手指的关节角度.
+            gap_map: 各指尖到拇指尖的距离/掌宽比.
+
+        Returns:
+            (是否指向, 原因码, 食指伸直, 中指伸直, 无名指弯曲, 小指弯曲, 参考角度).
+        """
         reference_angle = max(angle_map["ring"], angle_map["pinky"])
         index_extended = angle_map["index"] >= straight_angle or (
             angle_map["index"] >= straight_angle_relaxed
