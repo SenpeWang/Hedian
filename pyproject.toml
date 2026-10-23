@@ -1,0 +1,21 @@
+[tool.ruff]
+# 与 requirements.txt 声明的运行环境一致
+target-version = "py310"
+# PEP8 默认 79 列对中文注释过紧, 放宽到 120
+line-length = 120
+# 只扫描 Python 源码, 避开前端目录与 ruff 缓存
+extend-exclude = ["frontend", ".ruff_cache"]
+
+[tool.ruff.lint]
+# E/W: pycodestyle(PEP8) 错误与警告
+# F:    pyflakes(未使用导入/变量、未定义名称等真实问题)
+# 说明: isort(I) 未纳入, 现有代码存在 20 处导入排序差异,
+#       纳入即门禁红; 待后续机械修复后另行开启。
+select = ["E", "W", "F"]
+
+[tool.ruff.lint.per-file-ignores]
+# 入口脚本需先注入 sys.path / 切换工作目录再导入项目模块;
+# 源码已逐行标注 noqa, 但多行导入的 noqa 覆盖不到 import 首行, 故按文件豁免
+"main.py" = ["E402"]
+# 评估 prompt 模板为长中文文本行, 不做折行处理
+"evaluation/qwen_evaluator.py" = ["E501"]

@@ -1,0 +1,72 @@
+# 代码规范与构建门禁 —— 与 commitlint.yml 分工:
+#   commitlint.yml 管提交信息, 本文件管代码质量。
+#
+# 触发时机: Pull Request 指向 main
+# 检查内容:
+#   - python:  语法编译检查 + ruff(PEP8 / pyflakes)
+#   - frontend: ESLint + TypeScript 类型检查 + vite 构建
+#
+# 注意: requirements.txt 的重依赖(torch/CUDA 等, 数 GB 级)不在 CI 安装,
+# 因此本门禁只做静态检查, 不执行运行时与测试; 接入测试属于后续演进。
+# 生效前提: 仓库分支保护中为本 job 勾选「Require status checks」。
+name: 代码规范检查
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+# 同一 PR 有新推送时取消进行中的旧检查, 节省额度
+concurrency:
+  group: lint-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  python:
+    name: Python 语法与规范
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
+
+      - name: 安装 ruff
+        run: pip install ruff
+
+      - name: 语法检查(compileall)
+        run: python -m compileall -q main.py core modules evaluation rules web
+
+      - name: 代码规范检查(ruff)
+        run: ruff check .
+
+  frontend:
+    name: 前端规范与构建
+    runs-on: ubuntu-latest
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 安装 Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: 安装依赖
+        working-directory: frontend
+        run: npm ci
+
+      - name: ESLint 检查
+        working-directory: frontend
+        run: npm run lint
+
+      - name: 类型检查与构建
+        working-directory: frontend
+        run: npm run build
