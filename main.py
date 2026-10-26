@@ -15,6 +15,8 @@
 import sys
 import os
 import glob
+import threading
+import time
 
 # 让 onnxruntime-gpu 的 CUDA EP 能找到 pip 装的 nvidia cu12 运行时库
 # (库在 site-packages/nvidia/*/lib, 不在系统标准路径, 动态链接器默认不搜;
@@ -189,6 +191,20 @@ def _run_module_process(
 
     logger = setup_logger(f"process.{module_name}")
     logger.info(f"{module_name} 进程启动，run_id={run_id}")
+
+    # 父进程(Web)被强杀时子进程会被 init 收养, 定期比对父 PID 后立即退出,
+    # 避免残留进程长期占用显存
+    _parent_pid = os.getppid()
+
+    def _exit_on_parent_death() -> None:
+        """父进程消失后立即终止本进程."""
+        while True:
+            time.sleep(5.0)
+            if os.getppid() != _parent_pid:
+                logger.warning(f"{module_name} 检测到父进程已退出，立即终止自身")
+                os._exit(0)
+
+    threading.Thread(target=_exit_on_parent_death, daemon=True).start()
 
     paths = PathConfig(
         base_dir=Path(paths_dict["base_dir"]),
@@ -429,6 +445,26 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
         multiprocessing.active_children()
         return count
 
+    def clear_redis_state() -> None:
+        """清空推理、模块与流水线相关的 Redis 状态.
+
+        正常收尾与 Web 进程退出共用同一套清理逻辑, 避免残留的推理流长期占用内存.
+        """
+        try:
+            client = redis.Redis(
+                host=REDIS_HOST,
+                port=REDIS_PORT,
+                db=REDIS_DB,
+                decode_responses=True,
+            )
+            for pattern in ("inference:*", "module:*", "pipeline:*"):
+                for scan_key in client.scan_iter(pattern):
+                    client.delete(scan_key)
+            client.close()
+            logger.info("已清空 Redis 推理数据")
+        except Exception as cleanup_error:
+            logger.error(f"清空 Redis 推理数据失败: {cleanup_error}")
+
     def on_pipeline_start(event: dict) -> None:
         """处理 pipeline.start 事件, 按配置拉起本轮推理子进程.
 
@@ -654,25 +690,7 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             # 回收退场子进程状态码，清除 ps aux 中的 <defunct> 僵尸进程条目
             stop_pipeline_processes()
             # 推理完成：清空本轮 Redis 推理数据，为下次「开始测试」准备干净状态
-            try:
-                cleanup_client = redis.Redis(
-                    host=REDIS_HOST,
-                    port=REDIS_PORT,
-                    db=REDIS_DB,
-                    decode_responses=True,
-                )
-                for scan_key in cleanup_client.scan_iter("inference:*"):
-                    cleanup_client.delete(scan_key)
-                for scan_key in cleanup_client.scan_iter("module:*"):
-                    cleanup_client.delete(scan_key)
-                for scan_key in cleanup_client.scan_iter("pipeline:*"):
-                    cleanup_client.delete(scan_key)
-                cleanup_client.close()
-                logger.info(
-                    "推理完成后已清空 Redis 推理数据，等待下次开始测试"
-                )
-            except Exception as cleanup_error:
-                logger.error(f"推理完成后清空 Redis 失败: {cleanup_error}")
+            clear_redis_state()
             logger.info(
                 "推理流与评估流程已全部完成，GPU 推理子进程与僵尸表项已 100% 清理，Web 保持运行"
             )
@@ -689,10 +707,19 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
 
     # 端口从配置读取（config.yaml → app.port），默认 5002
     web_port = int(config_dict.get("app", {}).get("port", 5002))
-    uvicorn.run(app, host="0.0.0.0", port=web_port, log_level="warning")
-
-    inference_sync.stop()
-    event_bus.stop()
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=web_port, log_level="warning")
+    finally:
+        # Web 进程退出（Ctrl+C / SIGTERM）：回收推理子进程并清空本轮 Redis 状态
+        stopped = stop_pipeline_processes()
+        clear_redis_state()
+        if getattr(app.state, "vis_forwarder", None):
+            app.state.vis_forwarder.stop()
+        inference_sync.stop()
+        event_bus.stop()
+        logger.info(
+            f"Web 进程退出，已终止 {stopped} 个推理子进程并清理 Redis"
+        )
 
 
 def main() -> None:
