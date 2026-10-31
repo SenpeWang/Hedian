@@ -9,7 +9,7 @@ import logging
 import os
 import pkgutil
 from abc import ABC, abstractmethod
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, Optional
 
 from core.event_bus import EventBus
 
@@ -131,13 +131,6 @@ class RuleRegistry:
         """
         return self._rules.get(name)
 
-    def get_all_rules(self) -> List[BaseRule]:
-        """获取全部已注册的制度实例.
-
-        Returns:
-            全部制度实例列表.
-        """
-        return list(self._rules.values())
 
     def save_all_results(self, result_dir: str) -> None:
         """对全部制度执行收尾 finalize 并保存各自产物.

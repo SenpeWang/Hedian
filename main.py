@@ -89,24 +89,6 @@ REDIS_DB = 0
 logger = setup_logger("main")
 
 
-def _paths_from_dict(paths_dict: dict) -> "PathConfig":
-    """从可序列化的 paths_dict 重建 PathConfig（跨进程传递用）.
-
-    Args:
-        paths_dict: 含 base_dir / data_root / model_root / result_root 的
-        可 pickle 字典.
-
-    Returns:
-        重建的 PathConfig 实例.
-    """
-    from pathlib import Path
-
-    return PathConfig(
-        base_dir=Path(paths_dict["base_dir"]),
-        data_root=Path(paths_dict["data_root"]),
-        model_root=Path(paths_dict["model_root"]),
-        result_root=Path(paths_dict["result_root"]),
-    )
 
 
 def _expected_sources(config_dict: dict) -> set:

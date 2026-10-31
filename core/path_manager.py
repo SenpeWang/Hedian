@@ -65,16 +65,6 @@ class PathConfig:
         """
         return self.model_root / model_subdir / filename
 
-    def get_video_path(self, filename: str) -> Path:
-        """拼接视频路径.
-
-        Args:
-            filename: 视频文件名.
-
-        Returns:
-            Path: data_root / "videos" / filename.
-        """
-        return self.data_root / "videos" / filename
 
     def get_result_path(self, run_id: str, module: str, filename: str) -> Path:
         """拼接结果文件路径, 并创建其父目录.
