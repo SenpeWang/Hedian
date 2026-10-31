@@ -1,7 +1,7 @@
 # 代码规范与构建门禁 —— 与 commitlint.yml 分工:
 #   commitlint.yml 管提交信息, 本文件管代码质量。
 #
-# 触发时机: Pull Request 指向 main
+# 触发时机: Pull Request 指向 main 与 push 到 main
 # 检查内容:
 #   - python:  语法编译检查 + ruff(PEP8 / pyflakes)
 #   - frontend: ESLint + TypeScript 类型检查 + vite 构建
@@ -13,6 +13,8 @@ name: 代码规范检查
 
 on:
   pull_request:
+    branches: [main]
+  push:
     branches: [main]
 
 permissions:
