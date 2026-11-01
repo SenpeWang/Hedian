@@ -36,7 +36,7 @@ from modules.behavior.behavior_vis import (
     scale_screen_polygons,
 )
 from modules.behavior.file_detector import FingerFileDetector
-from modules.behavior.screen_detect import FingerScreenDetector
+from modules.behavior.screen_detector import FingerScreenDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 
 logger = logging.getLogger("module.behavior")

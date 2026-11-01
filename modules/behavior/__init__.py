@@ -2,7 +2,7 @@
 
 from modules.behavior.behavior_module import BehaviorModule
 from modules.behavior.hand_raiser import HandRaiser
-from modules.behavior.screen_detect import FingerScreenDetector
+from modules.behavior.screen_detector import FingerScreenDetector
 from modules.behavior.file_detector import FingerFileDetector
 from modules.behavior.storage_behavior import BehaviorStorage
 

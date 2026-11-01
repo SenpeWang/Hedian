@@ -7,7 +7,7 @@
      - draw_detection_boxes：检测到的目标框（pointing_hand 紫框 / file 黄框）
      - draw_trigger：事件触发框（红色粗框 + 触发标签）
 
-检测器（screen_detect / file_detector）调用本模块绘制函数，不自行写 cv2 绘制代码。
+检测器（screen_detector / file_detector）调用本模块绘制函数，不自行写 cv2 绘制代码。
 
 可视化风格：统一黄色半透明填充 + 实线闭合边框 + 质心标签（对齐 gaze_roi_app/visualizer）。
 """

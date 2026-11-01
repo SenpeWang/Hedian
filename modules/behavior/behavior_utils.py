@@ -7,7 +7,7 @@
   - 姿态工具：PoseTools（夹角计算）、PoseEMAFilter（关键点 EMA 平滑）、
     PoseRoleClassifier（事件时刻判别机组长 / 操作员）
 
-所有几何函数均为无副作用纯函数，供 screen_detect / file_detector / hand_raiser /
+所有几何函数均为无副作用纯函数，供 screen_detector / file_detector / hand_raiser /
 behavior_module 等模块复用。
 """
 

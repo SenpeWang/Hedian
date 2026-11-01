@@ -21,7 +21,7 @@ from modules.behavior.behavior_vis import (
     screen_polygons_as_tuples,
 )
 
-logger = logging.getLogger("module.behavior.screen_detect")
+logger = logging.getLogger("module.behavior.screen_detector")
 
 
 class FingerScreenDetector(BaseDetector):
