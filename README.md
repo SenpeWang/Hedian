@@ -35,42 +35,44 @@
 
 ```mermaid
 flowchart LR
-    subgraph SRC[数据源]
-        F[camFRONT.mpg + 音频]
-        P[camPOP.mpg]
-    end
+    classDef src   fill:#e3f2fd,stroke:#1976d2,color:#0d47a1
+    classDef pipe  fill:#fff3e0,stroke:#f57c00,color:#e65100
+    classDef core  fill:#e8f5e9,stroke:#388e3c,color:#1b5e20
+    classDef rule  fill:#fce4ec,stroke:#c2185b,color:#880e4f
+    classDef eval  fill:#f3e5f5,stroke:#7b1fa2,color:#4a148c
+    classDef web   fill:#e0f7fa,stroke:#0097a7,color:#006064
+    classDef fe    fill:#fff8e1,stroke:#fbc02d,color:#ff6f00
 
-    subgraph PIPE[推理层 modules/]
-        TR[Tracker<br/>检测+姿态+MOT]
-        GZ[Gaze<br/>头部+视线]
-        VO[Voice<br/>流式ASR+对齐]
-        BH[Behavior<br/>举手/指屏/指文件]
+    subgraph SRC["数据源"]
+        F["camFRONT.mpg + 音频"]:::src
+        P["camPOP.mpg"]:::src
     end
-
-    subgraph BUS[核心层 core/]
-        EB[事件总线]
-        SYNC[同步对齐器]
-        VIS[可视化编码]
+    subgraph PIPE["感知层"]
+        TR["Tracker<br/>检测·姿态·MOT"]:::pipe
+        GZ["Gaze<br/>头部·视线"]:::pipe
+        VO["Voice<br/>流式ASR·对齐"]:::pipe
+        BH["Behavior<br/>举手·指屏·指文件"]:::pipe
     end
-
-    subgraph RULE[rules/ 规程状态机]
-        R1[监护制]
-        R2[自唱票]
-        R3[信息通报]
-        R4[人员状态]
-        R5[普通沟通]
+    subgraph BUS["核心层"]
+        EB["事件总线<br/>Redis Stream"]:::core
+        SYNC["同步对齐器"]:::core
+        VIS["可视化编码<br/>fMP4"]:::core
     end
-
-    subgraph EVAL[evaluation/]
-        LL[Qwen3-8B<br/>合规评估]
+    subgraph RULE["规程状态机"]
+        R1["监护制"]:::rule
+        R2["自唱票"]:::rule
+        R3["信息通报"]:::rule
+        R4["人员状态"]:::rule
+        R5["普通沟通"]:::rule
     end
-
-    subgraph WEB[web/ 服务层]
-        HTTP[FastAPI HTTP]
-        WS[WebSocket /ws/data]
+    subgraph EVAL["评估层"]
+        LL["Qwen3-8B<br/>合规评估"]:::eval
     end
-
-    FE[frontend/<br/>Vue3 + MSE]
+    subgraph WEB["服务层"]
+        HTTP["FastAPI HTTP"]:::web
+        WS["WebSocket /ws/data"]:::web
+    end
+    FE["展现层<br/>Vue3 + MSE"]:::fe
 
     F --> TR & GZ & VO
     P --> BH
