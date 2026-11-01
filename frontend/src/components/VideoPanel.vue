@@ -1,8 +1,8 @@
 <script setup lang="ts">
 // VideoPanel: MSE fMP4 流式播放展示组件(薄)
-// front=主时钟(emit currentTime); pop=从动(锁步算法在 media/slave-sync, 此处仅驱动)
+// front=主时钟(emit currentTime); pop=从动(锁步算法在 media/slaveSync, 此处仅驱动)
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { createSlaveSyncState, syncSlave, resetSlaveSync } from '../media/slave-sync'
+import { createSlaveSyncState, syncSlave, resetSlaveSync } from '../media/slaveSync'
 
 const props = withDefaults(
   defineProps<{
@@ -31,7 +31,7 @@ const slaveState = createSlaveSyncState()
 // 已起播后 stall 恢复只需 0.3s 余量(快速恢复)
 let startedOnce = false
 
-// 逐帧循环: front emit currentTime(主时钟); pop 调 slave-sync 锁步. 仅 isPlaying 时跑
+// 逐帧循环: front emit currentTime(主时钟); pop 调 slaveSync 锁步. 仅 isPlaying 时跑
 function stepRenderLoop() {
   const vid = videoRef.value
   if (vid) {
@@ -90,7 +90,7 @@ function handleVisibilityChange() {
 defineExpose({ pauseVideo })
 
 // 速率控制权分离: front 速率归水位引擎(此处 watch 设置);
-// pop 速率完全归 slave-sync 伺服层(每帧 base×factor 连续修正, 此处不得干预——
+// pop 速率完全归 slaveSync 伺服层(每帧 base×factor 连续修正, 此处不得干预——
 // 否则伺服修正被 watch 周期性清零, pop 追赶失效掉队累积)
 watch(
   () => props.playbackRate,

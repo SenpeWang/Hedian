@@ -2,10 +2,10 @@
 // 职责: 管线状态机 / 主时钟 / 媒体 URL / 速率 / 消息路由(内核→业务 store 回调注入)
 // 消息流单向: WS → 内核 → usePlayback 路由 → 业务 store(useTranscript/useNotify/useReports)
 import { ref, computed, onBeforeUnmount, type Ref } from 'vue'
-import { createMediaBuffer, type MediaBuffer } from '../media/mse-buffer'
-import { RateController } from '../media/rate-controller'
+import { createMediaBuffer, type MediaBuffer } from '../media/mseBuffer'
+import { RateController } from '../media/rateController'
 import { Scheduler } from '../media/scheduler'
-import { createWsClient, type WsClient } from '../media/ws-client'
+import { createWsClient, type WsClient } from '../media/wsClient'
 import { isReportMsg } from '../media/protocol'
 import { createLogger } from '../media/logger'
 import { metrics } from '../media/metrics'
