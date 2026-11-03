@@ -131,7 +131,6 @@ class RuleRegistry:
         """
         return self._rules.get(name)
 
-
     def save_all_results(self, result_dir: str) -> None:
         """对全部制度执行收尾 finalize 并保存各自产物.
 

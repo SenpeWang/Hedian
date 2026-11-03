@@ -65,7 +65,6 @@ class PathConfig:
         """
         return self.model_root / model_subdir / filename
 
-
     def get_result_path(self, run_id: str, module: str, filename: str) -> Path:
         """拼接结果文件路径, 并创建其父目录.
 

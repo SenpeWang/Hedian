@@ -89,8 +89,6 @@ REDIS_DB = 0
 logger = setup_logger("main")
 
 
-
-
 def _expected_sources(config_dict: dict) -> set:
     """按本轮启用的模块推导参与对齐的 source 集合.
 
