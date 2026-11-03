@@ -1,8 +1,8 @@
 [tool.ruff]
 # 与 requirements.txt 声明的运行环境一致
 target-version = "py310"
-# PEP8 默认 79 列对中文注释过紧, 放宽到 120
-line-length = 120
+# 行宽 79 列, 与 README「开发规范」一致
+line-length = 79
 # 只扫描 Python 源码, 避开前端目录与 ruff 缓存
 extend-exclude = ["frontend", ".ruff_cache"]
 
