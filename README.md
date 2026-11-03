@@ -395,8 +395,8 @@ VOICE_KEY_MOMENT 事件（key_moment + keys） → 规程状态机
 
 ### 开发规范
 
-- **代码风格**：Python **基于 PEP 8 并遵循 Google Python Style Guide**（4 空格缩进、行宽 ≤ 79 列、 snake_case 命名、类型注解完整，docstring 使用 Google 风格的 `Args` / `Returns` 段）；前端使用 ESLint + Prettier 统一风格（配置已随仓库提供：`frontend/eslint.config.js`、`frontend/.prettierrc`），提交前确认 `npm run lint` 与 `npx prettier --check 'src/**/*.{ts,vue}'` 均无告警。
-- **CI 门禁**（`.github/workflows/lint.yml`）：Python 跑 `ruff check .`（规则集 `E`/`W`/`F`，`line-length = 79`、`target-version = "py310"`，配置见 `pyproject.toml`）与 `compileall` 语法检查；前端跑 ESLint + `vue-tsc` 类型检查 + `vite build`。per-file-ignores：`main.py` 忽略 `E402`（入口需先注入 `sys.path` 再导入）；`evaluation/qwen_evaluator.py` 忽略 `E501`（长中文 prompt 模板不折行）。
+- **代码风格**：Python **基于 PEP 8 并遵循 Google Python Style Guide**（4 空格缩进、行宽 ≤ 120 列、 snake_case 命名、类型注解完整，docstring 使用 Google 风格的 `Args` / `Returns` 段）；前端使用 ESLint + Prettier 统一风格（配置已随仓库提供：`frontend/eslint.config.js`、`frontend/.prettierrc`），提交前确认 `npm run lint` 与 `npx prettier --check 'src/**/*.{ts,vue}'` 均无告警。
+- **CI 门禁**（`.github/workflows/lint.yml`）：Python 跑 `ruff check .`（规则集 `E`/`W`/`F`，`line-length = 120`、`target-version = "py310"`，配置见 `pyproject.toml`）与 `compileall` 语法检查；前端跑 ESLint + `vue-tsc` 类型检查 + `vite build`。per-file-ignores：`main.py` 忽略 `E402`（入口需先注入 `sys.path` 再导入）；`evaluation/qwen_evaluator.py` 忽略 `E501`（长中文 prompt 模板不折行）。
 - **组件命名**：Vue 组件使用 PascalCase（如 `VideoPanel.vue`）；组合式函数以 `use` 前缀驼峰命名（如 `usePlayback.ts`、`useNotify.ts`）；其余变量与函数统一 camelCase。
 - **提交规范**：遵循 [Conventional Commits](https://www.conventionalcommits.org/)，并遵守原子提交 —— 详见下方「提交规范」一节。
 - **文档注释**：Python 关键函数补 `Args` / `Returns` 段；前端导出的 API 使用 TSDoc（`@param` / `@returns`）。
