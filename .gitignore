@@ -24,8 +24,10 @@ venv/
 env/
 config.local.yaml
 
-# Data directory
-data/
+# Data directory（忽略内容而非目录本身，才能对单个配置文件开例外）
+data/*
+# 场景配置是代码资产，需要入库（视频/ROI 等仍在 data/ 下忽略）
+!data/workstations.json
 
 # Model files
 models/
@@ -51,5 +53,17 @@ frontend/tsconfig.tsbuildinfo
 !README.md
 !API.md
 !命名规范.md
+
+# 本地调试与基准脚本（个人临时工具，不入版本库）
+_bench_*.py
+_prof_*.py
+_smoke_*.py
+_snap_*.py
+
+# 本地实验配置（含本地路径与调参，不入版本库）
+config_bench.yaml
+config_full.yaml
+config_stream.yaml
+config_verify.yaml
 
 

@@ -97,8 +97,16 @@ class MultiObjectTracker:
     结合 OC-SORT 与 ByteTrack 双阈值匹配算法，实现连续帧目标跟踪与初始工位身份分配。
     """
 
-    def __init__(self) -> None:
-        """初始化内部 OC-SORT/ByteTrack 跟踪器与工位身份分配状态."""
+    def __init__(
+        self,
+        workstations: Optional[Dict[str, tuple]] = None,
+    ) -> None:
+        """初始化内部 OC-SORT/ByteTrack 跟踪器与工位身份分配状态.
+
+        Args:
+            workstations: 工位基准点 {身份: (x, y)}，按机室从 scene 配置注入；
+                None 时使用模块内默认值（单机室兼容）。
+        """
         from modules.tracker.ocsort_bytetrack import OCSORTByteTracker
 
         self.tracker = OCSORTByteTracker(
@@ -113,6 +121,10 @@ class MultiObjectTracker:
             confirm_frames=3,
             max_recover_distance=300.0,
             max_speed_per_frame=10.0,
+        )
+        # 工位基准点：优先用机室配置注入，否则退回代码内默认值
+        self.workstations: Dict[str, tuple] = (
+            dict(workstations) if workstations else dict(WORKSTATIONS)
         )
         self.frame_id: int = 0
         self.identities_assigned: bool = False
@@ -130,7 +142,7 @@ class MultiObjectTracker:
         if self.identities_assigned or len(tracks) < 2:
             return
 
-        workstations = list(WORKSTATIONS.items())
+        workstations = list(self.workstations.items())
         assigned_track_object_ids: Set[int] = set()
 
         assignments = []

@@ -2,9 +2,10 @@
 # 本文件是唯一配置事实源；core/config_manager.py 加载本文件
 
 app:
-  # 视角级 GPU 分配: front(tracker+gaze)=0, voice/pop/evaluation=1
+  # 视角级 GPU 分配: front(tracker+gaze+identity)=0, voice/pop/evaluation=1
   gpu_map:
     tracker: "0"
+    identity: "0"
     voice: "1"
     behavior: "1"
     evaluation: "1"
@@ -26,6 +27,15 @@ videos:
   front: "data/videos/camFRONT.mpg"
   pop: "data/videos/camPOP.mpg"
 
+# 场景(机室)配置 —— 换机室只改这里，不再改代码
+#   room_id: 1=机室1, 2=机室2（决定用 workstations.json 里哪一套工位、哪一份 ROI）
+#   workstations: 工位基准点(anchor) + 判定多边形(polygon) 定义文件
+#   roi: 屏幕关注区；留空则依次回退 data/ROI_room{id}.json -> data/ROI.json
+scene:
+  room_id: 1
+  workstations: "data/workstations.json"
+  roi: ""
+
 supervision:
   bind_hold_sec: 10.0
   unbind_hold_sec: 10.0
@@ -42,8 +52,10 @@ tracker:
     pose_confidence: 0.35
     nms_threshold: 0.35
     img_size: 640
-    weights: "yolo11_MOT.pt"           # 人员检测主模型(含 MOT 跟踪头)
-    pose_model: "yolo26s-pose.pt"      # 姿态估计(举手检测与 MOT 姿态)
+    weights: "best_nuclear.pt"         # 人员检测主模型(核电站自训 best.pt, 单类 person)
+    # 姿态估计(举手检测与 MOT 姿态)：本机 ultralytics 8.3.191 不认 yolo26 系列
+    # (缺 Pose26 类)，故用兼容权重 pose.pt；升级 ultralytics 后可切回 yolo26s-pose.pt
+    pose_model: "pose.pt"
 
 voice:
   sample_rate: 16000
@@ -138,10 +150,45 @@ behavior:
     role_cooldown_sec: 1.5  # 角色抖动冷却
     grace_frames: 12  # 遮挡空窗填补帧数
 
+# 人员身份与在岗监控（独立进程；阶段 1 = 检测+跟踪+工位在岗判定）
+#   away_hold_sec: 连续离开工位多边形超过该秒数才确认"离岗"
+#   push_interval_sec: 前端面板推送节流
+#   detection: 留空则沿用 tracker.detection
+identity:
+  # true = 内嵌到 tracker 进程复用其 tracks（省一份 YOLO，main.py 不再起独立进程）
+  # false = 独立进程（自带检测+跟踪），适合单独调试
+  embedded: true
+  away_hold_sec: 2.0
+  push_interval_sec: 0.5
+  detection:
+    weights: "best_nuclear.pt"   # 与 tracker 共用自训权重(单类 person)
+  # 人脸识别：InsightFace 三模板身份锁定
+  face:
+    enabled: true
+    model_name: "buffalo_l"
+    det_size: 640
+    ctx_id: 0                    # 子进程已按 gpu_map 限定可见 GPU，这里固定 0
+    min_box_size: 40             # 人体框最小边长，太小不裁人脸
+    det_score: 0.7               # 人脸检测得分门槛
+    verify_interval_sec: 0.5     # 同一 tid 的人脸推理节流间隔
+  # 身份锁定状态机
+  lock:
+    spatial_threshold: 1.2       # 人脸距离 < 该值判为匹配
+    margin: 0.10                 # 与次优角色的最小距离差
+    grace_sec: 2.5               # 驻留确认允许的中断间隔(容忍 ID 抖动)
+    strong_time_sec: 1.5         # 强匹配所需驻留时长
+    strong_passes: 2             # 强匹配所需合格次数
+    weak_time_sec: 5.0           # 弱匹配所需驻留时长
+    weak_passes: 4               # 弱匹配所需合格次数
+    absent_hold_sec: 3.0         # 锁定后连续不在画面多久释放
+    elim_frames: 5               # 排除法补位所需连续帧
+    auto_register_frames: 15     # 自动注册底库所需连续在岗帧
+
 modules:
   gaze: true
   voice: true
   tracker: true
+  identity: true         # 内嵌到 tracker 进程复用 tracks（identity.embedded=true）
   personnel_status: true
   info_notice: true
   behavior: true
@@ -151,5 +198,13 @@ rules:
   supervision: true
   self_ticket: true
   personnel_status: true
+  # 制度阈值（落盘在配置里，改值即生效，无需改代码）
+  # 口径沿用人员状态监控规程：视线离开盘台 1 分钟、无人值守 10 秒
+  params:
+    personnel_status:
+      gaze_away_sec: 60.0     # 两名操纵员视线同时离开盘台持续该秒数 → 违规
+      no_people_sec: 10.0     # 主控室人员少于 1 人持续该秒数 → 违规
+      # 工位离岗不在此设阈值：口径沿用 identity.away_hold_sec（连续离开工位
+      # 多边形超过该秒数即确认离岗），确认离岗即记 STATION_AWAY_VIOLATION
   info_notice: true
   normal_comm: true

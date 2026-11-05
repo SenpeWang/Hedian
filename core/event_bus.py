@@ -41,6 +41,10 @@ class EventTopic:
     GAZE_ATTENTION = "gaze.attention"
     GAZE_ALERT = "gaze.alert"
 
+    # Identity -> EventBus
+    IDENTITY_ROLE = "identity.role"
+    IDENTITY_AWAY = "identity.away"
+
     # Rules -> EventBus
     FLOW_STARTED = "flow.started"
     FLOW_ENDED = "flow.ended"

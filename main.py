@@ -110,6 +110,8 @@ def _expected_sources(config_dict: dict) -> set:
         expected_sources.add("tracking")
         if modules_config.get("gaze", False):
             expected_sources.add("gaze")
+    if modules_config.get("identity", False):
+        expected_sources.add("identity")
     return expected_sources
 
 
@@ -194,7 +196,7 @@ def _run_module_process(
     )
 
     active_result_dir = str(paths.get_result_dir(run_id))
-    for sub in ("voice", "tracker", "gaze", "behavior", "qwen", "evaluation"):
+    for sub in ("voice", "tracker", "gaze", "behavior", "identity", "qwen", "evaluation"):
         os.makedirs(os.path.join(active_result_dir, sub), exist_ok=True)
 
     new_log_file = os.path.join(active_result_dir, "run.log")
@@ -287,6 +289,35 @@ def run_behavior_process(config_dict, paths_dict, video_path, run_id) -> None:
 
     _run_module_process(
         "behavior", BehaviorModule, config_dict, paths_dict, video_path, run_id
+    )
+
+
+def run_identity_process(config_dict, paths_dict, video_path, run_id) -> None:
+    """运行人员身份与在岗监控进程.
+
+    Args:
+        config_dict: 完整配置字典.
+        paths_dict: 可序列化的路径配置字典.
+        video_path: 待推理视频路径（前置视角）.
+        run_id: 本轮运行标识.
+    """
+
+    # 与 tracker 一致：清理 LD_LIBRARY_PATH，避免 nvidia pip 运行时库被 PyTorch 误链接
+    def _env_setup() -> None:
+        """清理 LD_LIBRARY_PATH."""
+        if "LD_LIBRARY_PATH" in os.environ:
+            del os.environ["LD_LIBRARY_PATH"]
+
+    from modules.identity import IdentityModule
+
+    _run_module_process(
+        "identity",
+        IdentityModule,
+        config_dict,
+        paths_dict,
+        video_path,
+        run_id,
+        env_setup=_env_setup,
     )
 
 
@@ -386,7 +417,8 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
     from rules.flow_recorder import FlowEventRecorder
 
     registry = RuleRegistry()
-    registry.discover()
+    # 传入全局配置：rules.params.<制度名> 作为该制度的阈值参数
+    registry.discover(config_dict)
 
     # 流程事件记录器：统一保存 rules/flow_events.json
     flow_recorder = FlowEventRecorder(event_bus)
@@ -540,6 +572,20 @@ def run_web_process(config_dict, paths_dict, run_id=None) -> None:
             )
             proc.start()
             active_worker_processes.append(("behavior", proc))
+
+        identity_cfg = config_dict.get("identity", {}) or {}
+        if (
+            config_dict.get("modules", {}).get("identity")
+            and not identity_cfg.get("embedded", False)
+        ):
+            proc = multiprocessing.Process(
+                target=run_identity_process,
+                args=(config_dict, paths_dict, front_video, active_run_id),
+                name="identity",
+                daemon=False,
+            )
+            proc.start()
+            active_worker_processes.append(("identity", proc))
 
         logger.info(
             f"已按需启动 {len(active_worker_processes)} 个推理子进程: "

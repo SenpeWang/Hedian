@@ -38,7 +38,10 @@ class GazeEstimator:
         import onnxruntime
 
         # 官方 API: 从 pip nvidia 包预加载 CUDA/cuDNN 库，供下方 CUDA EP 使用
-        onnxruntime.preload_dlls()
+        # 该 API 仅 onnxruntime 1.21+ 提供，旧版本需跳过（库由系统 ldconfig 提供）
+        preload_dlls = getattr(onnxruntime, "preload_dlls", None)
+        if callable(preload_dlls):
+            preload_dlls()
         if providers is None:
             providers = ["CUDAExecutionProvider"]
 

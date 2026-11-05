@@ -21,6 +21,7 @@ _SOURCE_CATEGORY: Dict[str, str] = {
     "gaze": "gaze",
     "video_pop": "behavior",
     "behavior": "behavior",
+    "identity": "identity",
 }
 
 
