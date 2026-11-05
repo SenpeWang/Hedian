@@ -21,7 +21,6 @@ from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.storage_behavior import BehaviorStorage
 from modules.gaze.gaze_module import GazeModule
 from modules.identity.identity_monitor import IdentityMonitor
-from modules.identity.role_lock import ROLES as IDENTITY_ROLES
 from modules.identity.storage_identity import IdentityStorage
 from modules.tracker.multi_object_tracker import MultiObjectTracker, STrack
 from modules.tracker.object_detector import ObjectDetector
