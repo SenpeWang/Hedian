@@ -64,7 +64,13 @@ class VisStreamForwarder:
             )
             thread.start()
             self._threads.append(thread)
-        logger.info("VisStreamForwarder 启动,消费 front/pop")
+        # 打印实际 Redis 目标:数据写 db15 而转发读 db0 时前端只会黑屏,必须可见
+        kwargs = getattr(self._redis.connection_pool, "connection_kwargs", {}) or {}
+        logger.info(
+            "VisStreamForwarder 启动,消费 front/pop db=%s key=%sfront",
+            kwargs.get("db", "?"),
+            KEY_PREFIX,
+        )
 
     def _consume(self, view: str) -> None:
         """持续消费单个视角的 fMP4 Redis Stream 并转发到 WebSocket.
@@ -74,6 +80,24 @@ class VisStreamForwarder:
         """
         key = KEY_PREFIX + view
         last_id = "0-0"
+        logger.info(f"VisStreamForwarder[{view}] 消费线程进入 key={key}")
+        try:
+            self._consume_loop(view, key, last_id)
+        finally:
+            logger.info(
+                f"VisStreamForwarder[{view}] 消费线程退出 "
+                f"(stop={self._stop.is_set()})"
+            )
+
+    def _consume_loop(self, view: str, key: str, last_id: str) -> None:
+        """消费循环主体（拆出以便记录线程进出与转发计数）.
+
+        Args:
+            view: 视角名.
+            key: Redis Stream key.
+            last_id: 起始消费 ID.
+        """
+        forwarded = 0
         while not self._stop.is_set():
             try:
                 stream_entries = self._redis.xread(
@@ -88,6 +112,12 @@ class VisStreamForwarder:
                             if isinstance(entry_id, bytes)
                             else entry_id
                         )
+                        forwarded += 1
+                        if forwarded == 1 or forwarded % 300 == 0:
+                            logger.info(
+                                f"VisStreamForwarder[{view}] 已转发 {forwarded} 段 "
+                                f"(last_id={last_id})"
+                            )
                         seg_type = fields.get(b"type", b"").decode()
                         data = fields.get(b"data", b"")
                         if seg_type == "end":

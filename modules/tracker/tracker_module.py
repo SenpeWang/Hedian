@@ -20,12 +20,19 @@ from core.vis_encoder import VisEncoder
 from modules.behavior.hand_raiser import HandRaiser
 from modules.behavior.storage_behavior import BehaviorStorage
 from modules.gaze.gaze_module import GazeModule
+from modules.identity.identity_monitor import IdentityMonitor
+from modules.identity.role_lock import ROLES as IDENTITY_ROLES
+from modules.identity.storage_identity import IdentityStorage
 from modules.tracker.multi_object_tracker import MultiObjectTracker, STrack
 from modules.tracker.object_detector import ObjectDetector
+from modules.tracker.scene_config import SceneConfig, load_scene
 from modules.tracker.storage_tracker import TrackerStorage
 from modules.tracker.visualizer import draw_tracks
 
 logger = logging.getLogger("module.tracker")
+
+# 视频元数据可接受的帧率上限(超过即视为畸形时间戳, 回退配置帧率)
+MAX_REASONABLE_FPS = 240.0
 
 # 默认模型权重文件名(相对 model_root/<子目录>, 可被 config.yaml 覆盖)
 _DEFAULT_DET_WEIGHTS = "yolo11_MOT.pt"
@@ -65,6 +72,9 @@ class TrackerModule(BaseModule):
         self._result_storage: Optional[TrackerStorage] = None
         self._events: List[Dict] = []
         self._identity_map: Dict[str, int] = {}
+        self._scene: Optional[SceneConfig] = None
+        self._identity_monitor: Optional[IdentityMonitor] = None
+        self._identity_storage: Optional[IdentityStorage] = None
         self._vis_encoder: Optional[VisEncoder] = None
         self._last_supervision_states: Dict[str, str] = {}
         self._supervision_active: bool = False
@@ -88,6 +98,9 @@ class TrackerModule(BaseModule):
             tracker_config = self.config.get("tracker", {})
             supervision_config = self.config.get("supervision", {})
 
+            # 场景(机室)配置：工位基准点、判定多边形、屏幕 ROI 全部按机室加载
+            self._scene = load_scene(self.config, self.paths.base_dir)
+
             # 初始化目标与姿态检测器
             detection_config = tracker_config.get("detection", {})
             self._detector = ObjectDetector(
@@ -105,27 +118,60 @@ class TrackerModule(BaseModule):
                 img_size=detection_config.get("img_size", 640),
             )
 
-            # 初始化多目标跟踪器
-            self._tracker = MultiObjectTracker()
-
-            # 初始化凝视处理器
-            gaze_config = self.config.get("gaze", {})
-            self._gaze_processor = GazeModule(
-                head_model_path=self.paths.get_model_path(
-                    "gaze", gaze_config.get("head_model", _DEFAULT_HEAD_MODEL)
-                ),
-                gaze_model_path=self.paths.get_model_path(
-                    "gaze", gaze_config.get("gaze_model", _DEFAULT_GAZE_MODEL)
-                ),
-                roi_json_path=str(self.paths.base_dir / "data" / "ROI.json"),
-                config=gaze_config,
-                inference_fn=self.push_display,
-                event_bus=self.event_bus,
-                progress_fn=lambda current, total: (
-                    self.inference_stream.update_module_time("gaze", current)
-                ),
-                paths=self.paths,
+            # 初始化多目标跟踪器（工位基准点按当前机室注入）
+            self._tracker = MultiObjectTracker(
+                workstations=self._scene.anchors or None
             )
+
+            # 身份监控内嵌：复用本进程的 tracks，避免与独立进程各跑一遍 YOLO
+            # 开关只看 identity.embedded：modules.identity 仅决定是否另起独立进程，
+            # 不再作为内嵌的前置条件（否则两个开关不一致时会静默不跑身份监控）
+            identity_config = self.config.get("identity", {}) or {}
+            if identity_config.get("embedded", False):
+                if not self.config.get("modules", {}).get("identity", False):
+                    logger.warning(
+                        "identity.embedded=true 但 modules.identity=false："
+                        "身份监控仍由 tracker 进程内嵌承载，只是不起独立进程"
+                    )
+                self._identity_monitor = IdentityMonitor(
+                    self._scene,
+                    face_config=identity_config.get("face", {}) or {},
+                    lock_config=identity_config.get("lock", {}) or {},
+                    away_hold_sec=float(identity_config.get("away_hold_sec", 2.0)),
+                )
+                if self._identity_monitor.initialize():
+                    self._identity_storage = IdentityStorage(self.paths)
+                    logger.info("身份监控已内嵌到 tracker 进程（复用 tracks）")
+                else:
+                    self._identity_monitor = None
+                    logger.warning("身份监控内嵌初始化失败，回退为几何工位分配")
+
+            # 初始化凝视处理器（modules.gaze=false 时跳过，便于只跑身份/跟踪链路）
+            gaze_config = self.config.get("gaze", {})
+            self._gaze_processor = None
+            if self.config.get("modules", {}).get("gaze", True):
+                self._gaze_processor = GazeModule(
+                    head_model_path=self.paths.get_model_path(
+                        "gaze", gaze_config.get("head_model", _DEFAULT_HEAD_MODEL)
+                    ),
+                    gaze_model_path=self.paths.get_model_path(
+                        "gaze", gaze_config.get("gaze_model", _DEFAULT_GAZE_MODEL)
+                    ),
+                    roi_json_path=str(
+                        self._scene.roi_path
+                        if self._scene and self._scene.roi_path
+                        else self.paths.base_dir / "data" / "ROI.json"
+                    ),
+                    config=gaze_config,
+                    inference_fn=self.push_display,
+                    event_bus=self.event_bus,
+                    progress_fn=lambda current, total: (
+                        self.inference_stream.update_module_time("gaze", current)
+                    ),
+                    paths=self.paths,
+                )
+            else:
+                logger.warning("modules.gaze=false，跳过凝视处理器初始化")
 
             # 初始化举手检测器（实现位于 behavior 模块，tracker 仅持有实例用于前置视角调用）
             cooldown_sec = float(supervision_config.get("cooldown_sec", 1.5))
@@ -195,6 +241,14 @@ class TrackerModule(BaseModule):
                     f"读取 front 视频帧率失败(CAP_PROP_FPS={raw_fps}), 不使用默认帧率"
                 )
             fps = float(raw_fps)
+            # mpegts 经 -c copy 裁剪会给出 90000 这类畸形帧率, 直接用会让时间轴全乱
+            if fps > MAX_REASONABLE_FPS:
+                fallback_fps = float(self.config.get("fps", 30.0))
+                logger.warning(
+                    f"front 视频帧率异常(CAP_PROP_FPS={fps}), "
+                    f"回退配置帧率 {fallback_fps}"
+                )
+                fps = fallback_fps
             total_frames = int(video_capture.get(cv2.CAP_PROP_FRAME_COUNT))
             frame_count = 0
 
@@ -206,12 +260,14 @@ class TrackerModule(BaseModule):
             logger.info(f"开始处理视频: {video_path}")
             logger.info(f"FPS={fps}, 总帧数={total_frames}")
 
-            # 视觉流编码器:把带标注的帧编码为 fMP4(带 front 原音频)推 Redis Stream
+            # 视觉流编码器:把带标注的帧编码为 fMP4(纯视频)推 Redis Stream
+            # 前端 MSE 统一按 avc1(无音频)声明, 音频由 voice 模块独立读取原音轨,
+            # 若此处带音频会造成 init 段含 mp4a 与前端声明不符 -> 黑屏
             self._vis_encoder = VisEncoder(
                 view="front",
                 video_path=video_path,
                 fps=fps,
-                with_audio=True,
+                with_audio=False,
                 redis_host=self.config.get("redis_host", "localhost"),
                 redis_port=self.config.get("redis_port", 6379),
                 redis_db=self.config.get("redis_db", 0),
@@ -253,17 +309,91 @@ class TrackerModule(BaseModule):
                 # 2. 目标跟踪
                 tracks = self._tracker.track(frame, detections)
 
-                # 3. 工位身份分配
-                if (
+                # 3. 身份：内嵌模式走人脸锁定（复用 tracks），否则退回几何工位分配
+                if self._identity_monitor is not None:
+                    locked = self._identity_monitor.process_frame(
+                        frame, tracks, timestamp
+                    )
+                    role_map = {
+                        role: tid for role, tid in locked.items() if tid is not None
+                    }
+                    # 同步回跟踪器：让 track.identity / get_track_by_identity 生效，
+                    # 否则 _monitor_distance（LEADER-ROAD 距离）与监护规则拿不到身份
+                    self._tracker.identity_map = dict(role_map)
+                    self._tracker.identities_assigned = bool(role_map)
+                    tid_to_role = {tid: role for role, tid in role_map.items()}
+                    for track in tracks:
+                        track.identity = tid_to_role.get(int(track.track_id))
+
+                    if role_map != self._identity_map:
+                        self._identity_map = role_map
+                        roles_formatted = ",".join(
+                            f"{role}:{tid}" for role, tid in role_map.items()
+                        )
+                        if role_map:
+                            role_record = {
+                                "localSec": round(timestamp, 2),
+                                "key_moment": f"角色分配,{roles_formatted}",
+                                "source": "identity",
+                                "identities": dict(role_map),
+                            }
+                            self._events.append(dict(role_record))
+                            # 同步进 identity 产物，保证 identity_key_moments.json 自洽
+                            self._identity_monitor.events.append(
+                                dict(role_record)
+                            )
+                        self.push_display(
+                            "identity",
+                            {
+                                "localSec": round(timestamp, 2),
+                                "tag": "ROLE_ASSIGNED",
+                                "data": {"roles": role_map},
+                            },
+                        )
+                        logger.info(f"角色锁定更新: {role_map}")
+
+                    for record in self._identity_monitor.drain_events():
+                        self._events.append(
+                            {
+                                "localSec": record["localSec"],
+                                "key_moment": record["key_moment"],
+                                "source": "identity",
+                            }
+                        )
+                        self.push_display(
+                            "identity",
+                            {
+                                "localSec": record["localSec"],
+                                "tag": "IDENTITY_AWAY",
+                                "data": {
+                                    "identity": record.get("identity"),
+                                    "event": record.get("event"),
+                                    "duration_sec": record.get("duration_sec"),
+                                },
+                            },
+                        )
+                        self.push_event(
+                            EventTopic.IDENTITY_AWAY,
+                            {
+                                "localSec": record["localSec"],
+                                "identity": record.get("identity"),
+                                "event": record.get("event"),
+                                "duration_sec": record.get("duration_sec"),
+                                "room_id": self._scene.room_id if self._scene else "",
+                            },
+                            timestamp=float(record["localSec"]),
+                        )
+                elif (
                     not self._tracker.identities_assigned
                     and self._tracker.initialized
                     and len(tracks) >= 2
                 ):
                     self._tracker.assign_identities(tracks)
 
-                # 身份分配事件广播与落盘
+                # 几何分配模式下的事件广播与落盘
                 if (
-                    self._tracker.identities_assigned
+                    self._identity_monitor is None
+                    and self._tracker.identities_assigned
                     and not identities_broadcasted
                 ):
                     identities_broadcasted = True
@@ -351,9 +481,16 @@ class TrackerModule(BaseModule):
                         )
                     else:
                         annotated_frame = frame.copy()
-                    # 跟踪框 + 身份标签
+                    # 跟踪框 + 身份标签 + 离岗叠加层
                     annotated_frame = draw_tracks(
-                        annotated_frame, tracks, self._identity_map
+                        annotated_frame,
+                        tracks,
+                        self._identity_map,
+                        (
+                            self._identity_monitor.snapshot
+                            if self._identity_monitor is not None
+                            else None
+                        ),
                     )
                     # LEADER 与 ROAD 距离线
                     self._draw_distance_lines(annotated_frame)
@@ -395,6 +532,32 @@ class TrackerModule(BaseModule):
                         f"{frame_count}/{total_frames}帧 {percentage}%"
                     )
 
+            # 收尾：闭合未结束的离岗段
+            if self._identity_monitor is not None:
+                self._identity_monitor.close(timestamp)
+                for record in self._identity_monitor.drain_events():
+                    self._events.append(
+                        {
+                            "localSec": record["localSec"],
+                            "key_moment": record["key_moment"],
+                            "source": "identity",
+                        }
+                    )
+                    # 收尾补发的离岗段也要进事件总线，否则规则层漏判最后一段
+                    self.push_event(
+                        EventTopic.IDENTITY_AWAY,
+                        {
+                            "localSec": record["localSec"],
+                            "identity": record.get("identity"),
+                            "event": record.get("event"),
+                            "duration_sec": record.get("duration_sec"),
+                            "room_id": (
+                                self._scene.room_id if self._scene else ""
+                            ),
+                        },
+                        timestamp=float(record["localSec"]),
+                    )
+
             video_capture.release()
             if self._vis_encoder is not None:
                 self._vis_encoder.finalize()
@@ -411,7 +574,20 @@ class TrackerModule(BaseModule):
         """
         self._result_storage.save_key_moments(run_id, self._events)
         self._result_storage.save_role_info(run_id, self._identity_map)
-        self._gaze_processor.save_results(run_id)
+        if self._gaze_processor is not None:
+            self._gaze_processor.save_results(run_id)
+        if self._identity_monitor is not None and self._identity_storage is not None:
+            self._identity_storage.save_key_moments(
+                run_id, self._identity_monitor.events
+            )
+            self._identity_storage.save_away_events(
+                run_id, self._identity_monitor.away_events
+            )
+            self._identity_storage.save_role_info(
+                run_id,
+                self._identity_monitor.snapshot,
+                self._scene.room_id if self._scene else "",
+            )
         logger.info(f"MOT 结果已保存到 {run_id}")
 
     def _on_flow_started(self, event: dict) -> None:

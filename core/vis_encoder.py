@@ -164,10 +164,52 @@ class VisEncoder:
         ]
         return cmd
 
+    @staticmethod
+    def _probe_has_audio(video_path: Optional[str]) -> bool:
+        """用 ffprobe 探测原视频是否带音频轨.
+
+        Args:
+            video_path: 原视频路径, 可为 None.
+
+        Returns:
+            存在音频流返回 True; 路径为空/探测失败返回 False.
+        """
+        if not video_path:
+            return False
+        try:
+            result = subprocess.run(
+                [
+                    "ffprobe",
+                    "-v",
+                    "error",
+                    "-select_streams",
+                    "a",
+                    "-show_entries",
+                    "stream=codec_name",
+                    "-of",
+                    "csv=p=0",
+                    str(video_path),
+                ],
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+            return bool(result.stdout.strip())
+        except Exception as error:
+            logger.warning(f"ffprobe 探测音轨失败: {video_path}, {error}")
+            return False
+
     def start(self) -> None:
         """启动 ffmpeg 子进程与读取/排空线程."""
         if not self.width or not self.height:
             raise RuntimeError("VisEncoder 启动前需设置 width/height")
+        # 无音轨的源视频若仍按 -map 1:a 启动, ffmpeg 会立即退出导致写帧 Broken pipe
+        if self.with_audio and not self._probe_has_audio(self.video_path):
+            logger.warning(
+                f"VisEncoder[{self.view}] 原视频无音频轨, 改为无音频编码: "
+                f"{self.video_path}"
+            )
+            self.with_audio = False
         cmd = self._build_cmd()
         self._proc = subprocess.Popen(
             cmd,

@@ -74,12 +74,13 @@ export function usePlayback(currentPlaybackSec: Ref<number>) {
         /* 忽略 */
       }
     }
-    // front:含音频轨;pop:仅视频
+    // front/pop 均按纯视频声明:后端 fMP4 在源视频无音轨时用 -an 编码,
+    // 声明 mp4a 会与实际初始化段不符导致 appendBuffer 被拒(表现为一直黑屏)
     const frontMS = new MediaSource()
     frontMediaUrl.value = URL.createObjectURL(frontMS)
     frontBuf = createMediaBuffer({
       mediaSource: frontMS,
-      codec: 'video/mp4; codecs="avc1.42E01E,mp4a.40.2"',
+      codec: 'video/mp4; codecs="avc1.42E01E"',
       view: 'front',
       getClock: () => currentPlaybackSec.value,
       logger: log

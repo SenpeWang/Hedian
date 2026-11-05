@@ -5,6 +5,7 @@ RuleRegistry 自动发现 rules/ 子目录中的制度。
 """
 
 import importlib
+import inspect
 import logging
 import os
 import pkgutil
@@ -97,11 +98,17 @@ class RuleRegistry:
         self._rules[rule.name()] = rule
         logger.info(f"注册制度: {rule.name()}")
 
-    def discover(self) -> None:
-        """扫描 rules/ 子目录，动态加载规则."""
+    def discover(self, config: Optional[Dict[str, Any]] = None) -> None:
+        """扫描 rules/ 子目录，动态加载规则.
+
+        Args:
+            config: 全局配置字典; `rules.params.<制度名>` 会传给该制度的
+                register() 作为阈值配置（register 支持无参时自动降级）.
+        """
         try:
             package = importlib.import_module("rules")
             package_path = os.path.dirname(package.__file__)
+            params_map = ((config or {}).get("rules") or {}).get("params") or {}
 
             for _, name, is_pkg in pkgutil.iter_modules([package_path]):
                 if name in ("base",):
@@ -109,7 +116,7 @@ class RuleRegistry:
                 try:
                     module = importlib.import_module(f"rules.{name}")
                     if hasattr(module, "register"):
-                        rule = module.register()
+                        rule = self._build_rule(module, params_map.get(name))
                         self._rules[rule.name()] = rule
                         logger.info(f"发现制度: {rule.name()}")
                 except Exception as error:
@@ -119,6 +126,30 @@ class RuleRegistry:
 
         except Exception as error:
             logger.error(f"扫描制度目录失败: {error}", exc_info=True)
+
+    @staticmethod
+    def _build_rule(module, params: Optional[Dict[str, Any]]) -> BaseRule:
+        """按 register() 签名构造制度实例，兼容无参 register.
+
+        Args:
+            module: 制度模块（需带 register 属性）.
+            params: 该制度在 `rules.params` 下的配置段，可为 None.
+
+        Returns:
+            制度实例.
+        """
+        register = module.register
+        try:
+            positional = [
+                param
+                for param in inspect.signature(register).parameters.values()
+                if param.kind
+                in (param.POSITIONAL_ONLY, param.POSITIONAL_OR_KEYWORD)
+            ]
+            accepts_config = bool(positional)
+        except (TypeError, ValueError):
+            accepts_config = False
+        return register(params or {}) if accepts_config else register()
 
     def get_rule(self, name: str) -> Optional[BaseRule]:
         """按名称获取制度实例.

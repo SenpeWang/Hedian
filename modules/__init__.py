@@ -12,9 +12,11 @@
 from modules.voice.voice_module import VoiceModule
 from modules.tracker.tracker_module import TrackerModule
 from modules.behavior.behavior_module import BehaviorModule
+from modules.identity.identity_module import IdentityModule
 
 __all__ = [
     "VoiceModule",
     "TrackerModule",
     "BehaviorModule",
+    "IdentityModule",
 ]
